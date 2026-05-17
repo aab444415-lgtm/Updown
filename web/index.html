@@ -23,30 +23,105 @@
     </header>
 
     <main>
-      <section class="status-band" aria-label="현재 리포트 상태">
-        <div>
-          <span class="label">생성 시각</span>
-          <strong id="createdAt">-</strong>
+      <nav class="page-tabs" aria-label="페이지 목록">
+        <a class="page-tab active" href="#home" data-page-link="home">메인</a>
+        <a class="page-tab" href="#backtest" data-page-link="backtest">모델 검증</a>
+        <a class="page-tab" href="#snapshots" data-page-link="snapshots">스냅샷</a>
+        <a class="page-tab" href="#macro" data-page-link="macro">시장 배경</a>
+        <a class="page-tab" href="#industries" data-page-link="industries">산업</a>
+        <a class="page-tab" href="#stocks" data-page-link="stocks">종목</a>
+        <a class="page-tab" href="#detail" data-page-link="detail">종목 상세</a>
+        <a class="page-tab" href="#news" data-page-link="news">뉴스</a>
+      </nav>
+
+      <section class="page-view overview-section active" data-page="home" aria-label="메인 화면">
+        <div class="section-title">
+          <p class="eyebrow">Main</p>
+          <h2>오늘의 리서치 요약</h2>
         </div>
-        <div>
-          <span class="label">뉴스</span>
-          <strong id="newsStatus">-</strong>
+
+        <section class="status-band" aria-label="현재 리포트 상태">
+          <div>
+            <span class="label">생성 시각</span>
+            <strong id="createdAt">-</strong>
+          </div>
+          <div>
+            <span class="label">뉴스</span>
+            <strong id="newsStatus">-</strong>
+          </div>
+          <div>
+            <span class="label">시장 데이터</span>
+            <strong id="marketStatus">-</strong>
+          </div>
+          <div>
+            <span class="label">재무 데이터</span>
+            <strong id="fundamentalStatus">-</strong>
+          </div>
+          <div>
+            <span class="label">상위 종목</span>
+            <strong id="topTicker">-</strong>
+          </div>
+        </section>
+
+        <div class="overview-grid">
+          <article class="overview-card">
+            <span>상위 종목</span>
+            <strong id="overviewTopStocks">-</strong>
+          </article>
+          <article class="overview-card">
+            <span>유망 산업</span>
+            <strong id="overviewTopIndustries">-</strong>
+          </article>
+          <article class="overview-card">
+            <span>백테스트</span>
+            <strong id="overviewBacktest">계산 전</strong>
+          </article>
+          <article class="overview-card">
+            <span>기록 상태</span>
+            <strong id="overviewSnapshots">확인 전</strong>
+          </article>
         </div>
-        <div>
-          <span class="label">시장 데이터</span>
-          <strong id="marketStatus">-</strong>
-        </div>
-        <div>
-          <span class="label">재무 데이터</span>
-          <strong id="fundamentalStatus">-</strong>
-        </div>
-        <div>
-          <span class="label">상위 종목</span>
-          <strong id="topTicker">-</strong>
+
+        <div class="page-directory" aria-label="상세 페이지로 이동">
+          <a href="#backtest">
+            <span>01</span>
+            <strong>추천 모델 검증</strong>
+            <small>수익률, 초과수익, 월별 결과</small>
+          </a>
+          <a href="#snapshots">
+            <span>02</span>
+            <strong>추천 스냅샷 기록</strong>
+            <small>날짜별 추천 기록과 준비도</small>
+          </a>
+          <a href="#macro">
+            <span>03</span>
+            <strong>현재 시장 배경</strong>
+            <small>금리, 물가, 환율, 거시 점수</small>
+          </a>
+          <a href="#industries">
+            <span>04</span>
+            <strong>유망 산업</strong>
+            <small>산업별 점수와 근거</small>
+          </a>
+          <a href="#stocks">
+            <span>05</span>
+            <strong>추천 종목 후보</strong>
+            <small>필터와 종목별 점수 비교</small>
+          </a>
+          <a href="#detail">
+            <span>06</span>
+            <strong>종목 상세</strong>
+            <small>회계 지표, 추천 근거, 리스크</small>
+          </a>
+          <a href="#news">
+            <span>07</span>
+            <strong>참고 뉴스</strong>
+            <small>분석에 참고한 뉴스 목록</small>
+          </a>
         </div>
       </section>
 
-      <section class="backtest-section" aria-label="백테스트">
+      <section class="page-view backtest-section" data-page="backtest" aria-label="백테스트">
         <div class="section-title with-filter">
           <div>
             <p class="eyebrow">Backtest Lab</p>
@@ -86,7 +161,7 @@
         <div class="backtest-notes" id="backtestNotes"></div>
       </section>
 
-      <section class="snapshot-section" aria-label="추천 스냅샷 기록">
+      <section class="page-view snapshot-section" data-page="snapshots" aria-label="추천 스냅샷 기록">
         <div class="section-title with-filter">
           <div>
             <p class="eyebrow">Point-in-Time Records</p>
@@ -98,7 +173,7 @@
         <div class="snapshot-list" id="snapshotList"></div>
       </section>
 
-      <section class="macro-section" aria-label="거시경제 맥락">
+      <section class="page-view macro-section" data-page="macro" aria-label="거시경제 맥락">
         <div class="section-title">
           <p class="eyebrow">Macro Context</p>
           <h2>현재 시장 배경</h2>
@@ -108,7 +183,7 @@
         <div class="warning-row" id="warnings"></div>
       </section>
 
-      <section class="dashboard-grid">
+      <section class="page-view panel-page" data-page="industries" aria-label="유망 산업">
         <div class="panel">
           <div class="section-title">
             <p class="eyebrow">Industries</p>
@@ -116,7 +191,9 @@
           </div>
           <div class="industry-list" id="industryList"></div>
         </div>
+      </section>
 
+      <section class="page-view panel-page" data-page="stocks" aria-label="추천 종목 후보">
         <div class="panel">
           <div class="section-title with-filter">
             <div>
@@ -131,7 +208,7 @@
         </div>
       </section>
 
-      <section class="detail-section" aria-label="종목 상세">
+      <section class="page-view detail-section" data-page="detail" aria-label="종목 상세">
         <div class="detail-header">
           <div>
             <p class="eyebrow">Selected Stock</p>
@@ -155,7 +232,7 @@
         </div>
       </section>
 
-      <section class="news-section" aria-label="참고 뉴스">
+      <section class="page-view news-section" data-page="news" aria-label="참고 뉴스">
         <div class="section-title">
           <p class="eyebrow">News</p>
           <h2>참고 뉴스</h2>

@@ -113,6 +113,52 @@ main {
   padding: 22px clamp(14px, 3vw, 40px) 44px;
 }
 
+.page-tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 0 0 12px;
+  scrollbar-width: thin;
+}
+
+.page-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.page-tab.active {
+  border-color: var(--surface-strong);
+  background: var(--surface-strong);
+  color: #fff;
+}
+
+.page-view {
+  display: none;
+}
+
+.page-view.active {
+  display: block;
+}
+
+.overview-section {
+  padding: 22px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
 .status-band {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -142,6 +188,79 @@ main {
   font-size: clamp(16px, 2vw, 22px);
   line-height: 1.2;
   word-break: keep-all;
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.overview-card {
+  min-height: 92px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f7f9fb;
+}
+
+.overview-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.overview-card strong {
+  display: block;
+  margin-top: 10px;
+  font-size: clamp(17px, 2vw, 24px);
+  line-height: 1.25;
+}
+
+.page-directory {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.page-directory a {
+  display: grid;
+  min-height: 112px;
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  text-decoration: none;
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.page-directory a:hover {
+  border-color: var(--blue);
+  transform: translateY(-1px);
+}
+
+.page-directory span {
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.page-directory strong {
+  margin-top: 8px;
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+.page-directory small {
+  margin-top: 6px;
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 .macro-section,
@@ -530,6 +649,10 @@ main {
   align-items: start;
 }
 
+.panel-page {
+  margin-top: 20px;
+}
+
 .panel {
   padding: 20px;
   background: var(--surface);
@@ -833,6 +956,8 @@ main {
   .detail-grid,
   .macro-score-grid,
   .macro-indicator-grid,
+  .overview-grid,
+  .page-directory,
   .backtest-summary,
   .snapshot-summary,
   .period-head,
@@ -865,6 +990,7 @@ main {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .overview-section,
   .macro-section,
   .backtest-section,
   .snapshot-section,

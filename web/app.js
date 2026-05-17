@@ -5,14 +5,21 @@ const state = {
   snapshots: null,
   selectedTicker: null,
   industryFilter: "all",
+  currentPage: "home",
 };
 
 const elements = {
+  pageViews: [...document.querySelectorAll("[data-page]")],
+  pageLinks: [...document.querySelectorAll("[data-page-link]")],
   createdAt: document.querySelector("#createdAt"),
   newsStatus: document.querySelector("#newsStatus"),
   marketStatus: document.querySelector("#marketStatus"),
   fundamentalStatus: document.querySelector("#fundamentalStatus"),
   topTicker: document.querySelector("#topTicker"),
+  overviewTopStocks: document.querySelector("#overviewTopStocks"),
+  overviewTopIndustries: document.querySelector("#overviewTopIndustries"),
+  overviewBacktest: document.querySelector("#overviewBacktest"),
+  overviewSnapshots: document.querySelector("#overviewSnapshots"),
   macroContext: document.querySelector("#macroContext"),
   macroSnapshot: document.querySelector("#macroSnapshot"),
   warnings: document.querySelector("#warnings"),
@@ -40,6 +47,8 @@ const elements = {
   snapshotList: document.querySelector("#snapshotList"),
 };
 
+const PAGE_IDS = new Set(["home", "backtest", "snapshots", "macro", "industries", "stocks", "detail", "news"]);
+
 document.querySelectorAll(".segment").forEach((button) => {
   button.addEventListener("click", () => {
     state.mode = button.dataset.mode;
@@ -57,6 +66,8 @@ elements.industryFilter.addEventListener("change", () => {
   state.industryFilter = elements.industryFilter.value;
   renderStocks();
 });
+
+window.addEventListener("hashchange", () => showPage(pageFromHash()));
 
 async function loadReport() {
   setLoading(true);
@@ -133,6 +144,7 @@ function render() {
   renderIndustries();
   renderStocks();
   renderNews();
+  renderOverview();
 }
 
 function renderBacktest() {
@@ -185,6 +197,7 @@ function renderBacktest() {
   elements.backtestNotes.innerHTML = notes
     .map((note) => `<span class="warning-chip">${escapeHtml(note)}</span>`)
     .join("");
+  renderOverview();
 }
 
 function renderSnapshots() {
@@ -234,6 +247,7 @@ function renderSnapshots() {
       `;
     })
     .join("");
+  renderOverview();
 }
 
 function renderMacroSnapshot() {
@@ -367,6 +381,9 @@ function renderStocks() {
     button.addEventListener("click", () => {
       state.selectedTicker = stock.ticker;
       renderStocks();
+      if (state.currentPage === "stocks") {
+        window.location.hash = "detail";
+      }
     });
     elements.stockList.appendChild(button);
   });
@@ -411,6 +428,58 @@ function renderNews() {
     `;
     elements.newsList.appendChild(card);
   });
+}
+
+function renderOverview() {
+  if (!state.report) return;
+
+  const topStocks = state.report.stocks
+    .slice(0, 3)
+    .map((stock) => `${stock.ticker} ${formatScore(stock.score)}`)
+    .join(" · ");
+  const topIndustries = state.report.industries
+    .slice(0, 2)
+    .map((industry) => industry.name)
+    .join(" · ");
+
+  elements.overviewTopStocks.textContent = topStocks || "-";
+  elements.overviewTopIndustries.textContent = topIndustries || "-";
+
+  if (state.backtest) {
+    elements.overviewBacktest.textContent = `${formatReturn(state.backtest.strategyReturnPct, true)} / 초과 ${formatReturn(
+      state.backtest.alphaPct,
+      true
+    )}`;
+  }
+
+  if (state.snapshots) {
+    elements.overviewSnapshots.textContent = `${state.snapshots.uniqueDays || 0}일 · ${
+      state.snapshots.coverageLabel || "기록 없음"
+    }`;
+  }
+}
+
+function showPage(pageId) {
+  const nextPage = PAGE_IDS.has(pageId) ? pageId : "home";
+  state.currentPage = nextPage;
+
+  elements.pageViews.forEach((view) => {
+    const isActive = view.dataset.page === nextPage;
+    view.classList.toggle("active", isActive);
+    view.setAttribute("aria-hidden", isActive ? "false" : "true");
+  });
+
+  elements.pageLinks.forEach((link) => {
+    const isActive = link.dataset.pageLink === nextPage;
+    link.classList.toggle("active", isActive);
+    link.setAttribute("aria-current", isActive ? "page" : "false");
+  });
+
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function pageFromHash() {
+  return window.location.hash.replace("#", "") || "home";
 }
 
 function renderError(error) {
@@ -577,6 +646,7 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+showPage(pageFromHash());
 loadReport();
 loadBacktest();
 loadSnapshots();
