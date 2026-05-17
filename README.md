@@ -19,6 +19,8 @@ python3 -m stock_recommender.web
 
 브라우저에서 `http://127.0.0.1:8765`를 열면 됩니다.
 
+Cloudflare Pages 자동 업데이트는 [docs/cloudflare-auto-update.md](docs/cloudflare-auto-update.md)를 참고하세요.
+
 라이브 데이터 수집을 시도하려면:
 
 ```bash
