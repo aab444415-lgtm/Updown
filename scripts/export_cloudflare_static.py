@@ -41,7 +41,7 @@ def build_shell() -> None:
     index_html = index_html.replace(
         '<script src="/assets/app.js"></script>',
         '<script>window.STATIC_DATA_ONLY = true;</script>\n'
-        '    <script src="/assets/app.js?v=top3-pages-v2"></script>',
+        '    <script src="/assets/app.js?v=detail-cards-v3"></script>',
     )
     (DIST_DIR / "index.html").write_text(index_html, encoding="utf-8")
     shutil.copy2(WEB_DIR / "styles.css", DIST_DIR / "assets" / "styles.css")

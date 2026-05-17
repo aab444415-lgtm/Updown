@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>주식 추천 대시보드</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/assets/styles.css?v=top3-pages-v2" />
+    <link rel="stylesheet" href="/assets/styles.css?v=detail-cards-v3" />
   </head>
   <body>
     <header class="topbar">
@@ -210,26 +210,38 @@
       </section>
 
       <section class="page-view detail-section" data-page="detail" aria-label="종목 상세">
-        <div class="detail-header">
-          <div>
+        <div class="detail-hero">
+          <div class="detail-title-block">
             <p class="eyebrow">Selected Stock</p>
             <h2 id="detailTitle">-</h2>
+            <div class="detail-meta" id="detailMeta"></div>
           </div>
-          <div class="score-pill" id="detailScore">-</div>
+          <div class="detail-score-stack">
+            <span>종합점수</span>
+            <div class="score-pill" id="detailScore">-</div>
+          </div>
         </div>
+
+        <p class="detail-insight" id="detailInsight">-</p>
+        <div class="detail-score-grid" id="detailScoreGrid"></div>
+
         <div class="detail-grid">
-          <div>
+          <article class="detail-card">
             <h3>투자 지표</h3>
             <dl class="metric-grid" id="metricGrid"></dl>
-          </div>
-          <div>
+          </article>
+          <article class="detail-card">
             <h3>추천 근거</h3>
             <ul class="plain-list" id="reasonList"></ul>
-          </div>
-          <div>
+          </article>
+          <article class="detail-card">
+            <h3>최근 이슈</h3>
+            <ul class="plain-list issue-list" id="issueList"></ul>
+          </article>
+          <article class="detail-card">
             <h3>체크할 리스크</h3>
             <ul class="plain-list risk-list" id="riskList"></ul>
-          </div>
+          </article>
         </div>
       </section>
 

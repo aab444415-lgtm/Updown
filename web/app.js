@@ -27,9 +27,13 @@ const elements = {
   stockList: document.querySelector("#stockList"),
   industryFilter: document.querySelector("#industryFilter"),
   detailTitle: document.querySelector("#detailTitle"),
+  detailMeta: document.querySelector("#detailMeta"),
   detailScore: document.querySelector("#detailScore"),
+  detailInsight: document.querySelector("#detailInsight"),
+  detailScoreGrid: document.querySelector("#detailScoreGrid"),
   metricGrid: document.querySelector("#metricGrid"),
   reasonList: document.querySelector("#reasonList"),
+  issueList: document.querySelector("#issueList"),
   riskList: document.querySelector("#riskList"),
   newsList: document.querySelector("#newsList"),
   loading: document.querySelector("#loading"),
@@ -396,13 +400,30 @@ function renderDetail() {
   if (!stock) return;
 
   elements.detailTitle.textContent = `${stock.name} (${stock.ticker})`;
-  elements.detailScore.textContent = `${stock.decisionGrade} ${formatScore(stock.score)}`;
+  elements.detailScore.textContent = formatScore(stock.score);
+  elements.detailMeta.innerHTML = `
+    <span class="tag decision">${escapeHtml(stock.decisionGrade)}</span>
+    <span class="tag">${escapeHtml(stock.industry)}</span>
+    <span class="tag role">${escapeHtml(stock.role)}</span>
+    <span class="tag risk">리스크 ${escapeHtml(stock.riskLevel)}</span>
+    <span class="tag valuation">${escapeHtml(stock.valuationLabel)}</span>
+  `;
+  elements.detailInsight.textContent = pickPrimaryReason(stock);
+  elements.detailScoreGrid.innerHTML = `
+    ${detailScoreTile("산업", stock.industryScore)}
+    ${detailScoreTile("기본적 분석", stock.qualityScore)}
+    ${detailScoreTile("밸류에이션", stock.valuationScore)}
+    ${detailScoreTile("모멘텀", stock.momentumScore)}
+  `;
   elements.metricGrid.innerHTML = metricItems(stock.fundamentals).join("");
   elements.reasonList.innerHTML = [
-    `투자 판단 ${stock.decisionGrade}, 리스크 ${stock.riskLevel}, 밸류에이션 ${stock.valuationLabel}`,
+    `투자 판단: ${stock.decisionGrade}`,
     ...stock.reasons,
   ]
     .map((reason) => `<li>${escapeHtml(reason)}</li>`)
+    .join("");
+  elements.issueList.innerHTML = detailIssues(stock)
+    .map((issue) => `<li>${escapeHtml(issue)}</li>`)
     .join("");
   elements.riskList.innerHTML = stock.cautions.map((risk) => `<li>${escapeHtml(risk)}</li>`).join("");
 }
@@ -473,6 +494,7 @@ function renderTopRecommendationList(container, stocks, emptyText) {
           <span class="top-stock-main">
             <strong>${escapeHtml(stock.name)}</strong>
             <small>${escapeHtml(stock.ticker)} · ${escapeHtml(stock.industry)}</small>
+            <small class="top-stock-reason">${escapeHtml(pickPrimaryReason(stock))}</small>
           </span>
           <span class="top-stock-score">
             <strong>${formatScore(stock.score)}</strong>
@@ -490,6 +512,44 @@ function renderTopRecommendationList(container, stocks, emptyText) {
       window.location.hash = "detail";
     });
   });
+}
+
+function pickPrimaryReason(stock) {
+  const reasons = stock.reasons || [];
+  return (
+    reasons.find((reason) => {
+      return (
+        !reason.includes("산업의") &&
+        !reason.includes("기본적 분석") &&
+        !reason.includes("가격 모멘텀")
+      );
+    }) ||
+    reasons[0] ||
+    "점수화 모델 기준 상위 후보로 분류되었습니다."
+  );
+}
+
+function detailIssues(stock) {
+  const news = state.report?.news || [];
+  const ticker = stock.ticker.toLowerCase();
+  const name = stock.name.toLowerCase();
+  const industry = stock.industry.toLowerCase();
+  const matchedNews = news.filter((item) => {
+    const title = `${item.title || ""} ${item.source || ""}`.toLowerCase();
+    return title.includes(ticker) || title.includes(name) || title.includes(industry);
+  });
+  if (matchedNews.length) {
+    return matchedNews.slice(0, 4).map((item) => `${item.title} - ${item.source || "News"}`);
+  }
+
+  const structuralIssues = (stock.reasons || []).filter((reason) => {
+    return !reason.includes("기본적 분석") && !reason.includes("가격 모멘텀");
+  });
+  if (structuralIssues.length) {
+    return structuralIssues.slice(0, 4);
+  }
+
+  return ["라이브 뉴스가 부족해 현재는 산업/재무/모멘텀 근거를 중심으로 확인합니다."];
 }
 
 function showPage(pageId) {
@@ -617,6 +677,16 @@ function miniBar(label, score) {
 
 function scoreTile(label, score) {
   return `<div><span>${label}</span><strong>${formatScore(score)}</strong></div>`;
+}
+
+function detailScoreTile(label, score) {
+  return `
+    <div class="detail-score-tile">
+      <span>${escapeHtml(label)}</span>
+      <strong>${formatScore(score)}</strong>
+      ${scoreBar(score)}
+    </div>
+  `;
 }
 
 function metricItems(fundamentals) {

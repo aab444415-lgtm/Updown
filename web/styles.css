@@ -324,6 +324,15 @@ main {
   line-height: 1.25;
 }
 
+.top-stock-main .top-stock-reason {
+  display: block;
+  max-width: 100%;
+  margin-top: 4px;
+  color: #334155;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
 .top-stock-score {
   justify-items: end;
   text-align: right;
@@ -983,6 +992,11 @@ main {
   color: #9a3412;
 }
 
+.tag.valuation {
+  background: #f4f0ff;
+  color: #5b21b6;
+}
+
 .stock-scores {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1010,6 +1024,36 @@ main {
   font-size: 17px;
 }
 
+.detail-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.detail-title-block {
+  min-width: 0;
+}
+
+.detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.detail-score-stack {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.detail-score-stack span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
 .score-pill {
   min-width: 128px;
   padding: 10px 12px;
@@ -1021,10 +1065,63 @@ main {
   font-weight: 900;
 }
 
+.detail-insight {
+  margin: 18px 0 0;
+  padding: 16px;
+  border: 1px solid #bce3d8;
+  border-radius: 8px;
+  background: #effbf7;
+  color: #0b6f4d;
+  font-size: clamp(16px, 1.8vw, 20px);
+  font-weight: 850;
+  line-height: 1.5;
+}
+
+.detail-score-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.detail-score-tile {
+  min-height: 92px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f7f9fb;
+}
+
+.detail-score-tile span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.detail-score-tile strong {
+  display: block;
+  margin: 8px 0 10px;
+  font-size: 24px;
+  line-height: 1;
+}
+
 .detail-grid {
   display: grid;
-  grid-template-columns: 1.1fr 1fr 1fr;
-  gap: 22px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.detail-card {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.detail-card h3 {
+  margin-bottom: 12px;
 }
 
 .metric-grid {
@@ -1065,6 +1162,10 @@ main {
 
 .risk-list li::marker {
   color: var(--red);
+}
+
+.issue-list li::marker {
+  color: var(--blue);
 }
 
 .news-section {
@@ -1121,6 +1222,7 @@ main {
 @media (max-width: 980px) {
   .topbar,
   .main-title-row,
+  .detail-hero,
   .section-title.with-filter,
   .detail-header {
     align-items: flex-start;
@@ -1135,6 +1237,7 @@ main {
   .status-band,
   .dashboard-grid,
   .detail-grid,
+  .detail-score-grid,
   .macro-score-grid,
   .macro-indicator-grid,
   .main-meta,
@@ -1197,6 +1300,10 @@ main {
     grid-column: 2;
     justify-items: start;
     text-align: left;
+  }
+
+  .detail-score-stack {
+    justify-items: start;
   }
 
   .overview-section,
