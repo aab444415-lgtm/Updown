@@ -640,7 +640,7 @@ function chartPath(points, valueKey, scale) {
   let path = "";
   let drawing = false;
   points.forEach((point, index) => {
-    const value = Number(point?.[valueKey]);
+    const value = numericValue(point?.[valueKey]);
     if (!Number.isFinite(value)) {
       drawing = false;
       return;
@@ -674,7 +674,11 @@ function legendItem(x, className, label) {
 
 function seriesValues(points, valueKey) {
   if (!Array.isArray(points)) return [];
-  return points.map((point) => Number(point?.[valueKey])).filter((value) => Number.isFinite(value));
+  return points.map((point) => numericValue(point?.[valueKey])).filter((value) => Number.isFinite(value));
+}
+
+function numericValue(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function hasTechnicalPrices(technical) {
@@ -682,7 +686,7 @@ function hasTechnicalPrices(technical) {
 }
 
 function technicalMetric(label, value, note = "", options = {}) {
-  const position = Number(options.position);
+  const position = numericValue(options.position);
   const rangeBar = Number.isFinite(position)
     ? `<span class="range-track"><span style="width:${safeScore(position)}%"></span></span>`
     : "";
