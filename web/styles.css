@@ -152,11 +152,191 @@ main {
 }
 
 .overview-section {
-  padding: 22px;
+  padding: clamp(16px, 3vw, 26px);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: var(--shadow);
+}
+
+.main-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.main-title-row .section-title {
+  margin-bottom: 0;
+}
+
+.data-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.data-chip-row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f7f9fb;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.data-chip-row strong {
+  color: var(--text);
+}
+
+.main-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--border);
+}
+
+.main-meta span {
+  display: grid;
+  gap: 6px;
+  min-height: 68px;
+  padding: 12px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.main-meta strong {
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.25;
+}
+
+.top-market-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.market-top-card {
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.market-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.market-card-head h3,
+.directory-head h3 {
+  margin: 0;
+  font-size: clamp(21px, 2.4vw, 28px);
+  line-height: 1.2;
+}
+
+.market-card-head a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 850;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.top-stock-list {
+  display: grid;
+  gap: 10px;
+}
+
+.top-stock-button {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) minmax(82px, auto);
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 78px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f7f9fb;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.top-stock-button:hover {
+  border-color: var(--blue);
+  background: #eef5ff;
+}
+
+.rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--surface-strong);
+  color: #fff;
+  font-weight: 900;
+}
+
+.top-stock-main,
+.top-stock-score {
+  display: grid;
+  gap: 4px;
+}
+
+.top-stock-main strong {
+  font-size: 17px;
+  line-height: 1.25;
+}
+
+.top-stock-main small,
+.top-stock-score small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.top-stock-score {
+  justify-items: end;
+  text-align: right;
+}
+
+.top-stock-score strong {
+  color: var(--green);
+  font-size: 24px;
+  line-height: 1;
+}
+
+.directory-head {
+  margin-top: 22px;
 }
 
 .status-band {
@@ -940,6 +1120,7 @@ main {
 
 @media (max-width: 980px) {
   .topbar,
+  .main-title-row,
   .section-title.with-filter,
   .detail-header {
     align-items: flex-start;
@@ -956,6 +1137,8 @@ main {
   .detail-grid,
   .macro-score-grid,
   .macro-indicator-grid,
+  .main-meta,
+  .top-market-grid,
   .overview-grid,
   .page-directory,
   .backtest-summary,
@@ -988,6 +1171,32 @@ main {
 
   .status-band {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .page-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    overflow-x: visible;
+  }
+
+  .page-tab {
+    min-height: 36px;
+    padding: 0 6px;
+    font-size: 12px;
+  }
+
+  .data-chip-row {
+    justify-content: flex-start;
+  }
+
+  .top-stock-button {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .top-stock-score {
+    grid-column: 2;
+    justify-items: start;
+    text-align: left;
   }
 
   .overview-section,

@@ -16,8 +16,8 @@ const elements = {
   marketStatus: document.querySelector("#marketStatus"),
   fundamentalStatus: document.querySelector("#fundamentalStatus"),
   topTicker: document.querySelector("#topTicker"),
-  overviewTopStocks: document.querySelector("#overviewTopStocks"),
-  overviewTopIndustries: document.querySelector("#overviewTopIndustries"),
+  usTopList: document.querySelector("#usTopList"),
+  krTopList: document.querySelector("#krTopList"),
   overviewBacktest: document.querySelector("#overviewBacktest"),
   overviewSnapshots: document.querySelector("#overviewSnapshots"),
   macroContext: document.querySelector("#macroContext"),
@@ -433,17 +433,16 @@ function renderNews() {
 function renderOverview() {
   if (!state.report) return;
 
-  const topStocks = state.report.stocks
-    .slice(0, 3)
-    .map((stock) => `${stock.ticker} ${formatScore(stock.score)}`)
-    .join(" · ");
-  const topIndustries = state.report.industries
-    .slice(0, 2)
-    .map((industry) => industry.name)
-    .join(" · ");
-
-  elements.overviewTopStocks.textContent = topStocks || "-";
-  elements.overviewTopIndustries.textContent = topIndustries || "-";
+  renderTopRecommendationList(
+    elements.usTopList,
+    state.report.stocks.filter((stock) => stock.country === "US").slice(0, 3),
+    "미국 추천 종목이 없습니다."
+  );
+  renderTopRecommendationList(
+    elements.krTopList,
+    state.report.stocks.filter((stock) => stock.country === "KR").slice(0, 3),
+    "국내 추천 종목이 없습니다."
+  );
 
   if (state.backtest) {
     elements.overviewBacktest.textContent = `${formatReturn(state.backtest.strategyReturnPct, true)} / 초과 ${formatReturn(
@@ -457,6 +456,40 @@ function renderOverview() {
       state.snapshots.coverageLabel || "기록 없음"
     }`;
   }
+}
+
+function renderTopRecommendationList(container, stocks, emptyText) {
+  if (!container) return;
+  if (!stocks.length) {
+    container.innerHTML = `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
+    return;
+  }
+
+  container.innerHTML = stocks
+    .map(
+      (stock, index) => `
+        <button class="top-stock-button" type="button" data-ticker="${escapeHtml(stock.ticker)}">
+          <span class="rank">${index + 1}</span>
+          <span class="top-stock-main">
+            <strong>${escapeHtml(stock.name)}</strong>
+            <small>${escapeHtml(stock.ticker)} · ${escapeHtml(stock.industry)}</small>
+          </span>
+          <span class="top-stock-score">
+            <strong>${formatScore(stock.score)}</strong>
+            <small>${escapeHtml(stock.decisionGrade)}</small>
+          </span>
+        </button>
+      `
+    )
+    .join("");
+
+  container.querySelectorAll(".top-stock-button").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.selectedTicker = button.dataset.ticker;
+      renderStocks();
+      window.location.hash = "detail";
+    });
+  });
 }
 
 function showPage(pageId) {

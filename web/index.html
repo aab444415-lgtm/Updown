@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>주식 추천 대시보드</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/assets/styles.css" />
+    <link rel="stylesheet" href="/assets/styles.css?v=top3-pages-v2" />
   </head>
   <body>
     <header class="topbar">
@@ -35,54 +35,55 @@
       </nav>
 
       <section class="page-view overview-section active" data-page="home" aria-label="메인 화면">
-        <div class="section-title">
-          <p class="eyebrow">Main</p>
-          <h2>오늘의 리서치 요약</h2>
+        <div class="main-title-row">
+          <div class="section-title">
+            <p class="eyebrow">Main</p>
+            <h2>오늘의 추천 Top3</h2>
+          </div>
+          <div class="data-chip-row" aria-label="데이터 상태">
+            <span>뉴스 <strong id="newsStatus">-</strong></span>
+            <span>시장 <strong id="marketStatus">-</strong></span>
+            <span>재무 <strong id="fundamentalStatus">-</strong></span>
+          </div>
         </div>
 
-        <section class="status-band" aria-label="현재 리포트 상태">
-          <div>
-            <span class="label">생성 시각</span>
-            <strong id="createdAt">-</strong>
-          </div>
-          <div>
-            <span class="label">뉴스</span>
-            <strong id="newsStatus">-</strong>
-          </div>
-          <div>
-            <span class="label">시장 데이터</span>
-            <strong id="marketStatus">-</strong>
-          </div>
-          <div>
-            <span class="label">재무 데이터</span>
-            <strong id="fundamentalStatus">-</strong>
-          </div>
-          <div>
-            <span class="label">상위 종목</span>
-            <strong id="topTicker">-</strong>
-          </div>
-        </section>
-
-        <div class="overview-grid">
-          <article class="overview-card">
-            <span>상위 종목</span>
-            <strong id="overviewTopStocks">-</strong>
-          </article>
-          <article class="overview-card">
-            <span>유망 산업</span>
-            <strong id="overviewTopIndustries">-</strong>
-          </article>
-          <article class="overview-card">
-            <span>백테스트</span>
-            <strong id="overviewBacktest">계산 전</strong>
-          </article>
-          <article class="overview-card">
-            <span>기록 상태</span>
-            <strong id="overviewSnapshots">확인 전</strong>
-          </article>
+        <div class="main-meta">
+          <span>생성 시각 <strong id="createdAt">-</strong></span>
+          <span>전체 1위 <strong id="topTicker">-</strong></span>
+          <span>백테스트 <strong id="overviewBacktest">계산 전</strong></span>
+          <span>기록 <strong id="overviewSnapshots">확인 전</strong></span>
         </div>
 
-        <div class="page-directory" aria-label="상세 페이지로 이동">
+        <div class="top-market-grid" aria-label="국가별 추천 Top3">
+          <section class="market-top-card">
+            <div class="market-card-head">
+              <div>
+                <p class="eyebrow">US Top 3</p>
+                <h3>미국주식 추천 Top3</h3>
+              </div>
+              <a href="#stocks">전체 보기</a>
+            </div>
+            <div class="top-stock-list" id="usTopList"></div>
+          </section>
+
+          <section class="market-top-card">
+            <div class="market-card-head">
+              <div>
+                <p class="eyebrow">Korea Top 3</p>
+                <h3>국내주식 추천 Top3</h3>
+              </div>
+              <a href="#stocks">전체 보기</a>
+            </div>
+            <div class="top-stock-list" id="krTopList"></div>
+          </section>
+        </div>
+
+        <div class="directory-head">
+          <p class="eyebrow">Analysis Pages</p>
+          <h3>분석 페이지</h3>
+        </div>
+
+        <div class="page-directory" aria-label="분석 페이지로 이동">
           <a href="#backtest">
             <span>01</span>
             <strong>추천 모델 검증</strong>
