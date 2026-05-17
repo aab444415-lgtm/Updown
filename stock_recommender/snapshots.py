@@ -61,7 +61,7 @@ def snapshot_history(limit: int = 30) -> dict:
 def report_to_snapshot_payload(report: RecommendationReport, mode: str) -> dict:
     created_at = report.created_at
     return {
-        "version": 2,
+        "version": 4,
         "mode": mode,
         "snapshotDate": created_at.date().isoformat(),
         "createdAt": created_at.isoformat(),
@@ -108,6 +108,7 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str) -> dict:
                 "valuationLabel": item.valuation_label,
                 "analysisStyle": item.analysis_style,
                 "valuationNote": item.valuation_note,
+                "valuationRange": _valuation_range_payload(item),
                 "analysisChecks": list(item.analysis_checks),
                 "secondOrderChecks": list(item.second_order_checks),
                 "reasons": list(item.reasons),
@@ -122,6 +123,18 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str) -> dict:
                     "forwardPe": item.stock.fundamentals.forward_pe,
                     "marketCapUsd": item.stock.fundamentals.market_cap_usd,
                     "marketCapCurrency": item.stock.fundamentals.market_cap_currency,
+                    "revenue": item.stock.fundamentals.revenue,
+                    "operatingIncome": item.stock.fundamentals.operating_income,
+                    "ebitda": item.stock.fundamentals.ebitda,
+                    "netIncome": item.stock.fundamentals.net_income,
+                    "operatingCashFlow": item.stock.fundamentals.operating_cash_flow,
+                    "capitalExpenditure": item.stock.fundamentals.capital_expenditure,
+                    "freeCashFlow": item.stock.fundamentals.free_cash_flow,
+                    "currentAssets": item.stock.fundamentals.current_assets,
+                    "currentLiabilities": item.stock.fundamentals.current_liabilities,
+                    "currentRatioPct": item.stock.fundamentals.current_ratio_pct,
+                    "interestExpense": item.stock.fundamentals.interest_expense,
+                    "interestCoverage": item.stock.fundamentals.interest_coverage,
                 },
             }
             for item in report.stock_scores
@@ -160,6 +173,21 @@ def _macro_snapshot_payload(report: RecommendationReport) -> dict | None:
             }
             for item in snapshot.indicators
         ],
+    }
+
+
+def _valuation_range_payload(item) -> dict:
+    valuation_range = item.valuation_range
+    return {
+        "profitMetric": valuation_range.profit_metric,
+        "profitValue": valuation_range.profit_value,
+        "multipleLow": valuation_range.multiple_low,
+        "multipleHigh": valuation_range.multiple_high,
+        "marketCapLow": valuation_range.market_cap_low,
+        "marketCapHigh": valuation_range.market_cap_high,
+        "upsideLowPct": valuation_range.upside_low_pct,
+        "upsideHighPct": valuation_range.upside_high_pct,
+        "note": valuation_range.note,
     }
 
 

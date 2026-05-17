@@ -16,6 +16,17 @@ NET_INCOME_NAMES = ("당기순이익", "분기순이익")
 ASSET_NAMES = ("자산총계",)
 LIABILITY_NAMES = ("부채총계",)
 EQUITY_NAMES = ("자본총계",)
+CURRENT_ASSET_NAMES = ("유동자산",)
+CURRENT_LIABILITY_NAMES = ("유동부채",)
+DEPRECIATION_NAMES = ("감가상각비", "감가상각비및무형자산상각비", "감가상각비와무형자산상각비")
+AMORTIZATION_NAMES = ("무형자산상각비",)
+OPERATING_CASH_FLOW_NAMES = (
+    "영업활동현금흐름",
+    "영업활동으로인한현금흐름",
+    "영업활동으로부터의현금흐름",
+)
+CAPEX_NAMES = ("유형자산의취득", "유형자산취득", "유형자산의증가")
+INTEREST_EXPENSE_NAMES = ("이자비용", "금융비용")
 
 
 class OpenDartFinancialClient:
@@ -90,12 +101,26 @@ def extract_opendart_fundamentals(payload: dict, fallback: Fundamentals | None =
     net_income, _ = _find_current_previous(selected_rows, NET_INCOME_NAMES)
     liabilities, _ = _find_current_previous(selected_rows, LIABILITY_NAMES)
     equity_current, equity_previous = _find_current_previous(selected_rows, EQUITY_NAMES)
+    current_assets, _ = _find_current_previous(selected_rows, CURRENT_ASSET_NAMES)
+    current_liabilities, _ = _find_current_previous(selected_rows, CURRENT_LIABILITY_NAMES)
+    depreciation, _ = _find_current_previous(selected_rows, DEPRECIATION_NAMES)
+    amortization, _ = _find_current_previous(selected_rows, AMORTIZATION_NAMES)
+    operating_cash_flow, _ = _find_current_previous(selected_rows, OPERATING_CASH_FLOW_NAMES)
+    capital_expenditure, _ = _find_current_previous(selected_rows, CAPEX_NAMES)
+    interest_expense, _ = _find_current_previous(selected_rows, INTEREST_EXPENSE_NAMES)
 
     revenue_growth_pct = _growth_pct(revenue_current, revenue_previous)
     operating_margin_pct = _ratio_pct(operating_income, revenue_current)
     average_equity = _average(equity_current, equity_previous)
     roe_pct = _ratio_pct(net_income, average_equity)
     debt_to_equity_pct = _ratio_pct(liabilities, equity_current)
+    current_ratio_pct = _ratio_pct(current_assets, current_liabilities)
+    depreciation_amortization = _sum_optional(depreciation, amortization)
+    ebitda = _add(operating_income, depreciation_amortization)
+    capex_outflow = _outflow(capital_expenditure)
+    free_cash_flow = _subtract(operating_cash_flow, capex_outflow)
+    interest_expense_outflow = _outflow(interest_expense)
+    interest_coverage = _ratio(operating_income, interest_expense_outflow)
 
     return Fundamentals(
         revenue_growth_pct=_coalesce(revenue_growth_pct, fallback.revenue_growth_pct),
@@ -106,6 +131,18 @@ def extract_opendart_fundamentals(payload: dict, fallback: Fundamentals | None =
         forward_pe=fallback.forward_pe,
         market_cap_usd=fallback.market_cap_usd,
         market_cap_currency=fallback.market_cap_currency or "KRW",
+        revenue=_coalesce(revenue_current, fallback.revenue),
+        operating_income=_coalesce(operating_income, fallback.operating_income),
+        ebitda=_coalesce(ebitda, fallback.ebitda),
+        net_income=_coalesce(net_income, fallback.net_income),
+        operating_cash_flow=_coalesce(operating_cash_flow, fallback.operating_cash_flow),
+        capital_expenditure=_coalesce(capex_outflow, fallback.capital_expenditure),
+        free_cash_flow=_coalesce(free_cash_flow, fallback.free_cash_flow),
+        current_assets=_coalesce(current_assets, fallback.current_assets),
+        current_liabilities=_coalesce(current_liabilities, fallback.current_liabilities),
+        current_ratio_pct=_coalesce(current_ratio_pct, fallback.current_ratio_pct),
+        interest_expense=_coalesce(interest_expense_outflow, fallback.interest_expense),
+        interest_coverage=_coalesce(interest_coverage, fallback.interest_coverage),
     )
 
 
@@ -150,6 +187,37 @@ def _ratio_pct(numerator: float | None, denominator: float | None) -> float | No
     if numerator is None or denominator is None or denominator == 0:
         return None
     return (numerator / denominator) * 100
+
+
+def _ratio(numerator: float | None, denominator: float | None) -> float | None:
+    if numerator is None or denominator is None or denominator == 0:
+        return None
+    return numerator / denominator
+
+
+def _add(first: float | None, second: float | None) -> float | None:
+    if first is None or second is None:
+        return None
+    return first + second
+
+
+def _subtract(first: float | None, second: float | None) -> float | None:
+    if first is None or second is None:
+        return None
+    return first - second
+
+
+def _sum_optional(*values: float | None) -> float | None:
+    valid_values = [value for value in values if value is not None]
+    if not valid_values:
+        return None
+    return sum(valid_values)
+
+
+def _outflow(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return abs(value)
 
 
 def _average(first: float | None, second: float | None) -> float | None:

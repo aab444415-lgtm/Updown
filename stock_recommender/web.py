@@ -75,6 +75,7 @@ def report_to_dict(report: RecommendationReport) -> dict:
                 "valuationLabel": item.valuation_label,
                 "analysisStyle": item.analysis_style,
                 "valuationNote": item.valuation_note,
+                "valuationRange": _valuation_range_to_dict(item),
                 "analysisChecks": list(item.analysis_checks),
                 "secondOrderChecks": list(item.second_order_checks),
                 "fundamentals": {
@@ -86,6 +87,18 @@ def report_to_dict(report: RecommendationReport) -> dict:
                     "forwardPe": item.stock.fundamentals.forward_pe,
                     "marketCapUsd": item.stock.fundamentals.market_cap_usd,
                     "marketCapCurrency": item.stock.fundamentals.market_cap_currency,
+                    "revenue": item.stock.fundamentals.revenue,
+                    "operatingIncome": item.stock.fundamentals.operating_income,
+                    "ebitda": item.stock.fundamentals.ebitda,
+                    "netIncome": item.stock.fundamentals.net_income,
+                    "operatingCashFlow": item.stock.fundamentals.operating_cash_flow,
+                    "capitalExpenditure": item.stock.fundamentals.capital_expenditure,
+                    "freeCashFlow": item.stock.fundamentals.free_cash_flow,
+                    "currentAssets": item.stock.fundamentals.current_assets,
+                    "currentLiabilities": item.stock.fundamentals.current_liabilities,
+                    "currentRatioPct": item.stock.fundamentals.current_ratio_pct,
+                    "interestExpense": item.stock.fundamentals.interest_expense,
+                    "interestCoverage": item.stock.fundamentals.interest_coverage,
                 },
                 "technical": technical_by_ticker.get(item.stock.ticker.upper()),
                 "country": item.stock.country,
@@ -115,6 +128,21 @@ def _technical_by_ticker(report: RecommendationReport) -> dict[str, dict]:
         snapshot = build_technical_snapshot(points)
         results[ticker] = technical_snapshot_to_dict(snapshot)
     return results
+
+
+def _valuation_range_to_dict(item) -> dict:
+    valuation_range = item.valuation_range
+    return {
+        "profitMetric": valuation_range.profit_metric,
+        "profitValue": valuation_range.profit_value,
+        "multipleLow": valuation_range.multiple_low,
+        "multipleHigh": valuation_range.multiple_high,
+        "marketCapLow": valuation_range.market_cap_low,
+        "marketCapHigh": valuation_range.market_cap_high,
+        "upsideLowPct": valuation_range.upside_low_pct,
+        "upsideHighPct": valuation_range.upside_high_pct,
+        "note": valuation_range.note,
+    }
 
 
 def _macro_snapshot_to_dict(report: RecommendationReport) -> dict | None:

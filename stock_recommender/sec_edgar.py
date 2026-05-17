@@ -32,6 +32,26 @@ EQUITY_TAGS = (
     "StockholdersEquity",
     "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
 )
+CURRENT_ASSET_TAGS = ("AssetsCurrent",)
+CURRENT_LIABILITY_TAGS = ("LiabilitiesCurrent",)
+DEPRECIATION_AMORTIZATION_TAGS = (
+    "DepreciationDepletionAndAmortization",
+    "DepreciationAndAmortization",
+    "DepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
+)
+OPERATING_CASH_FLOW_TAGS = (
+    "NetCashProvidedByUsedInOperatingActivities",
+    "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
+)
+CAPEX_TAGS = (
+    "PaymentsToAcquirePropertyPlantAndEquipment",
+    "PaymentsToAcquireProductiveAssets",
+)
+INTEREST_EXPENSE_TAGS = (
+    "InterestExpenseNonOperating",
+    "InterestExpense",
+    "InterestAndDebtExpense",
+)
 
 
 class SecEdgarClient:
@@ -160,18 +180,36 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
     assets = _latest_and_previous(us_gaap, ASSET_TAGS)
     liabilities = _latest_and_previous(us_gaap, LIABILITY_TAGS)
     equity = _latest_and_previous(us_gaap, EQUITY_TAGS)
+    current_assets = _latest_and_previous(us_gaap, CURRENT_ASSET_TAGS)
+    current_liabilities = _latest_and_previous(us_gaap, CURRENT_LIABILITY_TAGS)
+    depreciation_amortization = _latest_and_previous(us_gaap, DEPRECIATION_AMORTIZATION_TAGS)
+    operating_cash_flow = _latest_and_previous(us_gaap, OPERATING_CASH_FLOW_TAGS)
+    capital_expenditure = _latest_and_previous(us_gaap, CAPEX_TAGS)
+    interest_expense = _latest_and_previous(us_gaap, INTEREST_EXPENSE_TAGS)
 
     latest_revenue, previous_revenue = revenue
     latest_operating_income, _ = operating_income
     latest_net_income, _ = net_income
     latest_liabilities, _ = liabilities
     latest_equity, previous_equity = equity
+    latest_current_assets, _ = current_assets
+    latest_current_liabilities, _ = current_liabilities
+    latest_depreciation_amortization, _ = depreciation_amortization
+    latest_operating_cash_flow, _ = operating_cash_flow
+    latest_capex, _ = capital_expenditure
+    latest_interest_expense, _ = interest_expense
 
     revenue_growth_pct = _growth_pct(latest_revenue, previous_revenue)
     operating_margin_pct = _ratio_pct(latest_operating_income, latest_revenue)
     average_equity = _average(latest_equity, previous_equity)
     roe_pct = _ratio_pct(latest_net_income, average_equity)
     debt_to_equity_pct = _ratio_pct(latest_liabilities, latest_equity)
+    current_ratio_pct = _ratio_pct(latest_current_assets, latest_current_liabilities)
+    ebitda = _add(latest_operating_income, latest_depreciation_amortization)
+    capex_outflow = _outflow(latest_capex)
+    free_cash_flow = _subtract(latest_operating_cash_flow, capex_outflow)
+    interest_expense_outflow = _outflow(latest_interest_expense)
+    interest_coverage = _ratio(latest_operating_income, interest_expense_outflow)
 
     return Fundamentals(
         revenue_growth_pct=_coalesce(revenue_growth_pct, fallback.revenue_growth_pct),
@@ -181,6 +219,19 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
         pe=fallback.pe,
         forward_pe=fallback.forward_pe,
         market_cap_usd=fallback.market_cap_usd,
+        market_cap_currency=fallback.market_cap_currency,
+        revenue=_coalesce(latest_revenue, fallback.revenue),
+        operating_income=_coalesce(latest_operating_income, fallback.operating_income),
+        ebitda=_coalesce(ebitda, fallback.ebitda),
+        net_income=_coalesce(latest_net_income, fallback.net_income),
+        operating_cash_flow=_coalesce(latest_operating_cash_flow, fallback.operating_cash_flow),
+        capital_expenditure=_coalesce(capex_outflow, fallback.capital_expenditure),
+        free_cash_flow=_coalesce(free_cash_flow, fallback.free_cash_flow),
+        current_assets=_coalesce(latest_current_assets, fallback.current_assets),
+        current_liabilities=_coalesce(latest_current_liabilities, fallback.current_liabilities),
+        current_ratio_pct=_coalesce(current_ratio_pct, fallback.current_ratio_pct),
+        interest_expense=_coalesce(interest_expense_outflow, fallback.interest_expense),
+        interest_coverage=_coalesce(interest_coverage, fallback.interest_coverage),
     )
 
 
@@ -238,6 +289,30 @@ def _ratio_pct(numerator: float | None, denominator: float | None) -> float | No
     if numerator is None or denominator is None or denominator == 0:
         return None
     return (numerator / denominator) * 100
+
+
+def _ratio(numerator: float | None, denominator: float | None) -> float | None:
+    if numerator is None or denominator is None or denominator == 0:
+        return None
+    return numerator / denominator
+
+
+def _add(first: float | None, second: float | None) -> float | None:
+    if first is None or second is None:
+        return None
+    return first + second
+
+
+def _subtract(first: float | None, second: float | None) -> float | None:
+    if first is None or second is None:
+        return None
+    return first - second
+
+
+def _outflow(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return abs(value)
 
 
 def _average(first: float | None, second: float | None) -> float | None:

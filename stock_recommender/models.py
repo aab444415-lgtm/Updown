@@ -18,6 +18,18 @@ class Fundamentals:
     forward_pe: float | None = None
     market_cap_usd: float | None = None
     market_cap_currency: str = "USD"
+    revenue: float | None = None
+    operating_income: float | None = None
+    ebitda: float | None = None
+    net_income: float | None = None
+    operating_cash_flow: float | None = None
+    capital_expenditure: float | None = None
+    free_cash_flow: float | None = None
+    current_assets: float | None = None
+    current_liabilities: float | None = None
+    current_ratio_pct: float | None = None
+    interest_expense: float | None = None
+    interest_coverage: float | None = None
 
 
 @dataclass(frozen=True)
@@ -105,6 +117,19 @@ class IndustryScore:
 
 
 @dataclass(frozen=True)
+class ValuationRange:
+    profit_metric: str
+    profit_value: float | None
+    multiple_low: float | None
+    multiple_high: float | None
+    market_cap_low: float | None
+    market_cap_high: float | None
+    upside_low_pct: float | None
+    upside_high_pct: float | None
+    note: str
+
+
+@dataclass(frozen=True)
 class StockScore:
     stock: StockProfile
     score: float
@@ -120,6 +145,7 @@ class StockScore:
     valuation_label: str
     analysis_style: str
     valuation_note: str
+    valuation_range: ValuationRange
     analysis_checks: tuple[str, ...]
     second_order_checks: tuple[str, ...]
 

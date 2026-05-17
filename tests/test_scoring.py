@@ -61,6 +61,9 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(nvidia.analysis_style, "성장주")
         self.assertTrue(any("멀티플" in check for check in nvidia.analysis_checks))
         self.assertGreaterEqual(len(nvidia.second_order_checks), 4)
+        self.assertEqual(nvidia.valuation_range.profit_metric, "PER 역산 이익")
+        self.assertIsNotNone(nvidia.valuation_range.market_cap_low)
+        self.assertTrue(any("밸류에이션 범위" in check for check in nvidia.analysis_checks))
 
     def test_report_contains_data_quality(self):
         report = build_report(
@@ -154,8 +157,26 @@ class SecEdgarTests(unittest.TestCase):
                     "NetIncomeLoss": {
                         "units": {"USD": [_annual_fact("2024-01-01", "2024-12-31", "2025-02-01", 18)]}
                     },
+                    "DepreciationDepletionAndAmortization": {
+                        "units": {"USD": [_annual_fact("2024-01-01", "2024-12-31", "2025-02-01", 7)]}
+                    },
+                    "NetCashProvidedByUsedInOperatingActivities": {
+                        "units": {"USD": [_annual_fact("2024-01-01", "2024-12-31", "2025-02-01", 30)]}
+                    },
+                    "PaymentsToAcquirePropertyPlantAndEquipment": {
+                        "units": {"USD": [_annual_fact("2024-01-01", "2024-12-31", "2025-02-01", 8)]}
+                    },
                     "Liabilities": {
                         "units": {"USD": [_annual_fact("2024-12-31", "2024-12-31", "2025-02-01", 60)]}
+                    },
+                    "AssetsCurrent": {
+                        "units": {"USD": [_annual_fact("2024-12-31", "2024-12-31", "2025-02-01", 50)]}
+                    },
+                    "LiabilitiesCurrent": {
+                        "units": {"USD": [_annual_fact("2024-12-31", "2024-12-31", "2025-02-01", 25)]}
+                    },
+                    "InterestExpenseNonOperating": {
+                        "units": {"USD": [_annual_fact("2024-01-01", "2024-12-31", "2025-02-01", 5)]}
                     },
                     "StockholdersEquity": {
                         "units": {
@@ -175,6 +196,15 @@ class SecEdgarTests(unittest.TestCase):
         self.assertAlmostEqual(fundamentals.operating_margin_pct, 20.0)
         self.assertAlmostEqual(fundamentals.roe_pct, 18 / 85 * 100)
         self.assertAlmostEqual(fundamentals.debt_to_equity_pct, 60 / 90 * 100)
+        self.assertEqual(fundamentals.revenue, 125)
+        self.assertEqual(fundamentals.operating_income, 25)
+        self.assertEqual(fundamentals.ebitda, 32)
+        self.assertEqual(fundamentals.net_income, 18)
+        self.assertEqual(fundamentals.operating_cash_flow, 30)
+        self.assertEqual(fundamentals.capital_expenditure, 8)
+        self.assertEqual(fundamentals.free_cash_flow, 22)
+        self.assertAlmostEqual(fundamentals.current_ratio_pct, 200.0)
+        self.assertAlmostEqual(fundamentals.interest_coverage, 5.0)
 
 
 class OpenDartTests(unittest.TestCase):
@@ -185,8 +215,14 @@ class OpenDartTests(unittest.TestCase):
                 _dart_row("CFS", "매출액", "125,000", "100,000"),
                 _dart_row("CFS", "영업이익", "25,000", "18,000"),
                 _dart_row("CFS", "당기순이익", "17,000", "14,000"),
+                _dart_row("CFS", "감가상각비", "7,000", "6,000"),
+                _dart_row("CFS", "영업활동현금흐름", "30,000", "22,000"),
+                _dart_row("CFS", "유형자산의 취득", "-8,000", "-7,000"),
                 _dart_row("CFS", "부채총계", "60,000", "55,000"),
                 _dart_row("CFS", "자본총계", "90,000", "80,000"),
+                _dart_row("CFS", "유동자산", "50,000", "45,000"),
+                _dart_row("CFS", "유동부채", "25,000", "24,000"),
+                _dart_row("CFS", "이자비용", "5,000", "4,500"),
             ],
         }
 
@@ -197,6 +233,15 @@ class OpenDartTests(unittest.TestCase):
         self.assertAlmostEqual(fundamentals.roe_pct, 17_000 / 85_000 * 100)
         self.assertAlmostEqual(fundamentals.debt_to_equity_pct, 60_000 / 90_000 * 100)
         self.assertEqual(fundamentals.market_cap_currency, "KRW")
+        self.assertEqual(fundamentals.revenue, 125_000)
+        self.assertEqual(fundamentals.operating_income, 25_000)
+        self.assertEqual(fundamentals.ebitda, 32_000)
+        self.assertEqual(fundamentals.net_income, 17_000)
+        self.assertEqual(fundamentals.operating_cash_flow, 30_000)
+        self.assertEqual(fundamentals.capital_expenditure, 8_000)
+        self.assertEqual(fundamentals.free_cash_flow, 22_000)
+        self.assertAlmostEqual(fundamentals.current_ratio_pct, 200.0)
+        self.assertAlmostEqual(fundamentals.interest_coverage, 5.0)
 
 
 class DecisionGradeTests(unittest.TestCase):

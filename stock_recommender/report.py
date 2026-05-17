@@ -97,6 +97,7 @@ def _render_stock(rank: int, item: StockScore) -> list[str]:
         f"- 세부 점수: 산업 {item.industry_score:.1f}, 기본적 분석 {item.quality_score:.1f}, "
         f"밸류에이션 {item.valuation_score:.1f}, 모멘텀 {item.momentum_score:.1f}"
     )
+    lines.append(f"- 약식 적정 시총 범위: {_format_valuation_range(item)}")
     lines.append(f"- 주요 지표: {_format_fundamentals(stock.fundamentals)}")
     lines.append("- 추천 근거:")
     for reason in item.reasons:
@@ -114,11 +115,20 @@ def _render_stock(rank: int, item: StockScore) -> list[str]:
 
 
 def _format_fundamentals(fundamentals: Fundamentals) -> str:
+    currency = fundamentals.market_cap_currency
     parts = [
         ("매출성장", _pct(fundamentals.revenue_growth_pct)),
         ("영업이익률", _pct(fundamentals.operating_margin_pct)),
         ("ROE", _pct(fundamentals.roe_pct)),
         ("부채비율", _pct(fundamentals.debt_to_equity_pct)),
+        ("유동비율", _pct(fundamentals.current_ratio_pct)),
+        ("이자보상", _multiple(fundamentals.interest_coverage)),
+        ("매출액", _amount(fundamentals.revenue, currency)),
+        ("영업이익", _amount(fundamentals.operating_income, currency)),
+        ("EBITDA", _amount(fundamentals.ebitda, currency)),
+        ("순이익", _amount(fundamentals.net_income, currency)),
+        ("영업현금흐름", _amount(fundamentals.operating_cash_flow, currency)),
+        ("FCF", _amount(fundamentals.free_cash_flow, currency)),
         ("PER", _multiple(fundamentals.pe)),
         ("Forward PER", _multiple(fundamentals.forward_pe)),
         ("시가총액", _market_cap(fundamentals.market_cap_usd, fundamentals.market_cap_currency)),
@@ -126,8 +136,27 @@ def _format_fundamentals(fundamentals: Fundamentals) -> str:
     return ", ".join(f"{name} {value}" for name, value in parts if value != "N/A")
 
 
+def _format_valuation_range(item: StockScore) -> str:
+    valuation_range = item.valuation_range
+    currency = item.stock.fundamentals.market_cap_currency
+    if valuation_range.market_cap_low is None or valuation_range.market_cap_high is None:
+        return valuation_range.note
+    upside = _pct_range(valuation_range.upside_low_pct, valuation_range.upside_high_pct)
+    return (
+        f"{_amount(valuation_range.market_cap_low, currency)}~{_amount(valuation_range.market_cap_high, currency)} "
+        f"({valuation_range.profit_metric}, {valuation_range.multiple_low:.1f}~{valuation_range.multiple_high:.1f}배, "
+        f"여력 {upside})"
+    )
+
+
 def _pct(value: float | None) -> str:
     return "N/A" if value is None else f"{value:.1f}%"
+
+
+def _pct_range(low: float | None, high: float | None) -> str:
+    if low is None or high is None:
+        return "N/A"
+    return f"{low:.1f}%~{high:.1f}%"
 
 
 def _multiple(value: float | None) -> str:
@@ -144,3 +173,23 @@ def _market_cap(value: float | None, currency: str) -> str:
     if value >= 1_000_000_000_000:
         return f"${value / 1_000_000_000_000:.2f}T"
     return f"${value / 1_000_000_000:.1f}B"
+
+
+def _amount(value: float | None, currency: str) -> str:
+    if value is None:
+        return "N/A"
+    sign = "-" if value < 0 else ""
+    abs_value = abs(value)
+    if currency == "KRW":
+        if abs_value >= 1_000_000_000_000:
+            return f"{sign}{abs_value / 1_000_000_000_000:.1f}조원"
+        if abs_value >= 100_000_000:
+            return f"{sign}{abs_value / 100_000_000:.0f}억원"
+        return f"{value:,.0f}원"
+    if abs_value >= 1_000_000_000_000:
+        return f"{sign}${abs_value / 1_000_000_000_000:.2f}T"
+    if abs_value >= 1_000_000_000:
+        return f"{sign}${abs_value / 1_000_000_000:.1f}B"
+    if abs_value >= 1_000_000:
+        return f"{sign}${abs_value / 1_000_000:.1f}M"
+    return f"{sign}${abs_value:,.0f}"

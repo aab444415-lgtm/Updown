@@ -423,10 +423,11 @@ function renderDetail() {
     ${detailScoreTile("모멘텀", stock.momentumScore)}
   `;
   renderTechnical(stock);
-  elements.metricGrid.innerHTML = metricItems(stock.fundamentals).join("");
+  elements.metricGrid.innerHTML = metricItems(stock).join("");
   elements.reasonList.innerHTML = [
     `투자 판단: ${stock.decisionGrade}`,
     `밸류에이션 해석: ${stock.valuationNote || stock.valuationLabel}`,
+    `약식 적정 시총 범위: ${formatValuationRange(stock)}`,
     ...stock.reasons,
   ]
     .map((reason) => `<li>${escapeHtml(reason)}</li>`)
@@ -908,15 +909,28 @@ function detailScoreTile(label, score) {
   `;
 }
 
-function metricItems(fundamentals) {
+function metricItems(stock) {
+  const fundamentals = stock.fundamentals;
+  const currency = fundamentals.marketCapCurrency || "USD";
   return [
     ["매출성장", formatPct(fundamentals.revenueGrowthPct)],
     ["영업이익률", formatPct(fundamentals.operatingMarginPct)],
     ["ROE", formatPct(fundamentals.roePct)],
     ["부채비율", formatPct(fundamentals.debtToEquityPct)],
+    ["유동비율", formatPct(fundamentals.currentRatioPct)],
+    ["이자보상", formatMultiple(fundamentals.interestCoverage)],
+    ["매출액", formatFinancialAmount(fundamentals.revenue, currency)],
+    ["영업이익", formatFinancialAmount(fundamentals.operatingIncome, currency)],
+    ["EBITDA", formatFinancialAmount(fundamentals.ebitda, currency)],
+    ["순이익", formatFinancialAmount(fundamentals.netIncome, currency)],
+    ["영업현금흐름", formatFinancialAmount(fundamentals.operatingCashFlow, currency)],
+    ["FCF", formatFinancialAmount(fundamentals.freeCashFlow, currency)],
     ["PER", formatMultiple(fundamentals.pe)],
     ["Forward PER", formatMultiple(fundamentals.forwardPe)],
-    ["시가총액", formatMarketCap(fundamentals.marketCapUsd, fundamentals.marketCapCurrency)],
+    ["시가총액", formatMarketCap(fundamentals.marketCapUsd, currency)],
+    ["적정 시총 하단", formatFinancialAmount(stock.valuationRange?.marketCapLow, currency)],
+    ["적정 시총 상단", formatFinancialAmount(stock.valuationRange?.marketCapHigh, currency)],
+    ["상승여력 범위", formatPctRange(stock.valuationRange?.upsideLowPct, stock.valuationRange?.upsideHighPct)],
   ].map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`);
 }
 
@@ -931,6 +945,25 @@ function safeScore(value) {
 
 function formatPct(value) {
   return Number.isFinite(value) ? `${value.toFixed(1)}%` : "N/A";
+}
+
+function formatPctRange(low, high) {
+  if (!Number.isFinite(low) || !Number.isFinite(high)) return "N/A";
+  return `${low.toFixed(1)}%~${high.toFixed(1)}%`;
+}
+
+function formatValuationRange(stock) {
+  const valuationRange = stock.valuationRange;
+  const currency = stock.fundamentals?.marketCapCurrency || "USD";
+  if (!valuationRange || !Number.isFinite(valuationRange.marketCapLow) || !Number.isFinite(valuationRange.marketCapHigh)) {
+    return valuationRange?.note || "계산 가능한 데이터 부족";
+  }
+  return `${formatFinancialAmount(valuationRange.marketCapLow, currency)}~${formatFinancialAmount(
+    valuationRange.marketCapHigh,
+    currency
+  )} · ${valuationRange.profitMetric} x ${formatMultiple(valuationRange.multipleLow)}~${formatMultiple(
+    valuationRange.multipleHigh
+  )} · 여력 ${formatPctRange(valuationRange.upsideLowPct, valuationRange.upsideHighPct)}`;
 }
 
 function formatReturn(value, signed = false) {
@@ -967,6 +1000,21 @@ function formatMarketCap(value, currency = "USD") {
   }
   if (value >= 1_000_000_000_000) return `$${(value / 1_000_000_000_000).toFixed(2)}T`;
   return `$${(value / 1_000_000_000).toFixed(1)}B`;
+}
+
+function formatFinancialAmount(value, currency = "USD") {
+  if (!Number.isFinite(value)) return "N/A";
+  const sign = value < 0 ? "-" : "";
+  const absValue = Math.abs(value);
+  if (currency === "KRW") {
+    if (absValue >= 1_000_000_000_000) return `${sign}${(absValue / 1_000_000_000_000).toFixed(1)}조원`;
+    if (absValue >= 100_000_000) return `${sign}${(absValue / 100_000_000).toFixed(0)}억원`;
+    return `${value.toLocaleString()}원`;
+  }
+  if (absValue >= 1_000_000_000_000) return `${sign}$${(absValue / 1_000_000_000_000).toFixed(2)}T`;
+  if (absValue >= 1_000_000_000) return `${sign}$${(absValue / 1_000_000_000).toFixed(1)}B`;
+  if (absValue >= 1_000_000) return `${sign}$${(absValue / 1_000_000).toFixed(1)}M`;
+  return `${sign}$${absValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 function formatIndicatorValue(value, unit) {
