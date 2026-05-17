@@ -1,0 +1,136 @@
+from __future__ import annotations
+
+from .models import Fundamentals, RecommendationReport, StockScore
+
+
+def render_markdown(
+    report: RecommendationReport, top_industries: int = 3, top_stocks: int = 5
+) -> str:
+    lines: list[str] = []
+    lines.append("# 주식 추천 리서치 리포트")
+    lines.append("")
+    lines.append(f"- 생성 시각: {report.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append("- 용도: 투자 후보 발굴용 리서치 보조 자료")
+    lines.append("- 주의: 매수/매도 지시가 아니며, 실제 투자 전 최신 공시와 가격을 직접 확인해야 합니다.")
+    lines.append("")
+    lines.append("## 거시경제/뉴스 맥락")
+    lines.append("")
+    lines.append(report.macro_context)
+    lines.append("")
+
+    lines.append("## 데이터 품질")
+    lines.append("")
+    lines.append(f"- 실시간 뉴스 사용: {'예' if report.data_quality.live_news else '아니오'}")
+    lines.append(f"- 실시간 시장 데이터 사용: {'예' if report.data_quality.live_market_data else '아니오'}")
+    lines.append(f"- 공식 재무 데이터 사용: {'예' if report.data_quality.live_fundamentals else '아니오'}")
+    lines.append(f"- 한국 OpenDART 재무 사용: {'예' if report.data_quality.live_korea_fundamentals else '아니오'}")
+    lines.append(f"- 거시경제 지표 사용: {'예' if report.data_quality.live_macro else '아니오'}")
+    if report.data_quality.configured_sources:
+        lines.append("- 설정된 데이터 소스: " + ", ".join(report.data_quality.configured_sources))
+    if report.data_quality.missing_sources:
+        lines.append("- 아직 키가 없는 선택 소스: " + ", ".join(report.data_quality.missing_sources))
+    for warning in report.data_quality.warnings:
+        lines.append(f"- {warning}")
+    lines.append("")
+
+    if report.macro_snapshot is not None:
+        lines.append("## 거시경제 지표")
+        lines.append("")
+        lines.append(report.macro_snapshot.summary)
+        lines.append("")
+        for indicator in report.macro_snapshot.indicators:
+            value = "N/A" if indicator.value is None else f"{indicator.value:,.2f}{indicator.unit}"
+            date = indicator.latest_date or "날짜 없음"
+            lines.append(f"- {indicator.name}: {value} ({indicator.source}, {date}) - {indicator.note}")
+        lines.append("")
+
+    lines.append("## 유망 산업")
+    lines.append("")
+    for rank, item in enumerate(report.industry_scores[:top_industries], start=1):
+        lines.append(f"### {rank}. {item.industry.name} - {item.score:.1f}점")
+        lines.append("")
+        lines.append(item.industry.description)
+        lines.append("")
+        lines.append(
+            f"- 세부 점수: 거시 {item.macro_score:.1f}, 뉴스 {item.news_score:.1f}, 시장 {item.market_score:.1f}"
+        )
+        for evidence in item.evidence:
+            lines.append(f"- {evidence}")
+        lines.append("- 주요 리스크: " + "; ".join(item.industry.risks[:2]))
+        lines.append("")
+
+    lines.append("## 추천 종목 후보")
+    lines.append("")
+    for rank, item in enumerate(report.stock_scores[:top_stocks], start=1):
+        lines.extend(_render_stock(rank, item))
+        lines.append("")
+
+    if report.news_items:
+        lines.append("## 참고 뉴스")
+        lines.append("")
+        for item in report.news_items[:8]:
+            url = f" ({item.url})" if item.url else ""
+            lines.append(f"- {item.title} - {item.source}{url}")
+        lines.append("")
+
+    lines.append("## 점수 해석")
+    lines.append("")
+    lines.append("- 산업 점수: 거시 테마, 뉴스 언급 강도, 산업 내 가격 모멘텀을 합산합니다.")
+    lines.append("- 종목 점수: 산업 점수, 기본적 분석, 밸류에이션, 가격 모멘텀, 핵심/부가 기업 역할을 합산합니다.")
+    lines.append("- 점수는 정답이 아니라 후보 압축용 랭킹입니다.")
+    return "\n".join(lines)
+
+
+def _render_stock(rank: int, item: StockScore) -> list[str]:
+    stock = item.stock
+    role = "핵심 기업" if stock.role == "core" else "부가/연관 기업"
+    lines = [f"### {rank}. {stock.name} ({stock.ticker}) - {item.score:.1f}점 / {item.decision_grade}", ""]
+    lines.append(f"- 산업/역할: {stock.industry} / {role}")
+    lines.append(
+        f"- 투자 판단: {item.decision_grade}, 리스크 {item.risk_level}, 밸류에이션 {item.valuation_label}"
+    )
+    lines.append(
+        f"- 세부 점수: 산업 {item.industry_score:.1f}, 기본적 분석 {item.quality_score:.1f}, "
+        f"밸류에이션 {item.valuation_score:.1f}, 모멘텀 {item.momentum_score:.1f}"
+    )
+    lines.append(f"- 주요 지표: {_format_fundamentals(stock.fundamentals)}")
+    lines.append("- 추천 근거:")
+    for reason in item.reasons:
+        lines.append(f"  - {reason}")
+    lines.append("- 체크할 리스크:")
+    for caution in item.cautions[:3]:
+        lines.append(f"  - {caution}")
+    return lines
+
+
+def _format_fundamentals(fundamentals: Fundamentals) -> str:
+    parts = [
+        ("매출성장", _pct(fundamentals.revenue_growth_pct)),
+        ("영업이익률", _pct(fundamentals.operating_margin_pct)),
+        ("ROE", _pct(fundamentals.roe_pct)),
+        ("부채비율", _pct(fundamentals.debt_to_equity_pct)),
+        ("PER", _multiple(fundamentals.pe)),
+        ("Forward PER", _multiple(fundamentals.forward_pe)),
+        ("시가총액", _market_cap(fundamentals.market_cap_usd, fundamentals.market_cap_currency)),
+    ]
+    return ", ".join(f"{name} {value}" for name, value in parts if value != "N/A")
+
+
+def _pct(value: float | None) -> str:
+    return "N/A" if value is None else f"{value:.1f}%"
+
+
+def _multiple(value: float | None) -> str:
+    return "N/A" if value is None else f"{value:.1f}배"
+
+
+def _market_cap(value: float | None, currency: str) -> str:
+    if value is None:
+        return "N/A"
+    if currency == "KRW":
+        if value >= 1_000_000_000_000:
+            return f"{value / 1_000_000_000_000:.1f}조원"
+        return f"{value / 100_000_000:.0f}억원"
+    if value >= 1_000_000_000_000:
+        return f"${value / 1_000_000_000_000:.2f}T"
+    return f"${value / 1_000_000_000:.1f}B"

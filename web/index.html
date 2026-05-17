@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>주식 추천 대시보드</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Research Dashboard</p>
+        <h1>주식 추천 대시보드</h1>
+      </div>
+      <div class="toolbar" aria-label="데이터 모드">
+        <div class="segmented" role="group" aria-label="데이터 모드 선택">
+          <button class="segment active" data-mode="sample" type="button">샘플</button>
+          <button class="segment" data-mode="live" type="button">라이브</button>
+        </div>
+        <button class="refresh-button" id="refreshButton" type="button">새로고침</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="status-band" aria-label="현재 리포트 상태">
+        <div>
+          <span class="label">생성 시각</span>
+          <strong id="createdAt">-</strong>
+        </div>
+        <div>
+          <span class="label">뉴스</span>
+          <strong id="newsStatus">-</strong>
+        </div>
+        <div>
+          <span class="label">시장 데이터</span>
+          <strong id="marketStatus">-</strong>
+        </div>
+        <div>
+          <span class="label">재무 데이터</span>
+          <strong id="fundamentalStatus">-</strong>
+        </div>
+        <div>
+          <span class="label">상위 종목</span>
+          <strong id="topTicker">-</strong>
+        </div>
+      </section>
+
+      <section class="backtest-section" aria-label="백테스트">
+        <div class="section-title with-filter">
+          <div>
+            <p class="eyebrow">Backtest Lab</p>
+            <h2>추천 모델 검증</h2>
+          </div>
+          <div class="backtest-controls">
+            <label>
+              <span>기간</span>
+              <select id="backtestMonths" aria-label="백테스트 기간">
+                <option value="6">6개월</option>
+                <option value="12" selected>12개월</option>
+                <option value="24">24개월</option>
+              </select>
+            </label>
+            <label>
+              <span>Top</span>
+              <select id="backtestTop" aria-label="백테스트 종목 수">
+                <option value="3">3</option>
+                <option value="5" selected>5</option>
+                <option value="10">10</option>
+              </select>
+            </label>
+            <label>
+              <span>비교</span>
+              <select id="backtestBenchmark" aria-label="백테스트 벤치마크">
+                <option value="SPY" selected>SPY</option>
+                <option value="QQQ">QQQ</option>
+                <option value="^KS11">KOSPI</option>
+              </select>
+            </label>
+            <button class="backtest-button" id="backtestButton" type="button">실행</button>
+          </div>
+        </div>
+        <div class="backtest-summary" id="backtestSummary"></div>
+        <div class="backtest-benchmarks" id="backtestBenchmarks"></div>
+        <div class="backtest-periods" id="backtestPeriods"></div>
+        <div class="backtest-notes" id="backtestNotes"></div>
+      </section>
+
+      <section class="snapshot-section" aria-label="추천 스냅샷 기록">
+        <div class="section-title with-filter">
+          <div>
+            <p class="eyebrow">Point-in-Time Records</p>
+            <h2>추천 스냅샷 기록</h2>
+          </div>
+          <button class="snapshot-button" id="snapshotRefreshButton" type="button">기록 새로고침</button>
+        </div>
+        <div class="snapshot-summary" id="snapshotSummary"></div>
+        <div class="snapshot-list" id="snapshotList"></div>
+      </section>
+
+      <section class="macro-section" aria-label="거시경제 맥락">
+        <div class="section-title">
+          <p class="eyebrow">Macro Context</p>
+          <h2>현재 시장 배경</h2>
+        </div>
+        <p id="macroContext"></p>
+        <div class="macro-snapshot" id="macroSnapshot"></div>
+        <div class="warning-row" id="warnings"></div>
+      </section>
+
+      <section class="dashboard-grid">
+        <div class="panel">
+          <div class="section-title">
+            <p class="eyebrow">Industries</p>
+            <h2>유망 산업</h2>
+          </div>
+          <div class="industry-list" id="industryList"></div>
+        </div>
+
+        <div class="panel">
+          <div class="section-title with-filter">
+            <div>
+              <p class="eyebrow">Stocks</p>
+              <h2>추천 종목 후보</h2>
+            </div>
+            <select id="industryFilter" aria-label="산업 필터">
+              <option value="all">전체</option>
+            </select>
+          </div>
+          <div class="stock-list" id="stockList"></div>
+        </div>
+      </section>
+
+      <section class="detail-section" aria-label="종목 상세">
+        <div class="detail-header">
+          <div>
+            <p class="eyebrow">Selected Stock</p>
+            <h2 id="detailTitle">-</h2>
+          </div>
+          <div class="score-pill" id="detailScore">-</div>
+        </div>
+        <div class="detail-grid">
+          <div>
+            <h3>투자 지표</h3>
+            <dl class="metric-grid" id="metricGrid"></dl>
+          </div>
+          <div>
+            <h3>추천 근거</h3>
+            <ul class="plain-list" id="reasonList"></ul>
+          </div>
+          <div>
+            <h3>체크할 리스크</h3>
+            <ul class="plain-list risk-list" id="riskList"></ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="news-section" aria-label="참고 뉴스">
+        <div class="section-title">
+          <p class="eyebrow">News</p>
+          <h2>참고 뉴스</h2>
+        </div>
+        <div class="news-list" id="newsList"></div>
+      </section>
+    </main>
+
+    <div class="loading" id="loading" aria-live="polite">데이터 불러오는 중</div>
+    <script src="/assets/app.js"></script>
+  </body>
+</html>

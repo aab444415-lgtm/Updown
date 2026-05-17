@@ -1,0 +1,10 @@
+.env
+.venv/
+.vercel/
+data/
+__pycache__/
+*.pyc
+.DS_Store
+reports/
+tests/
+stock-dashboard-*.png

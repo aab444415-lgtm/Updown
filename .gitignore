@@ -1,0 +1,12 @@
+.env
+.venv/
+.vercel/
+.playwright-mcp/
+data/
+dist/
+reports/
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+stock-dashboard-*.png
