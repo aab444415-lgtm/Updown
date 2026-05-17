@@ -344,6 +344,21 @@ main {
   line-height: 1;
 }
 
+.top-stock-tech {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
 .directory-head {
   margin-top: 22px;
 }
@@ -992,6 +1007,11 @@ main {
   color: #9a3412;
 }
 
+.tag.style {
+  background: #eef7f7;
+  color: #0f766e;
+}
+
 .tag.valuation {
   background: #f4f0ff;
   color: #5b21b6;
@@ -1124,6 +1144,188 @@ main {
   margin-bottom: 12px;
 }
 
+.technical-card {
+  margin-top: 14px;
+}
+
+.technical-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.technical-head h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.trend-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f7f9fb;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.trend-up {
+  border-color: #bce3d8;
+  background: #effbf7;
+  color: #0b6f4d;
+}
+
+.trend-down {
+  border-color: #f2c8c5;
+  background: #fff1f0;
+  color: var(--red);
+}
+
+.trend-neutral {
+  border-color: #c8d5e8;
+  background: #eef5ff;
+  color: #174ea6;
+}
+
+.trend-missing {
+  border-color: var(--border);
+  background: #f7f9fb;
+  color: var(--muted);
+}
+
+.technical-chart {
+  min-height: 248px;
+  overflow: hidden;
+  border: 1px solid #edf1f5;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.technical-chart svg {
+  display: block;
+  width: 100%;
+  min-height: 248px;
+}
+
+.chart-bg {
+  fill: #fbfcfd;
+}
+
+.chart-grid {
+  stroke: #e2e8f0;
+  stroke-width: 1;
+}
+
+.chart-axis-label,
+.chart-date-label,
+.chart-legend text {
+  fill: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.chart-line {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chart-line.price {
+  stroke: #111827;
+  stroke-width: 2.8;
+}
+
+.chart-line.ma20,
+.chart-legend-line.ma20 {
+  stroke: var(--blue);
+}
+
+.chart-line.ma60,
+.chart-legend-line.ma60 {
+  stroke: var(--green);
+}
+
+.chart-line.ma120,
+.chart-legend-line.ma120 {
+  stroke: var(--amber);
+}
+
+.chart-line.ma20,
+.chart-line.ma60,
+.chart-line.ma120 {
+  stroke-width: 1.7;
+}
+
+.chart-legend-line {
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+
+.chart-legend-line.price {
+  stroke: #111827;
+}
+
+.technical-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.technical-metric {
+  min-height: 78px;
+  padding: 10px;
+  border: 1px solid #edf1f5;
+  border-radius: 6px;
+  background: #f7f9fb;
+}
+
+.technical-metric span,
+.technical-metric small {
+  display: block;
+}
+
+.technical-metric > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.technical-metric strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 18px;
+  line-height: 1.15;
+}
+
+.technical-metric small {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.range-track {
+  height: 6px;
+  overflow: hidden;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: #e5eaf1;
+}
+
+.range-track span {
+  height: 100%;
+  background: linear-gradient(90deg, var(--green), var(--blue));
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1166,6 +1368,14 @@ main {
 
 .issue-list li::marker {
   color: var(--blue);
+}
+
+.check-list li::marker {
+  color: var(--green);
+}
+
+.second-order-list li::marker {
+  color: var(--teal);
 }
 
 .news-section {
@@ -1300,6 +1510,14 @@ main {
     grid-column: 2;
     justify-items: start;
     text-align: left;
+  }
+
+  .technical-head {
+    display: grid;
+  }
+
+  .technical-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .detail-score-stack {

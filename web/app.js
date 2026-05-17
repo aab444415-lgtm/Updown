@@ -31,8 +31,13 @@ const elements = {
   detailScore: document.querySelector("#detailScore"),
   detailInsight: document.querySelector("#detailInsight"),
   detailScoreGrid: document.querySelector("#detailScoreGrid"),
+  technicalTrend: document.querySelector("#technicalTrend"),
+  technicalChart: document.querySelector("#technicalChart"),
+  technicalMetrics: document.querySelector("#technicalMetrics"),
   metricGrid: document.querySelector("#metricGrid"),
   reasonList: document.querySelector("#reasonList"),
+  analysisCheckList: document.querySelector("#analysisCheckList"),
+  secondOrderList: document.querySelector("#secondOrderList"),
   issueList: document.querySelector("#issueList"),
   riskList: document.querySelector("#riskList"),
   newsList: document.querySelector("#newsList"),
@@ -372,6 +377,7 @@ function renderStocks() {
           <span class="tag decision">${escapeHtml(stock.decisionGrade)}</span>
           <span class="tag">${escapeHtml(stock.industry)}</span>
           <span class="tag role">${escapeHtml(stock.role)}</span>
+          <span class="tag style">${escapeHtml(stock.analysisStyle || "분석")}</span>
           <span class="tag risk">리스크 ${escapeHtml(stock.riskLevel)}</span>
         </div>
         <div class="stock-scores">
@@ -405,6 +411,7 @@ function renderDetail() {
     <span class="tag decision">${escapeHtml(stock.decisionGrade)}</span>
     <span class="tag">${escapeHtml(stock.industry)}</span>
     <span class="tag role">${escapeHtml(stock.role)}</span>
+    <span class="tag style">${escapeHtml(stock.analysisStyle || "분석")}</span>
     <span class="tag risk">리스크 ${escapeHtml(stock.riskLevel)}</span>
     <span class="tag valuation">${escapeHtml(stock.valuationLabel)}</span>
   `;
@@ -415,12 +422,20 @@ function renderDetail() {
     ${detailScoreTile("밸류에이션", stock.valuationScore)}
     ${detailScoreTile("모멘텀", stock.momentumScore)}
   `;
+  renderTechnical(stock);
   elements.metricGrid.innerHTML = metricItems(stock.fundamentals).join("");
   elements.reasonList.innerHTML = [
     `투자 판단: ${stock.decisionGrade}`,
+    `밸류에이션 해석: ${stock.valuationNote || stock.valuationLabel}`,
     ...stock.reasons,
   ]
     .map((reason) => `<li>${escapeHtml(reason)}</li>`)
+    .join("");
+  elements.analysisCheckList.innerHTML = (stock.analysisChecks || [])
+    .map((check) => `<li>${escapeHtml(check)}</li>`)
+    .join("");
+  elements.secondOrderList.innerHTML = (stock.secondOrderChecks || [])
+    .map((check) => `<li>${escapeHtml(check)}</li>`)
     .join("");
   elements.issueList.innerHTML = detailIssues(stock)
     .map((issue) => `<li>${escapeHtml(issue)}</li>`)
@@ -499,6 +514,7 @@ function renderTopRecommendationList(container, stocks, emptyText) {
           <span class="top-stock-score">
             <strong>${formatScore(stock.score)}</strong>
             <small>${escapeHtml(stock.decisionGrade)}</small>
+            ${technicalTopBadge(stock)}
           </span>
         </button>
       `
@@ -512,6 +528,201 @@ function renderTopRecommendationList(container, stocks, emptyText) {
       window.location.hash = "detail";
     });
   });
+}
+
+function renderTechnical(stock) {
+  if (!elements.technicalTrend || !elements.technicalChart || !elements.technicalMetrics) return;
+
+  const technical = stock.technical || null;
+  const trendLabel = technical?.trendLabel || "데이터 부족";
+  elements.technicalTrend.className = `trend-pill ${technicalToneClass(trendLabel)}`;
+  elements.technicalTrend.textContent = trendLabel;
+
+  if (!hasTechnicalPrices(technical)) {
+    elements.technicalChart.innerHTML = `<div class="empty-state">차트 데이터 부족</div>`;
+    elements.technicalMetrics.innerHTML = [
+      technicalMetric("RSI 14", "N/A", "가격 데이터 부족"),
+      technicalMetric("52주 위치", "N/A", "고가/저가 계산 전"),
+      technicalMetric("1개월", "N/A"),
+      technicalMetric("3개월", "N/A"),
+      technicalMetric("6개월", "N/A"),
+    ].join("");
+    return;
+  }
+
+  elements.technicalChart.innerHTML = buildTechnicalSvg(technical);
+  elements.technicalMetrics.innerHTML = [
+    technicalMetric("RSI 14", formatOneDecimal(technical.rsi14), rsiLabel(technical.rsi14)),
+    technicalMetric(
+      "52주 위치",
+      formatPct(technical.rangePositionPct),
+      `${formatPriceValue(technical.fiftyTwoWeekLow)} - ${formatPriceValue(technical.fiftyTwoWeekHigh)}`,
+      { position: technical.rangePositionPct }
+    ),
+    technicalMetric("1개월", formatReturn(technical.oneMonthReturnPct, true)),
+    technicalMetric("3개월", formatReturn(technical.threeMonthReturnPct, true)),
+    technicalMetric("6개월", formatReturn(technical.sixMonthReturnPct, true)),
+  ].join("");
+}
+
+function buildTechnicalSvg(technical) {
+  const prices = Array.isArray(technical.prices) ? technical.prices : [];
+  const ma20 = Array.isArray(technical.ma20) ? technical.ma20 : [];
+  const ma60 = Array.isArray(technical.ma60) ? technical.ma60 : [];
+  const ma120 = Array.isArray(technical.ma120) ? technical.ma120 : [];
+  const values = [
+    ...seriesValues(prices, "close"),
+    ...seriesValues(ma20, "value"),
+    ...seriesValues(ma60, "value"),
+    ...seriesValues(ma120, "value"),
+  ];
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const padding = Math.max((maxValue - minValue) * 0.08, maxValue * 0.01, 1);
+  const scale = {
+    width: 720,
+    height: 300,
+    left: 42,
+    right: 24,
+    top: 20,
+    bottom: 38,
+    min: minValue - padding,
+    max: maxValue + padding,
+    total: prices.length,
+  };
+  scale.innerWidth = scale.width - scale.left - scale.right;
+  scale.innerHeight = scale.height - scale.top - scale.bottom;
+
+  const gridRows = [0, 0.25, 0.5, 0.75, 1]
+    .map((ratio) => {
+      const y = scale.top + scale.innerHeight * ratio;
+      const value = scale.max - (scale.max - scale.min) * ratio;
+      return `
+        <line class="chart-grid" x1="${scale.left}" y1="${y.toFixed(1)}" x2="${scale.width - scale.right}" y2="${y.toFixed(1)}"></line>
+        <text class="chart-axis-label" x="${scale.left - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end">${escapeHtml(
+          formatPriceValue(value)
+        )}</text>
+      `;
+    })
+    .join("");
+  const firstDate = prices[0]?.date || "";
+  const lastDate = prices[prices.length - 1]?.date || "";
+
+  return `
+    <svg viewBox="0 0 ${scale.width} ${scale.height}" role="img" aria-label="최근 1년 가격 차트">
+      <rect class="chart-bg" x="0" y="0" width="${scale.width}" height="${scale.height}" rx="8"></rect>
+      ${gridRows}
+      <path class="chart-line price" d="${chartPath(prices, "close", scale)}"></path>
+      ${chartPathElement(ma20, "ma20", "value", scale)}
+      ${chartPathElement(ma60, "ma60", "value", scale)}
+      ${chartPathElement(ma120, "ma120", "value", scale)}
+      <text class="chart-date-label" x="${scale.left}" y="${scale.height - 10}">${escapeHtml(shortDate(firstDate))}</text>
+      <text class="chart-date-label" x="${scale.width - scale.right}" y="${scale.height - 10}" text-anchor="end">${escapeHtml(
+        shortDate(lastDate)
+      )}</text>
+      <g class="chart-legend" transform="translate(${scale.width - 304}, ${scale.top + 4})">
+        ${legendItem(0, "price", "종가")}
+        ${legendItem(68, "ma20", "MA20")}
+        ${legendItem(138, "ma60", "MA60")}
+        ${legendItem(208, "ma120", "MA120")}
+      </g>
+    </svg>
+  `;
+}
+
+function chartPathElement(points, className, valueKey, scale) {
+  const path = chartPath(points, valueKey, scale);
+  return path ? `<path class="chart-line ${className}" d="${path}"></path>` : "";
+}
+
+function chartPath(points, valueKey, scale) {
+  if (!Array.isArray(points) || !points.length) return "";
+  let path = "";
+  let drawing = false;
+  points.forEach((point, index) => {
+    const value = Number(point?.[valueKey]);
+    if (!Number.isFinite(value)) {
+      drawing = false;
+      return;
+    }
+    const x = scaleX(index, scale);
+    const y = scaleY(value, scale);
+    path += `${drawing ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)} `;
+    drawing = true;
+  });
+  return path.trim();
+}
+
+function scaleX(index, scale) {
+  if (scale.total <= 1) return scale.left + scale.innerWidth / 2;
+  return scale.left + (index / (scale.total - 1)) * scale.innerWidth;
+}
+
+function scaleY(value, scale) {
+  if (scale.max <= scale.min) return scale.top + scale.innerHeight / 2;
+  return scale.top + ((scale.max - value) / (scale.max - scale.min)) * scale.innerHeight;
+}
+
+function legendItem(x, className, label) {
+  return `
+    <g transform="translate(${x}, 0)">
+      <line class="chart-legend-line ${className}" x1="0" y1="5" x2="18" y2="5"></line>
+      <text x="24" y="9">${escapeHtml(label)}</text>
+    </g>
+  `;
+}
+
+function seriesValues(points, valueKey) {
+  if (!Array.isArray(points)) return [];
+  return points.map((point) => Number(point?.[valueKey])).filter((value) => Number.isFinite(value));
+}
+
+function hasTechnicalPrices(technical) {
+  return seriesValues(technical?.prices, "close").length >= 2;
+}
+
+function technicalMetric(label, value, note = "", options = {}) {
+  const position = Number(options.position);
+  const rangeBar = Number.isFinite(position)
+    ? `<span class="range-track"><span style="width:${safeScore(position)}%"></span></span>`
+    : "";
+  return `
+    <div class="technical-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      ${note ? `<small>${escapeHtml(note)}</small>` : ""}
+      ${rangeBar}
+    </div>
+  `;
+}
+
+function technicalTopBadge(stock) {
+  const technical = stock.technical;
+  const label = technicalSummary(technical);
+  return `<span class="top-stock-tech ${technicalToneClass(technical?.trendLabel)}">${escapeHtml(label)}</span>`;
+}
+
+function technicalSummary(technical) {
+  if (!technical) return "기술 데이터 부족";
+  const trend = technical.trendLabel || "데이터 부족";
+  if (Number.isFinite(technical.rsi14)) {
+    return `${trend} · RSI ${technical.rsi14.toFixed(0)}`;
+  }
+  return trend;
+}
+
+function technicalToneClass(label) {
+  if (label === "상승 추세") return "trend-up";
+  if (label === "하락 추세") return "trend-down";
+  if (label === "중립") return "trend-neutral";
+  return "trend-missing";
+}
+
+function rsiLabel(value) {
+  if (!Number.isFinite(value)) return "데이터 부족";
+  if (value >= 70) return "과열권";
+  if (value <= 30) return "침체권";
+  return "중립권";
 }
 
 function pickPrimaryReason(stock) {
@@ -530,6 +741,10 @@ function pickPrimaryReason(stock) {
 }
 
 function detailIssues(stock) {
+  if (stock.recentIssues?.length) {
+    return stock.recentIssues.slice(0, 4);
+  }
+
   const news = state.report?.news || [];
   const ticker = stock.ticker.toLowerCase();
   const name = stock.name.toLowerCase();
@@ -718,6 +933,22 @@ function formatReturn(value, signed = false) {
   if (!Number.isFinite(value)) return "N/A";
   const prefix = signed && value > 0 ? "+" : "";
   return `${prefix}${value.toFixed(1)}%`;
+}
+
+function formatOneDecimal(value) {
+  return Number.isFinite(value) ? value.toFixed(1) : "N/A";
+}
+
+function formatPriceValue(value) {
+  if (!Number.isFinite(value)) return "N/A";
+  return value.toLocaleString(undefined, {
+    maximumFractionDigits: value >= 100 ? 0 : 2,
+  });
+}
+
+function shortDate(value) {
+  if (typeof value !== "string" || value.length < 10) return "";
+  return value.slice(5, 10).replace("-", "/");
 }
 
 function formatMultiple(value) {

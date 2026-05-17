@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>주식 추천 대시보드</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/assets/styles.css?v=detail-cards-v3" />
+    <link rel="stylesheet" href="/assets/styles.css?v=technical-chart-v4" />
   </head>
   <body>
     <header class="topbar">
@@ -112,7 +112,7 @@
           <a href="#detail">
             <span>06</span>
             <strong>종목 상세</strong>
-            <small>회계 지표, 추천 근거, 리스크</small>
+            <small>회계 지표, 가격 차트, 추천 근거</small>
           </a>
           <a href="#news">
             <span>07</span>
@@ -225,6 +225,18 @@
         <p class="detail-insight" id="detailInsight">-</p>
         <div class="detail-score-grid" id="detailScoreGrid"></div>
 
+        <article class="detail-card technical-card">
+          <div class="technical-head">
+            <div>
+              <p class="eyebrow">Technical Analysis</p>
+              <h3>가격 차트 & 기술 지표</h3>
+            </div>
+            <span class="trend-pill" id="technicalTrend">데이터 부족</span>
+          </div>
+          <div class="technical-chart" id="technicalChart"></div>
+          <div class="technical-metrics" id="technicalMetrics"></div>
+        </article>
+
         <div class="detail-grid">
           <article class="detail-card">
             <h3>투자 지표</h3>
@@ -233,6 +245,14 @@
           <article class="detail-card">
             <h3>추천 근거</h3>
             <ul class="plain-list" id="reasonList"></ul>
+          </article>
+          <article class="detail-card">
+            <h3>분석 체크</h3>
+            <ul class="plain-list check-list" id="analysisCheckList"></ul>
+          </article>
+          <article class="detail-card">
+            <h3>2차적 사고</h3>
+            <ul class="plain-list second-order-list" id="secondOrderList"></ul>
           </article>
           <article class="detail-card">
             <h3>최근 이슈</h3>
@@ -255,6 +275,6 @@
     </main>
 
     <div class="loading" id="loading" aria-live="polite">데이터 불러오는 중</div>
-    <script src="/assets/app.js"></script>
+    <script src="/assets/app.js?v=technical-chart-v4"></script>
   </body>
 </html>

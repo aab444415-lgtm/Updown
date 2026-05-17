@@ -118,6 +118,10 @@ class StockScore:
     decision_grade: str
     risk_level: str
     valuation_label: str
+    analysis_style: str
+    valuation_note: str
+    analysis_checks: tuple[str, ...]
+    second_order_checks: tuple[str, ...]
 
 
 @dataclass(frozen=True)

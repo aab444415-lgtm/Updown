@@ -122,6 +122,8 @@ def score_stocks(
         if momentum is None:
             momentum = 50
         role = 65 if stock.role == "core" else 55
+        analysis_style = analysis_style_for_stock(stock)
+        valuation_note = valuation_note_for_stock(stock, valuation, analysis_style)
         total = (
             industry_score.score * 0.30
             + quality * 0.28
@@ -129,8 +131,20 @@ def score_stocks(
             + momentum * 0.16
             + role * 0.10
         )
-        reasons = _stock_reasons(stock, quality, valuation, momentum, industry_score)
-        cautions = tuple(dict.fromkeys((*stock.risks, *industry_score.industry.risks[:1])))
+        reasons = _stock_reasons(
+            stock, quality, valuation, momentum, industry_score, analysis_style, valuation_note
+        )
+        analysis_checks = analysis_checks_for_stock(stock, valuation_note)
+        second_order_checks = second_order_checks_for_stock(stock, industry_score, analysis_style)
+        cautions = tuple(
+            dict.fromkeys(
+                (
+                    *stock.risks,
+                    *industry_score.industry.risks[:1],
+                    *risk_cautions_for_stock(stock, analysis_style),
+                )
+            )
+        )
         risk_level = risk_level_for_stock(stock, quality, valuation, momentum)
         decision_grade = decision_grade_for_stock(total, quality, valuation, momentum, risk_level)
         valuation_label = valuation_label_for_score(valuation)
@@ -148,6 +162,10 @@ def score_stocks(
                 decision_grade=decision_grade,
                 risk_level=risk_level,
                 valuation_label=valuation_label,
+                analysis_style=analysis_style,
+                valuation_note=valuation_note,
+                analysis_checks=analysis_checks,
+                second_order_checks=second_order_checks,
             )
         )
     return tuple(results)
@@ -166,16 +184,121 @@ def valuation_score(fundamentals: Fundamentals) -> float:
     if pe is None or pe <= 0:
         return 45
     if pe <= 12:
-        return 86
-    if pe <= 20:
-        return 76
-    if pe <= 35:
-        return 63
-    if pe <= 55:
-        return 48
-    if pe <= 85:
-        return 34
-    return 22
+        base = 86
+    elif pe <= 20:
+        base = 76
+    elif pe <= 35:
+        base = 63
+    elif pe <= 55:
+        base = 48
+    elif pe <= 85:
+        base = 34
+    else:
+        base = 22
+
+    growth = fundamentals.revenue_growth_pct
+    margin = fundamentals.operating_margin_pct
+    roe = fundamentals.roe_pct
+    debt_to_equity = fundamentals.debt_to_equity_pct
+
+    if growth is not None and math.isfinite(growth):
+        if pe > 35 and growth >= 25 and _at_least(margin, 10):
+            base += min(14, (growth - 20) * 0.35)
+        elif pe > 35 and growth < 12:
+            base -= 10
+
+        if pe <= 14 and growth < 5:
+            base -= 12
+        elif pe <= 22 and growth >= 20:
+            base += 6
+
+    if pe > 25 and margin is not None and math.isfinite(margin) and margin < 8:
+        base -= 8
+    if margin is not None and math.isfinite(margin) and margin < 0:
+        base -= 12
+    if debt_to_equity is not None and math.isfinite(debt_to_equity) and debt_to_equity > 220:
+        base -= 8
+    if roe is not None and math.isfinite(roe) and roe > 25 and pe <= 30:
+        base += 6
+
+    return _clamp(base, 0, 100)
+
+
+def analysis_style_for_stock(stock: StockProfile) -> str:
+    fundamentals = stock.fundamentals
+    pe = fundamentals.forward_pe if fundamentals.forward_pe is not None else fundamentals.pe
+    growth = fundamentals.revenue_growth_pct
+    margin = fundamentals.operating_margin_pct
+
+    if _is_cyclical_industry(stock.industry) and pe is not None and pe <= 14:
+        if _at_least(growth, 20):
+            return "사이클 회복 성장주"
+        return "경기민감 저PER 관찰"
+    if _at_least(growth, 25):
+        return "성장주"
+    if pe is not None and pe >= 45:
+        return "고멀티플 검증"
+    if pe is not None and pe <= 20 and quality_score(fundamentals) >= 60:
+        return "가치/퀄리티"
+    if margin is not None and margin < 0 and _at_least(growth, 15):
+        return "턴어라운드 관찰"
+    return "균형형"
+
+
+def valuation_note_for_stock(stock: StockProfile, valuation: float, analysis_style: str) -> str:
+    fundamentals = stock.fundamentals
+    pe = fundamentals.forward_pe if fundamentals.forward_pe is not None else fundamentals.pe
+    if pe is None or pe <= 0:
+        return "이익 멀티플 데이터가 부족해 보수적으로 중립 이하로 봅니다."
+
+    if analysis_style == "경기민감 저PER 관찰":
+        return "낮은 PER은 매력보다 이익 정점 신호일 수 있어 업황 둔화 여부를 먼저 확인합니다."
+    if analysis_style == "사이클 회복 성장주":
+        return "낮은 멀티플과 강한 성장률이 함께 보이지만 사이클 회복 지속성을 확인해야 합니다."
+    if pe >= 45 and valuation < 45:
+        return "높은 멀티플은 미래 이익 개선이 계속될 때만 정당화됩니다."
+    if pe <= 20 and valuation >= 70:
+        return "낮은 멀티플이 긍정적이나 성장 둔화나 재무 부담이 숨어 있는지 확인합니다."
+    if valuation >= 63:
+        return "현재 멀티플은 성장성과 수익성 대비 무리하지 않은 구간으로 봅니다."
+    return "멀티플 부담이 있어 실적 상향이나 산업 전망 개선의 근거가 필요합니다."
+
+
+def analysis_checks_for_stock(stock: StockProfile, valuation_note: str) -> tuple[str, ...]:
+    fundamentals = stock.fundamentals
+    return (
+        _growth_check(fundamentals),
+        _profitability_check(fundamentals),
+        _stability_check(fundamentals),
+        f"멀티플 해석: {valuation_note}",
+    )
+
+
+def second_order_checks_for_stock(
+    stock: StockProfile, industry_score: IndustryScore, analysis_style: str
+) -> tuple[str, ...]:
+    leadership_check = (
+        f"{stock.name}의 선두 프리미엄이 경쟁사 대비 타당한지 확인"
+        if stock.role == "core"
+        else f"{stock.name}이 선두 기업과의 격차를 줄일 수 있는 구체적 이유 확인"
+    )
+    return (
+        f"{stock.industry} 성장률이 몇 년 지속될지와 현재 산업 점수 {industry_score.score:.1f}점의 지속성 확인",
+        "미래 이익 규모와 적용할 멀티플을 각각 범위로 잡아 상승 여력을 재계산",
+        leadership_check,
+        _style_specific_second_order_check(analysis_style),
+    )
+
+
+def risk_cautions_for_stock(stock: StockProfile, analysis_style: str) -> tuple[str, ...]:
+    cautions: list[str] = []
+    if analysis_style == "경기민감 저PER 관찰":
+        cautions.append("낮은 PER이 이익 정점 구간에서 나타난 착시인지 확인 필요")
+    if analysis_style in {"고멀티플 검증", "성장주"}:
+        cautions.append("성장 기대가 이미 가격에 반영된 정도 확인 필요")
+    if stock.fundamentals.debt_to_equity_pct is not None and stock.fundamentals.debt_to_equity_pct > 200:
+        cautions.append("부채비율이 높아 이자보상비율과 현금흐름 추가 확인 필요")
+    return tuple(cautions)
 
 
 def decision_grade_for_stock(
@@ -212,6 +335,8 @@ def risk_level_for_stock(
     debt_to_equity = stock.fundamentals.debt_to_equity_pct
     if debt_to_equity is not None and debt_to_equity > 220:
         risk_points += 2
+    if _is_cyclical_low_pe(stock):
+        risk_points += 1
     operating_margin = stock.fundamentals.operating_margin_pct
     if operating_margin is not None and operating_margin < 0:
         risk_points += 1
@@ -258,16 +383,88 @@ def _stock_reasons(
     valuation: float,
     momentum: float,
     industry_score: IndustryScore,
+    analysis_style: str,
+    valuation_note: str,
 ) -> tuple[str, ...]:
     role_text = "핵심 기업" if stock.role == "core" else "부가/연관 기업"
     reasons = [
         f"{industry_score.industry.name} 산업의 {role_text}",
         stock.thesis,
+        f"분석 스타일: {analysis_style}",
         f"기본적 분석 점수 {quality:.1f}/100, 밸류에이션 점수 {valuation:.1f}/100",
+        valuation_note,
         f"가격 모멘텀 점수 {momentum:.1f}/100",
     ]
     reasons.extend(stock.recent_issues[:1])
     return tuple(reasons)
+
+
+def _growth_check(fundamentals: Fundamentals) -> str:
+    growth = fundamentals.revenue_growth_pct
+    if growth is None or not math.isfinite(growth):
+        return "매출 성장: 데이터 부족으로 산업 성장성과 공시 확인 필요"
+    if growth >= 25:
+        tone = "강한 확장"
+    elif growth >= 8:
+        tone = "완만한 성장"
+    elif growth >= 0:
+        tone = "성장 둔화"
+    else:
+        tone = "매출 감소"
+    return f"매출 성장: {growth:.1f}%로 {tone} 흐름"
+
+
+def _profitability_check(fundamentals: Fundamentals) -> str:
+    margin = fundamentals.operating_margin_pct
+    roe = fundamentals.roe_pct
+    margin_text = "N/A" if margin is None else f"{margin:.1f}%"
+    roe_text = "N/A" if roe is None else f"{roe:.1f}%"
+    if _at_least(margin, 20) and _at_least(roe, 15):
+        tone = "수익성과 자본효율이 모두 양호"
+    elif margin is not None and margin < 0:
+        tone = "영업 적자라 이익 개선 확인 필요"
+    else:
+        tone = "수익성의 지속성과 개선 속도 확인 필요"
+    return f"이익의 질: 영업이익률 {margin_text}, ROE {roe_text} - {tone}"
+
+
+def _stability_check(fundamentals: Fundamentals) -> str:
+    debt_to_equity = fundamentals.debt_to_equity_pct
+    if debt_to_equity is None or not math.isfinite(debt_to_equity):
+        return "안정성: 부채비율 데이터 부족, 유동비율과 이자보상비율 추가 확인 필요"
+    if debt_to_equity > 220:
+        tone = "재무 부담이 큰 구간"
+    elif debt_to_equity > 150:
+        tone = "차입 부담 점검 필요"
+    else:
+        tone = "부채비율은 과도하지 않은 편"
+    return f"안정성: 부채비율 {debt_to_equity:.1f}% - {tone}, 유동비율과 이자보상비율 추가 확인"
+
+
+def _style_specific_second_order_check(analysis_style: str) -> str:
+    if analysis_style == "경기민감 저PER 관찰":
+        return "낮은 PER이 저평가가 아니라 이익 정점 신호일 가능성을 반대로 검토"
+    if analysis_style == "사이클 회복 성장주":
+        return "업황 회복이 일회성인지 구조적 이익 증가인지 분리해서 검토"
+    if analysis_style in {"성장주", "고멀티플 검증"}:
+        return "시장 기대보다 더 큰 이익 증가가 가능한지, 아니면 이미 선반영됐는지 검토"
+    if analysis_style == "가치/퀄리티":
+        return "낮은 멀티플의 이유가 일시적 소외인지 구조적 성장 둔화인지 검토"
+    return "산업 전망, 이익 추정, 멀티플 가정 중 어느 하나라도 틀렸을 때의 하방 검토"
+
+
+def _is_cyclical_low_pe(stock: StockProfile) -> bool:
+    pe = stock.fundamentals.forward_pe if stock.fundamentals.forward_pe is not None else stock.fundamentals.pe
+    return pe is not None and pe <= 14 and _is_cyclical_industry(stock.industry)
+
+
+def _is_cyclical_industry(industry: str) -> bool:
+    cyclical_terms = ("반도체", "전력 인프라", "에너지 장비", "우주항공")
+    return any(term in industry for term in cyclical_terms)
+
+
+def _at_least(value: float | None, threshold: float) -> bool:
+    return value is not None and math.isfinite(value) and value >= threshold
 
 
 def _term_score(counter: Counter[str], terms: Iterable[str], baseline: float, scale: float) -> float:

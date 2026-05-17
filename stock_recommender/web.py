@@ -9,10 +9,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .backtest import BENCHMARKS, backtest_to_dict, create_backtest
+from .backtest import BENCHMARKS, backtest_to_dict, create_backtest, fetch_price_history
+from .config import load_config
 from .models import RecommendationReport
 from .pipeline import create_recommendation_report
 from .snapshots import snapshot_history
+from .storage import CacheStore
+from .technical import build_technical_snapshot, technical_snapshot_to_dict
 from .universe import DEFAULT_MACRO_CONTEXT
 
 
@@ -24,6 +27,7 @@ def create_report(live: bool = False, macro_context: str = DEFAULT_MACRO_CONTEXT
 
 
 def report_to_dict(report: RecommendationReport) -> dict:
+    technical_by_ticker = _technical_by_ticker(report)
     return {
         "createdAt": report.created_at.strftime("%Y-%m-%d %H:%M:%S"),
         "macroContext": report.macro_context,
@@ -65,9 +69,14 @@ def report_to_dict(report: RecommendationReport) -> dict:
                 "momentumScore": item.momentum_score,
                 "reasons": list(item.reasons),
                 "cautions": list(item.cautions),
+                "recentIssues": list(item.stock.recent_issues),
                 "decisionGrade": item.decision_grade,
                 "riskLevel": item.risk_level,
                 "valuationLabel": item.valuation_label,
+                "analysisStyle": item.analysis_style,
+                "valuationNote": item.valuation_note,
+                "analysisChecks": list(item.analysis_checks),
+                "secondOrderChecks": list(item.second_order_checks),
                 "fundamentals": {
                     "revenueGrowthPct": item.stock.fundamentals.revenue_growth_pct,
                     "operatingMarginPct": item.stock.fundamentals.operating_margin_pct,
@@ -78,6 +87,7 @@ def report_to_dict(report: RecommendationReport) -> dict:
                     "marketCapUsd": item.stock.fundamentals.market_cap_usd,
                     "marketCapCurrency": item.stock.fundamentals.market_cap_currency,
                 },
+                "technical": technical_by_ticker.get(item.stock.ticker.upper()),
                 "country": item.stock.country,
                 "currency": item.stock.currency,
             }
@@ -93,6 +103,18 @@ def report_to_dict(report: RecommendationReport) -> dict:
             for item in report.news_items[:12]
         ],
     }
+
+
+def _technical_by_ticker(report: RecommendationReport) -> dict[str, dict]:
+    config = load_config()
+    cache = CacheStore(config.cache_db_path)
+    results: dict[str, dict] = {}
+    tickers = tuple(dict.fromkeys(item.stock.ticker.upper() for item in report.stock_scores))
+    for ticker in tickers:
+        points = fetch_price_history(ticker, cache=cache, range_value="1y", timeout=5.0)
+        snapshot = build_technical_snapshot(points)
+        results[ticker] = technical_snapshot_to_dict(snapshot)
+    return results
 
 
 def _macro_snapshot_to_dict(report: RecommendationReport) -> dict | None:

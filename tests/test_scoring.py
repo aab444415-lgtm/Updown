@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 from stock_recommender.backtest import PricePoint, run_backtest
 from stock_recommender.config import configured_source_names, load_config, missing_optional_source_names
 from stock_recommender.macro_data import industry_macro_data_score
-from stock_recommender.models import DataQuality, MacroIndicator, MacroSnapshot
+from stock_recommender.models import DataQuality, Fundamentals, MacroIndicator, MacroSnapshot
 from stock_recommender.opendart_financials import extract_opendart_fundamentals
 from stock_recommender.report import render_markdown
 from stock_recommender.scoring import build_report, decision_grade_for_stock, quality_score, valuation_score
@@ -28,6 +28,39 @@ class ScoringTests(unittest.TestCase):
         lockheed = next(stock for stock in STOCKS if stock.ticker == "LMT")
 
         self.assertGreater(valuation_score(lockheed.fundamentals), valuation_score(amd.fundamentals))
+
+    def test_valuation_score_does_not_blindly_reward_low_pe(self):
+        cheap_but_stagnant = Fundamentals(
+            revenue_growth_pct=-2.0,
+            operating_margin_pct=4.0,
+            roe_pct=3.0,
+            debt_to_equity_pct=170.0,
+            pe=8.0,
+            forward_pe=8.0,
+        )
+        reasonable_growth = Fundamentals(
+            revenue_growth_pct=24.0,
+            operating_margin_pct=25.0,
+            roe_pct=28.0,
+            debt_to_equity_pct=45.0,
+            pe=30.0,
+            forward_pe=18.0,
+        )
+
+        self.assertGreater(valuation_score(reasonable_growth), valuation_score(cheap_but_stagnant))
+
+    def test_stock_scores_include_analysis_checks(self):
+        report = build_report(
+            macro_context=DEFAULT_MACRO_CONTEXT,
+            industries=INDUSTRIES,
+            stocks=STOCKS,
+            news_items=(),
+        )
+        nvidia = next(item for item in report.stock_scores if item.stock.ticker == "NVDA")
+
+        self.assertEqual(nvidia.analysis_style, "성장주")
+        self.assertTrue(any("멀티플" in check for check in nvidia.analysis_checks))
+        self.assertGreaterEqual(len(nvidia.second_order_checks), 4)
 
     def test_report_contains_data_quality(self):
         report = build_report(

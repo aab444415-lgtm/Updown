@@ -61,7 +61,7 @@ def snapshot_history(limit: int = 30) -> dict:
 def report_to_snapshot_payload(report: RecommendationReport, mode: str) -> dict:
     created_at = report.created_at
     return {
-        "version": 1,
+        "version": 2,
         "mode": mode,
         "snapshotDate": created_at.date().isoformat(),
         "createdAt": created_at.isoformat(),
@@ -106,8 +106,13 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str) -> dict:
                 "decisionGrade": item.decision_grade,
                 "riskLevel": item.risk_level,
                 "valuationLabel": item.valuation_label,
+                "analysisStyle": item.analysis_style,
+                "valuationNote": item.valuation_note,
+                "analysisChecks": list(item.analysis_checks),
+                "secondOrderChecks": list(item.second_order_checks),
                 "reasons": list(item.reasons),
                 "cautions": list(item.cautions),
+                "recentIssues": list(item.stock.recent_issues),
                 "fundamentals": {
                     "revenueGrowthPct": item.stock.fundamentals.revenue_growth_pct,
                     "operatingMarginPct": item.stock.fundamentals.operating_margin_pct,
@@ -180,6 +185,7 @@ def _summary_row(row: dict | None) -> dict | None:
                 "score": item.get("score"),
                 "decisionGrade": item.get("decisionGrade"),
                 "riskLevel": item.get("riskLevel"),
+                "analysisStyle": item.get("analysisStyle"),
             }
             for item in top_stocks
             if isinstance(item, dict)

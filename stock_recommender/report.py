@@ -76,7 +76,10 @@ def render_markdown(
     lines.append("## 점수 해석")
     lines.append("")
     lines.append("- 산업 점수: 거시 테마, 뉴스 언급 강도, 산업 내 가격 모멘텀을 합산합니다.")
-    lines.append("- 종목 점수: 산업 점수, 기본적 분석, 밸류에이션, 가격 모멘텀, 핵심/부가 기업 역할을 합산합니다.")
+    lines.append(
+        "- 종목 점수: 산업 점수, 기본적 분석, 성장성까지 반영한 밸류에이션, 가격 모멘텀, 핵심/부가 기업 역할을 합산합니다."
+    )
+    lines.append("- 낮은 PER은 단독 매수 근거가 아니며, 이익 정점과 성장 둔화 가능성을 함께 봅니다.")
     lines.append("- 점수는 정답이 아니라 후보 압축용 랭킹입니다.")
     return "\n".join(lines)
 
@@ -89,6 +92,7 @@ def _render_stock(rank: int, item: StockScore) -> list[str]:
     lines.append(
         f"- 투자 판단: {item.decision_grade}, 리스크 {item.risk_level}, 밸류에이션 {item.valuation_label}"
     )
+    lines.append(f"- 분석 스타일: {item.analysis_style}")
     lines.append(
         f"- 세부 점수: 산업 {item.industry_score:.1f}, 기본적 분석 {item.quality_score:.1f}, "
         f"밸류에이션 {item.valuation_score:.1f}, 모멘텀 {item.momentum_score:.1f}"
@@ -100,6 +104,12 @@ def _render_stock(rank: int, item: StockScore) -> list[str]:
     lines.append("- 체크할 리스크:")
     for caution in item.cautions[:3]:
         lines.append(f"  - {caution}")
+    lines.append("- 분석 체크:")
+    for check in item.analysis_checks:
+        lines.append(f"  - {check}")
+    lines.append("- 2차적 사고 체크:")
+    for check in item.second_order_checks:
+        lines.append(f"  - {check}")
     return lines
 
 
