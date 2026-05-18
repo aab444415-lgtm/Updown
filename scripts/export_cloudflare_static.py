@@ -39,9 +39,9 @@ def build_shell() -> None:
     (DIST_DIR / "data").mkdir()
     index_html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
     index_html = index_html.replace(
-        '<script src="/assets/app.js?v=short-term-v1"></script>',
+        '<script src="/assets/app.js?v=medium-term-v1"></script>',
         '<script>window.STATIC_DATA_ONLY = true;</script>\n'
-        '    <script src="/assets/app.js?v=short-term-v1"></script>',
+        '    <script src="/assets/app.js?v=medium-term-v1"></script>',
     )
     (DIST_DIR / "index.html").write_text(index_html, encoding="utf-8")
     shutil.copy2(WEB_DIR / "styles.css", DIST_DIR / "assets" / "styles.css")

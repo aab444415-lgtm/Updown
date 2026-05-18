@@ -181,6 +181,20 @@ class ShortTermScore:
 
 
 @dataclass(frozen=True)
+class MediumTermScore:
+    stock_score: StockScore
+    score: float
+    company_score: float
+    market_score: float
+    chart_score: float
+    news_score: float
+    signal_label: str
+    time_horizon: str
+    reasons: tuple[str, ...]
+    cautions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class RecommendationReport:
     created_at: datetime
     macro_context: str
@@ -189,5 +203,6 @@ class RecommendationReport:
     news_items: tuple[NewsItem, ...]
     early_growth_scores: tuple[EarlyGrowthScore, ...] = ()
     short_term_scores: tuple[ShortTermScore, ...] = ()
+    medium_term_scores: tuple[MediumTermScore, ...] = ()
     macro_snapshot: MacroSnapshot | None = None
     data_quality: DataQuality = field(default_factory=DataQuality)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .models import EarlyGrowthScore, Fundamentals, RecommendationReport, ShortTermScore, StockScore
+from .models import EarlyGrowthScore, Fundamentals, MediumTermScore, RecommendationReport, ShortTermScore, StockScore
 
 
 def render_markdown(
@@ -73,6 +73,14 @@ def render_markdown(
         lines.extend(_render_short_term_stock(rank, item))
         lines.append("")
 
+    lines.append("## 중기 매매 후보")
+    lines.append("")
+    lines.append("기업 데이터, 3개월 시장 흐름, 차트 위치, 산업 이슈로 2주~3개월 관점의 후보를 따로 점수화합니다.")
+    lines.append("")
+    for rank, item in enumerate(report.medium_term_scores[:top_stocks], start=1):
+        lines.extend(_render_medium_term_stock(rank, item))
+        lines.append("")
+
     lines.append("## 저점 성장주 후보")
     lines.append("")
     lines.append("소형/중소형 규모, 매출 성장, 재무 버팀목, 가격 조정 후 반등 가능성을 따로 점수화한 후보입니다.")
@@ -96,6 +104,7 @@ def render_markdown(
         "- 종목 점수: 산업 점수, 기본적 분석, 성장성까지 반영한 밸류에이션, 가격 모멘텀, 핵심/부가 기업 역할을 합산합니다."
     )
     lines.append("- 단기 점수: 뉴스 30%, 시장 데이터 35%, 차트 25%, 기업 데이터 10%를 반영합니다.")
+    lines.append("- 중기 점수: 기업 데이터 30%, 시장 데이터 30%, 차트 25%, 뉴스 15%를 반영합니다.")
     lines.append("- 저점 성장주 점수: 작은 시가총액, 매출 성장, 재무 버팀목, 고점 대비 조정과 단기 반등 여부를 따로 봅니다.")
     lines.append("- 낮은 PER은 단독 매수 근거가 아니며, 이익 정점과 성장 둔화 가능성을 함께 봅니다.")
     lines.append("- 점수는 정답이 아니라 후보 압축용 랭킹입니다.")
@@ -164,6 +173,26 @@ def _render_short_term_stock(rank: int, item: ShortTermScore) -> list[str]:
     )
     lines.append(f"- 종합 판단 참고: {stock_score.decision_grade}, 리스크 {stock_score.risk_level}")
     lines.append("- 단기 근거:")
+    for reason in item.reasons:
+        lines.append(f"  - {reason}")
+    if item.cautions:
+        lines.append("- 확인할 점:")
+        for caution in item.cautions[:4]:
+            lines.append(f"  - {caution}")
+    return lines
+
+
+def _render_medium_term_stock(rank: int, item: MediumTermScore) -> list[str]:
+    stock_score = item.stock_score
+    stock = stock_score.stock
+    lines = [f"### {rank}. {stock.name} ({stock.ticker}) - {item.score:.1f}점 / {item.signal_label}", ""]
+    lines.append(f"- 기간: {item.time_horizon}")
+    lines.append(
+        f"- 세부 점수: 기업 {item.company_score:.1f}, 시장 {item.market_score:.1f}, "
+        f"차트 {item.chart_score:.1f}, 뉴스 {item.news_score:.1f}"
+    )
+    lines.append(f"- 종합 판단 참고: {stock_score.decision_grade}, 리스크 {stock_score.risk_level}")
+    lines.append("- 중기 근거:")
     for reason in item.reasons:
         lines.append(f"  - {reason}")
     if item.cautions:

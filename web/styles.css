@@ -1022,6 +1022,11 @@ main {
   color: #174ea6;
 }
 
+.tag.medium-term {
+  background: #eef7f7;
+  color: #0f766e;
+}
+
 .tag.growth {
   background: #fff8e9;
   color: #815a16;
@@ -1068,6 +1073,10 @@ main {
 }
 
 .short-term-scores {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.medium-term-scores {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 

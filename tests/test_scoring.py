@@ -80,6 +80,7 @@ class ScoringTests(unittest.TestCase):
         self.assertIn("테스트 경고", markdown)
         self.assertIn("## 추천 종목 후보", markdown)
         self.assertIn("## 단기 매매 후보", markdown)
+        self.assertIn("## 중기 매매 후보", markdown)
         self.assertIn("## 저점 성장주 후보", markdown)
 
     def test_report_contains_macro_snapshot(self):
@@ -198,6 +199,53 @@ class ScoringTests(unittest.TestCase):
         self.assertGreater(top.market_score, 70)
         self.assertGreater(top.chart_score, 70)
         self.assertIn(top.signal_label, {"단기 강세 후보", "단기 관심"})
+
+    def test_medium_term_ranking_uses_company_market_chart_and_news(self):
+        industry = INDUSTRIES[0]
+        steady = StockProfile(
+            ticker="STEADY",
+            name="Steady AI",
+            industry=industry.name,
+            role="adjacent",
+            thesis="분기 실적 성장과 3개월 추세가 함께 개선되는 후보입니다.",
+            risks=("고객 투자 지연",),
+            fundamentals=Fundamentals(32.0, 21.0, 18.0, 35.0, 30.0, 22.0, 2_000_000_000),
+            recent_issues=("AI data center 수주와 분기 실적 성장 지속",),
+        )
+        fading = StockProfile(
+            ticker="FADING",
+            name="Fading AI",
+            industry=industry.name,
+            role="adjacent",
+            thesis="중기 추세와 실적 지표가 약한 비교 후보입니다.",
+            risks=("수익성 악화",),
+            fundamentals=Fundamentals(-8.0, -6.0, -5.0, 240.0, 16.0, 15.0, 2_000_000_000),
+        )
+
+        report = build_report(
+            macro_context=DEFAULT_MACRO_CONTEXT,
+            industries=(industry,),
+            stocks=(steady, fading),
+            news_items=(
+                NewsItem(
+                    title="AI data center spending supports Steady AI quarterly growth",
+                    source="Test News",
+                    summary="Semiconductor infrastructure demand remains firm.",
+                ),
+            ),
+            momentums={
+                "STEADY": Momentum(8.0, 20.0, 35.0, -10.0, 65.0),
+                "FADING": Momentum(-18.0, -25.0, -30.0, -42.0, 12.0),
+            },
+        )
+
+        top = report.medium_term_scores[0]
+
+        self.assertEqual(top.stock_score.stock.ticker, "STEADY")
+        self.assertGreater(top.company_score, report.medium_term_scores[1].company_score)
+        self.assertGreater(top.market_score, 70)
+        self.assertGreater(top.chart_score, 70)
+        self.assertIn(top.signal_label, {"중기 강세 후보", "중기 관심"})
 
 
 class ConfigTests(unittest.TestCase):
@@ -399,6 +447,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn("decisionGrade", rows[0]["payload"]["stocks"][0])
         self.assertIn("earlyGrowthCandidates", rows[0]["payload"])
         self.assertIn("shortTermCandidates", rows[0]["payload"])
+        self.assertIn("mediumTermCandidates", rows[0]["payload"])
 
 
 def _annual_fact(start: str, end: str, filed: str, value: float) -> dict:
