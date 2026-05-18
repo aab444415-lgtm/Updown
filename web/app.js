@@ -25,6 +25,7 @@ const elements = {
   warnings: document.querySelector("#warnings"),
   industryList: document.querySelector("#industryList"),
   stockList: document.querySelector("#stockList"),
+  earlyGrowthList: document.querySelector("#earlyGrowthList"),
   industryFilter: document.querySelector("#industryFilter"),
   detailTitle: document.querySelector("#detailTitle"),
   detailMeta: document.querySelector("#detailMeta"),
@@ -56,7 +57,17 @@ const elements = {
   snapshotList: document.querySelector("#snapshotList"),
 };
 
-const PAGE_IDS = new Set(["home", "backtest", "snapshots", "macro", "industries", "stocks", "detail", "news"]);
+const PAGE_IDS = new Set([
+  "home",
+  "backtest",
+  "snapshots",
+  "macro",
+  "industries",
+  "stocks",
+  "early-growth",
+  "detail",
+  "news",
+]);
 
 document.querySelectorAll(".segment").forEach((button) => {
   button.addEventListener("click", () => {
@@ -152,6 +163,7 @@ function render() {
   renderIndustryFilter();
   renderIndustries();
   renderStocks();
+  renderEarlyGrowth();
   renderNews();
   renderOverview();
 }
@@ -379,6 +391,7 @@ function renderStocks() {
           <span class="tag role">${escapeHtml(stock.role)}</span>
           <span class="tag style">${escapeHtml(stock.analysisStyle || "분석")}</span>
           <span class="tag risk">리스크 ${escapeHtml(stock.riskLevel)}</span>
+          ${stock.earlyGrowth ? `<span class="tag growth">${escapeHtml(stock.earlyGrowth.entryLabel)}</span>` : ""}
         </div>
         <div class="stock-scores">
           ${scoreTile("산업", stock.industryScore)}
@@ -401,6 +414,55 @@ function renderStocks() {
   renderDetail();
 }
 
+function renderEarlyGrowth() {
+  if (!elements.earlyGrowthList) return;
+  const candidates = state.report.earlyGrowthCandidates || [];
+  elements.earlyGrowthList.innerHTML = "";
+
+  if (!candidates.length) {
+    elements.earlyGrowthList.innerHTML = `<div class="empty-state">저점 성장주 후보가 없습니다.</div>`;
+    return;
+  }
+
+  candidates.slice(0, 12).forEach((candidate, index) => {
+    const stock = state.report.stocks.find((item) => item.ticker === candidate.ticker) || candidate;
+    const technicalStock = { ...candidate, technical: stock.technical || candidate.technical };
+    const button = document.createElement("button");
+    button.className = `stock-card early-growth-card ${candidate.ticker === state.selectedTicker ? "active" : ""}`;
+    button.type = "button";
+    button.innerHTML = `
+      <div class="stock-card-inner">
+        <div class="stock-head">
+          <h3>${index + 1}. ${escapeHtml(candidate.name)} (${escapeHtml(candidate.ticker)})</h3>
+          <span class="score">${formatScore(candidate.score)}</span>
+        </div>
+        <div class="stock-meta">
+          <span class="tag growth">${escapeHtml(candidate.entryLabel)}</span>
+          <span class="tag">${escapeHtml(candidate.industry)}</span>
+          <span class="tag decision">종합 ${formatScore(candidate.baseScore)}</span>
+          <span class="tag risk">리스크 ${escapeHtml(candidate.riskLevel)}</span>
+          ${technicalStock.technical ? technicalTopBadge(technicalStock) : ""}
+        </div>
+        <p class="early-growth-reason">${escapeHtml((candidate.reasons || [])[0] || pickPrimaryReason(stock))}</p>
+        <div class="stock-scores early-growth-scores">
+          ${scoreTile("규모", candidate.sizeScore)}
+          ${scoreTile("성장", candidate.growthScore)}
+          ${scoreTile("저점", candidate.pullbackScore)}
+          ${scoreTile("재무", candidate.qualityAnchorScore)}
+          ${scoreTile("밸류", candidate.valuationAnchorScore)}
+        </div>
+      </div>
+    `;
+    button.addEventListener("click", () => {
+      state.selectedTicker = candidate.ticker;
+      renderStocks();
+      renderEarlyGrowth();
+      window.location.hash = "detail";
+    });
+    elements.earlyGrowthList.appendChild(button);
+  });
+}
+
 function renderDetail() {
   const stock = state.report.stocks.find((item) => item.ticker === state.selectedTicker);
   if (!stock) return;
@@ -414,6 +476,7 @@ function renderDetail() {
     <span class="tag style">${escapeHtml(stock.analysisStyle || "분석")}</span>
     <span class="tag risk">리스크 ${escapeHtml(stock.riskLevel)}</span>
     <span class="tag valuation">${escapeHtml(stock.valuationLabel)}</span>
+    ${stock.earlyGrowth ? `<span class="tag growth">${escapeHtml(stock.earlyGrowth.entryLabel)}</span>` : ""}
   `;
   elements.detailInsight.textContent = pickPrimaryReason(stock);
   elements.detailScoreGrid.innerHTML = `
@@ -421,15 +484,19 @@ function renderDetail() {
     ${detailScoreTile("기본적 분석", stock.qualityScore)}
     ${detailScoreTile("밸류에이션", stock.valuationScore)}
     ${detailScoreTile("모멘텀", stock.momentumScore)}
+    ${stock.earlyGrowth ? detailScoreTile("저점 성장", stock.earlyGrowth.score) : ""}
   `;
   renderTechnical(stock);
   elements.metricGrid.innerHTML = metricItems(stock).join("");
   elements.reasonList.innerHTML = [
     `투자 판단: ${stock.decisionGrade}`,
+    stock.earlyGrowth ? `저점 성장 분류: ${stock.earlyGrowth.entryLabel} (${formatScore(stock.earlyGrowth.score)}점)` : null,
     `밸류에이션 해석: ${stock.valuationNote || stock.valuationLabel}`,
     `약식 적정 시총 범위: ${formatValuationRange(stock)}`,
+    ...(stock.earlyGrowth?.reasons || []),
     ...stock.reasons,
   ]
+    .filter(Boolean)
     .map((reason) => `<li>${escapeHtml(reason)}</li>`)
     .join("");
   elements.analysisCheckList.innerHTML = (stock.analysisChecks || [])
@@ -441,7 +508,9 @@ function renderDetail() {
   elements.issueList.innerHTML = detailIssues(stock)
     .map((issue) => `<li>${escapeHtml(issue)}</li>`)
     .join("");
-  elements.riskList.innerHTML = stock.cautions.map((risk) => `<li>${escapeHtml(risk)}</li>`).join("");
+  elements.riskList.innerHTML = [...(stock.earlyGrowth?.cautions || []), ...stock.cautions]
+    .map((risk) => `<li>${escapeHtml(risk)}</li>`)
+    .join("");
 }
 
 function renderNews() {

@@ -28,6 +28,9 @@ def create_report(live: bool = False, macro_context: str = DEFAULT_MACRO_CONTEXT
 
 def report_to_dict(report: RecommendationReport) -> dict:
     technical_by_ticker = _technical_by_ticker(report)
+    early_growth_by_ticker = {
+        item.stock_score.stock.ticker.upper(): item for item in report.early_growth_scores
+    }
     return {
         "createdAt": report.created_at.strftime("%Y-%m-%d %H:%M:%S"),
         "macroContext": report.macro_context,
@@ -103,8 +106,25 @@ def report_to_dict(report: RecommendationReport) -> dict:
                 "technical": technical_by_ticker.get(item.stock.ticker.upper()),
                 "country": item.stock.country,
                 "currency": item.stock.currency,
+                "earlyGrowth": _early_growth_to_dict(
+                    early_growth_by_ticker.get(item.stock.ticker.upper())
+                ),
             }
             for item in report.stock_scores
+        ],
+        "earlyGrowthCandidates": [
+            {
+                "ticker": item.stock_score.stock.ticker,
+                "name": item.stock_score.stock.name,
+                "industry": item.stock_score.stock.industry,
+                "country": item.stock_score.stock.country,
+                "currency": item.stock_score.stock.currency,
+                "baseScore": item.stock_score.score,
+                "decisionGrade": item.stock_score.decision_grade,
+                "riskLevel": item.stock_score.risk_level,
+                **_early_growth_to_dict(item),
+            }
+            for item in report.early_growth_scores
         ],
         "news": [
             {
@@ -142,6 +162,22 @@ def _valuation_range_to_dict(item) -> dict:
         "upsideLowPct": valuation_range.upside_low_pct,
         "upsideHighPct": valuation_range.upside_high_pct,
         "note": valuation_range.note,
+    }
+
+
+def _early_growth_to_dict(item) -> dict | None:
+    if item is None:
+        return None
+    return {
+        "score": item.score,
+        "sizeScore": item.size_score,
+        "growthScore": item.growth_score,
+        "pullbackScore": item.pullback_score,
+        "qualityAnchorScore": item.quality_anchor_score,
+        "valuationAnchorScore": item.valuation_anchor_score,
+        "entryLabel": item.entry_label,
+        "reasons": list(item.reasons),
+        "cautions": list(item.cautions),
     }
 
 

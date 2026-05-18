@@ -9,6 +9,7 @@ from .data_sources import average_industry_momentum, momentum_to_score
 from .macro_data import industry_macro_data_score
 from .models import (
     DataQuality,
+    EarlyGrowthScore,
     Fundamentals,
     IndustryProfile,
     IndustryScore,
@@ -50,12 +51,14 @@ def build_report(
         macro_snapshot=macro_snapshot,
     )
     stock_scores = score_stocks(stocks_tuple, industry_scores, momentums)
+    early_growth_scores = score_early_growth_candidates(stock_scores, momentums)
     return RecommendationReport(
         created_at=datetime.now(),
         macro_context=macro_context,
         industry_scores=tuple(sorted(industry_scores, key=lambda item: item.score, reverse=True)),
         stock_scores=tuple(sorted(stock_scores, key=lambda item: item.score, reverse=True)),
         news_items=news_tuple,
+        early_growth_scores=early_growth_scores,
         macro_snapshot=macro_snapshot,
         data_quality=data_quality or DataQuality(),
     )
@@ -172,6 +175,141 @@ def score_stocks(
             )
         )
     return tuple(results)
+
+
+def score_early_growth_candidates(
+    stock_scores: Iterable[StockScore], momentums: dict[str, Momentum]
+) -> tuple[EarlyGrowthScore, ...]:
+    results: list[EarlyGrowthScore] = []
+    for item in stock_scores:
+        stock = item.stock
+        fundamentals = stock.fundamentals
+        momentum = momentums.get(stock.ticker.upper(), Momentum())
+        size = company_size_score(fundamentals.market_cap_usd, fundamentals.market_cap_currency)
+        growth = early_revenue_growth_score(fundamentals.revenue_growth_pct)
+        pullback = pullback_entry_score(momentum)
+        quality_anchor = _early_quality_anchor_score(fundamentals, item.quality_score)
+        valuation_anchor = _early_valuation_anchor_score(item)
+        total = (
+            growth * 0.25
+            + size * 0.27
+            + pullback * 0.23
+            + quality_anchor * 0.15
+            + valuation_anchor * 0.07
+            + item.industry_score * 0.03
+        )
+        total -= _early_growth_penalty(fundamentals, momentum, size, growth, pullback)
+        score = _clamp(total, 0, 100)
+        results.append(
+            EarlyGrowthScore(
+                stock_score=item,
+                score=round(score, 1),
+                size_score=round(size, 1),
+                growth_score=round(growth, 1),
+                pullback_score=round(pullback, 1),
+                quality_anchor_score=round(quality_anchor, 1),
+                valuation_anchor_score=round(valuation_anchor, 1),
+                entry_label=early_growth_entry_label(score, pullback, growth, size),
+                reasons=early_growth_reasons(stock, momentum, size, growth, pullback, quality_anchor),
+                cautions=early_growth_cautions(stock, momentum, size, pullback, valuation_anchor),
+            )
+        )
+    return tuple(sorted(results, key=lambda item: item.score, reverse=True))
+
+
+def early_revenue_growth_score(growth_pct: float | None) -> float:
+    if growth_pct is None or not math.isfinite(growth_pct):
+        return 45
+    return _clamp(_scale(growth_pct, low=0, high=45), 0, 100)
+
+
+def company_size_score(market_cap: float | None, currency: str) -> float:
+    if market_cap is None or not math.isfinite(market_cap) or market_cap <= 0:
+        return 35
+    if currency.upper() == "KRW":
+        if market_cap < 100_000_000_000:
+            return 45
+        if market_cap <= 1_000_000_000_000:
+            return 100
+        if market_cap <= 5_000_000_000_000:
+            return 92
+        if market_cap <= 15_000_000_000_000:
+            return 74
+        if market_cap <= 50_000_000_000_000:
+            return 55
+        if market_cap <= 150_000_000_000_000:
+            return 18
+        return 8
+    if market_cap < 250_000_000:
+        return 45
+    if market_cap <= 2_000_000_000:
+        return 100
+    if market_cap <= 10_000_000_000:
+        return 92
+    if market_cap <= 25_000_000_000:
+        return 74
+    if market_cap <= 50_000_000_000:
+        return 55
+    if market_cap <= 100_000_000_000:
+        return 18
+    return 4
+
+
+def pullback_entry_score(momentum: Momentum) -> float:
+    position = momentum.range_position_pct
+    drawdown = momentum.drawdown_from_high_pct
+    one_month = momentum.one_month_pct
+    three_month = momentum.three_month_pct
+    six_month = momentum.six_month_pct
+    if all(value is None or not math.isfinite(value) for value in (position, drawdown, one_month, three_month, six_month)):
+        return 50
+
+    score = 50.0
+    if position is not None and math.isfinite(position):
+        if 15 <= position <= 55:
+            score += 30
+        elif 0 <= position < 15:
+            score += 18
+        elif 55 < position <= 75:
+            score += 5
+        else:
+            score -= 18
+
+    if drawdown is not None and math.isfinite(drawdown):
+        decline = abs(min(drawdown, 0))
+        if 10 <= decline <= 35:
+            score += 18
+        elif 5 <= decline < 10:
+            score += 8
+        elif 35 < decline <= 55:
+            score += 4
+        elif decline > 55:
+            score -= 18
+
+    if one_month is not None and math.isfinite(one_month):
+        if -8 <= one_month <= 18:
+            score += 8
+        if 0 <= one_month <= 15:
+            score += 6
+        if one_month < -18:
+            score -= 18
+
+    if three_month is not None and math.isfinite(three_month):
+        if -25 <= three_month <= 12:
+            score += 5
+        if three_month < -35:
+            score -= 12
+
+    if (
+        six_month is not None
+        and math.isfinite(six_month)
+        and six_month > 70
+        and position is not None
+        and position > 70
+    ):
+        score -= 22
+
+    return _clamp(score, 0, 100)
 
 
 def quality_score(fundamentals: Fundamentals) -> float:
@@ -421,6 +559,132 @@ def risk_level_for_stock(
     return "낮음"
 
 
+def _early_quality_anchor_score(fundamentals: Fundamentals, base_quality: float) -> float:
+    score = base_quality
+    if fundamentals.operating_margin_pct is not None and math.isfinite(fundamentals.operating_margin_pct):
+        if fundamentals.operating_margin_pct < 0:
+            score -= 14
+        elif fundamentals.operating_margin_pct >= 15:
+            score += 5
+    if fundamentals.free_cash_flow is not None and fundamentals.free_cash_flow < 0:
+        score -= 7
+    if fundamentals.current_ratio_pct is not None and fundamentals.current_ratio_pct >= 160:
+        score += 4
+    return _clamp(score, 0, 100)
+
+
+def _early_valuation_anchor_score(item: StockScore) -> float:
+    score = item.valuation_score
+    upside_high = item.valuation_range.upside_high_pct
+    upside_low = item.valuation_range.upside_low_pct
+    if upside_high is not None and math.isfinite(upside_high):
+        if upside_high >= 30:
+            score += 8
+        elif upside_high < 0:
+            score -= 10
+    if upside_low is not None and math.isfinite(upside_low) and upside_low < -35:
+        score -= 6
+    return _clamp(score, 0, 100)
+
+
+def _early_growth_penalty(
+    fundamentals: Fundamentals,
+    momentum: Momentum,
+    size_score: float,
+    growth_score: float,
+    pullback_score: float,
+) -> float:
+    penalty = 0.0
+    growth = fundamentals.revenue_growth_pct
+    if growth is not None and math.isfinite(growth) and growth < 8:
+        penalty += 9
+    if size_score <= 20:
+        penalty += 18
+    elif size_score <= 35:
+        penalty += 8
+    if pullback_score < 38:
+        penalty += 7
+    if fundamentals.debt_to_equity_pct is not None and fundamentals.debt_to_equity_pct > 220:
+        penalty += 8
+    if fundamentals.operating_margin_pct is not None and fundamentals.operating_margin_pct < -10:
+        penalty += 8
+    if fundamentals.free_cash_flow is not None and fundamentals.free_cash_flow < 0:
+        penalty += 4
+    if growth_score < 35:
+        penalty += 6
+    if (
+        momentum.range_position_pct is not None
+        and momentum.range_position_pct > 80
+        and momentum.six_month_pct is not None
+        and momentum.six_month_pct > 50
+    ):
+        penalty += 10
+    return penalty
+
+
+def early_growth_entry_label(score: float, pullback: float, growth: float, size: float) -> str:
+    if score >= 76 and pullback >= 62 and growth >= 60 and size >= 55:
+        return "저점 성장 후보"
+    if score >= 68 and growth >= 55 and size >= 45:
+        return "분할 관찰"
+    if score >= 58:
+        return "관찰"
+    return "후순위"
+
+
+def early_growth_reasons(
+    stock: StockProfile,
+    momentum: Momentum,
+    size_score: float,
+    growth_score: float,
+    pullback_score: float,
+    quality_anchor: float,
+) -> tuple[str, ...]:
+    fundamentals = stock.fundamentals
+    reasons = [
+        f"규모 점수 {size_score:.1f}/100: {_size_reason(fundamentals.market_cap_usd, fundamentals.market_cap_currency)}",
+        f"매출 성장 점수 {growth_score:.1f}/100: {_growth_check(fundamentals)}",
+        f"저점 진입 점수 {pullback_score:.1f}/100: {_pullback_reason(momentum)}",
+        f"재무 버팀목 {quality_anchor:.1f}/100: 영업이익률과 부채 부담을 함께 반영",
+    ]
+    reasons.extend(stock.recent_issues[:1])
+    return tuple(reasons)
+
+
+def early_growth_cautions(
+    stock: StockProfile,
+    momentum: Momentum,
+    size_score: float,
+    pullback_score: float,
+    valuation_anchor: float,
+) -> tuple[str, ...]:
+    fundamentals = stock.fundamentals
+    cautions: list[str] = []
+    if fundamentals.market_cap_usd is None:
+        cautions.append("시가총액 데이터가 부족해 라이브 모드에서 규모 필터를 다시 확인해야 함")
+    if size_score <= 30:
+        cautions.append("이미 대형주에 가까워 작은 회사 리레이팅 효과는 제한적일 수 있음")
+    if pullback_score < 45:
+        cautions.append("저점/반등 신호가 약해 추격 매수 또는 하락 지속 가능성 확인 필요")
+    if (
+        momentum.range_position_pct is not None
+        and momentum.range_position_pct <= 15
+        and momentum.one_month_pct is not None
+        and momentum.one_month_pct < 0
+    ):
+        cautions.append("가격이 6개월 저점권에 있지만 아직 하락 중일 수 있음")
+    if fundamentals.operating_margin_pct is not None and fundamentals.operating_margin_pct < 0:
+        cautions.append("영업적자 기업은 매출 성장보다 현금 소진 속도를 먼저 확인")
+    if fundamentals.free_cash_flow is not None and fundamentals.free_cash_flow < 0:
+        cautions.append("FCF가 음수라 추가 자금 조달 가능성 확인 필요")
+    if fundamentals.debt_to_equity_pct is not None and fundamentals.debt_to_equity_pct > 180:
+        cautions.append("부채 부담이 높아 금리와 차환 리스크 점검 필요")
+    if valuation_anchor < 45:
+        cautions.append("성장성 대비 밸류에이션 부담이 커 실적 상향 근거 필요")
+    cautions.extend(stock.risks[:1])
+    return tuple(dict.fromkeys(cautions))
+
+
 def valuation_label_for_score(score: float) -> str:
     if score >= 76:
         return "저평가/합리"
@@ -471,6 +735,44 @@ def _stock_reasons(
     ]
     reasons.extend(stock.recent_issues[:1])
     return tuple(reasons)
+
+
+def _size_reason(market_cap: float | None, currency: str) -> str:
+    if market_cap is None or not math.isfinite(market_cap):
+        return "시가총액 데이터 부족"
+    size_text = _compact_market_cap(market_cap, currency)
+    particle = "으로" if currency.upper() == "KRW" else "로"
+    score = company_size_score(market_cap, currency)
+    if score >= 90:
+        return f"시가총액 {size_text}{particle} 소형/중소형 성장주 구간"
+    if score >= 55:
+        return f"시가총액 {size_text}{particle} 중형 성장주 구간"
+    if score <= 12:
+        return f"시가총액 {size_text}{particle} 이미 대형주 구간"
+    return f"시가총액 {size_text}{particle} 작은 회사 프리미엄은 제한적"
+
+
+def _pullback_reason(momentum: Momentum) -> str:
+    position = momentum.range_position_pct
+    drawdown = momentum.drawdown_from_high_pct
+    one_month = momentum.one_month_pct
+    if position is None and drawdown is None and one_month is None:
+        return "가격 위치 데이터 부족으로 중립 처리"
+
+    parts: list[str] = []
+    if position is not None and math.isfinite(position):
+        if position <= 35:
+            zone = "저점권"
+        elif position <= 65:
+            zone = "중단 박스권"
+        else:
+            zone = "고점권"
+        parts.append(f"6개월 가격 위치 {position:.1f}% ({zone})")
+    if drawdown is not None and math.isfinite(drawdown):
+        parts.append(f"고점 대비 {drawdown:.1f}%")
+    if one_month is not None and math.isfinite(one_month):
+        parts.append(f"1개월 {one_month:.1f}%")
+    return ", ".join(parts)
 
 
 def _growth_check(fundamentals: Fundamentals) -> str:
@@ -632,6 +934,16 @@ def _compact_amount(value: float) -> str:
     if abs_value >= 1_000_000:
         return f"{sign}{abs_value / 1_000_000:.0f}백만"
     return f"{value:,.0f}"
+
+
+def _compact_market_cap(value: float, currency: str) -> str:
+    if currency.upper() == "KRW":
+        if value >= 1_000_000_000_000:
+            return f"{value / 1_000_000_000_000:.1f}조원"
+        return f"{value / 100_000_000:.0f}억원"
+    if value >= 1_000_000_000_000:
+        return f"${value / 1_000_000_000_000:.2f}T"
+    return f"${value / 1_000_000_000:.1f}B"
 
 
 def _range_text(low: float | None, high: float | None, suffix: str = "") -> str:

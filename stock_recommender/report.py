@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .models import Fundamentals, RecommendationReport, StockScore
+from .models import EarlyGrowthScore, Fundamentals, RecommendationReport, StockScore
 
 
 def render_markdown(
@@ -65,6 +65,14 @@ def render_markdown(
         lines.extend(_render_stock(rank, item))
         lines.append("")
 
+    lines.append("## 저점 성장주 후보")
+    lines.append("")
+    lines.append("소형/중소형 규모, 매출 성장, 재무 버팀목, 가격 조정 후 반등 가능성을 따로 점수화한 후보입니다.")
+    lines.append("")
+    for rank, item in enumerate(report.early_growth_scores[:top_stocks], start=1):
+        lines.extend(_render_early_growth_stock(rank, item))
+        lines.append("")
+
     if report.news_items:
         lines.append("## 참고 뉴스")
         lines.append("")
@@ -79,6 +87,7 @@ def render_markdown(
     lines.append(
         "- 종목 점수: 산업 점수, 기본적 분석, 성장성까지 반영한 밸류에이션, 가격 모멘텀, 핵심/부가 기업 역할을 합산합니다."
     )
+    lines.append("- 저점 성장주 점수: 작은 시가총액, 매출 성장, 재무 버팀목, 고점 대비 조정과 단기 반등 여부를 따로 봅니다.")
     lines.append("- 낮은 PER은 단독 매수 근거가 아니며, 이익 정점과 성장 둔화 가능성을 함께 봅니다.")
     lines.append("- 점수는 정답이 아니라 후보 압축용 랭킹입니다.")
     return "\n".join(lines)
@@ -111,6 +120,27 @@ def _render_stock(rank: int, item: StockScore) -> list[str]:
     lines.append("- 2차적 사고 체크:")
     for check in item.second_order_checks:
         lines.append(f"  - {check}")
+    return lines
+
+
+def _render_early_growth_stock(rank: int, item: EarlyGrowthScore) -> list[str]:
+    stock_score = item.stock_score
+    stock = stock_score.stock
+    lines = [f"### {rank}. {stock.name} ({stock.ticker}) - {item.score:.1f}점 / {item.entry_label}", ""]
+    lines.append(f"- 기존 종합 판단: {stock_score.decision_grade}, 리스크 {stock_score.risk_level}")
+    lines.append(
+        f"- 세부 점수: 규모 {item.size_score:.1f}, 성장 {item.growth_score:.1f}, "
+        f"저점 진입 {item.pullback_score:.1f}, 재무 {item.quality_anchor_score:.1f}, "
+        f"밸류 {item.valuation_anchor_score:.1f}"
+    )
+    lines.append(f"- 주요 지표: {_format_fundamentals(stock.fundamentals)}")
+    lines.append("- 후보 근거:")
+    for reason in item.reasons:
+        lines.append(f"  - {reason}")
+    if item.cautions:
+        lines.append("- 확인할 점:")
+        for caution in item.cautions[:4]:
+            lines.append(f"  - {caution}")
     return lines
 
 

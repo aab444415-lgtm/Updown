@@ -61,7 +61,7 @@ def snapshot_history(limit: int = 30) -> dict:
 def report_to_snapshot_payload(report: RecommendationReport, mode: str) -> dict:
     created_at = report.created_at
     return {
-        "version": 4,
+        "version": 5,
         "mode": mode,
         "snapshotDate": created_at.date().isoformat(),
         "createdAt": created_at.isoformat(),
@@ -138,6 +138,27 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str) -> dict:
                 },
             }
             for item in report.stock_scores
+        ],
+        "earlyGrowthCandidates": [
+            {
+                "ticker": item.stock_score.stock.ticker,
+                "name": item.stock_score.stock.name,
+                "country": item.stock_score.stock.country,
+                "industry": item.stock_score.stock.industry,
+                "score": item.score,
+                "baseScore": item.stock_score.score,
+                "entryLabel": item.entry_label,
+                "sizeScore": item.size_score,
+                "growthScore": item.growth_score,
+                "pullbackScore": item.pullback_score,
+                "qualityAnchorScore": item.quality_anchor_score,
+                "valuationAnchorScore": item.valuation_anchor_score,
+                "decisionGrade": item.stock_score.decision_grade,
+                "riskLevel": item.stock_score.risk_level,
+                "reasons": list(item.reasons),
+                "cautions": list(item.cautions),
+            }
+            for item in report.early_growth_scores
         ],
         "news": [
             {

@@ -378,10 +378,16 @@ def _price_on_or_before(points: tuple[PricePoint, ...], target: date) -> float |
 
 def _momentum_until(points: tuple[PricePoint, ...], target: date) -> Momentum:
     closes = [point.close for point in points if point.date <= target]
+    recent = closes[-126:] if len(closes) > 126 else closes
+    latest = recent[-1] if recent else None
+    high = max(recent) if recent else None
+    low = min(recent) if recent else None
     return Momentum(
         one_month_pct=_lookback_return(closes, 21),
         three_month_pct=_lookback_return(closes, 63),
         six_month_pct=_lookback_return(closes, 126),
+        drawdown_from_high_pct=_pct_from_high(latest, high),
+        range_position_pct=_range_position(latest, low, high),
     )
 
 
@@ -401,6 +407,20 @@ def _period_return(points: tuple[PricePoint, ...], start: date, end: date) -> fl
     if start_price is None or end_price is None or start_price <= 0:
         return None
     return ((end_price / start_price) - 1) * 100
+
+
+def _pct_from_high(latest: float | None, high: float | None) -> float | None:
+    if latest is None or high is None or high <= 0:
+        return None
+    return ((latest / high) - 1) * 100
+
+
+def _range_position(latest: float | None, low: float | None, high: float | None) -> float | None:
+    if latest is None or low is None or high is None:
+        return None
+    if high <= low:
+        return 50.0
+    return max(0.0, min(100.0, (latest - low) / (high - low) * 100))
 
 
 def _compound_return(returns: Iterable[float]) -> float:

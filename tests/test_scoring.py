@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 from stock_recommender.backtest import PricePoint, run_backtest
 from stock_recommender.config import configured_source_names, load_config, missing_optional_source_names
 from stock_recommender.macro_data import industry_macro_data_score
-from stock_recommender.models import DataQuality, Fundamentals, MacroIndicator, MacroSnapshot
+from stock_recommender.models import DataQuality, Fundamentals, MacroIndicator, MacroSnapshot, Momentum, StockProfile
 from stock_recommender.opendart_financials import extract_opendart_fundamentals
 from stock_recommender.report import render_markdown
 from stock_recommender.scoring import build_report, decision_grade_for_stock, quality_score, valuation_score
@@ -79,6 +79,7 @@ class ScoringTests(unittest.TestCase):
         self.assertIn("## 데이터 품질", markdown)
         self.assertIn("테스트 경고", markdown)
         self.assertIn("## 추천 종목 후보", markdown)
+        self.assertIn("## 저점 성장주 후보", markdown)
 
     def test_report_contains_macro_snapshot(self):
         snapshot = MacroSnapshot(
@@ -113,6 +114,42 @@ class ScoringTests(unittest.TestCase):
         ai_score = industry_macro_data_score("AI 반도체 및 데이터센터", snapshot)
 
         self.assertGreater(power_score, ai_score)
+
+    def test_early_growth_ranking_prefers_small_growth_pullback(self):
+        industry = INDUSTRIES[0]
+        small_growth = StockProfile(
+            ticker="SMALL",
+            name="Small Growth",
+            industry=industry.name,
+            role="adjacent",
+            thesis="작은 시가총액과 높은 매출 성장을 가진 후보입니다.",
+            risks=("소형주 변동성",),
+            fundamentals=Fundamentals(42.0, 18.0, 16.0, 20.0, 28.0, 22.0, 1_200_000_000),
+        )
+        mega_growth = StockProfile(
+            ticker="MEGA",
+            name="Mega Growth",
+            industry=industry.name,
+            role="core",
+            thesis="이미 대형주가 된 성장 기업입니다.",
+            risks=("고평가",),
+            fundamentals=Fundamentals(42.0, 30.0, 30.0, 10.0, 45.0, 35.0, 1_000_000_000_000),
+        )
+
+        report = build_report(
+            macro_context=DEFAULT_MACRO_CONTEXT,
+            industries=(industry,),
+            stocks=(small_growth, mega_growth),
+            news_items=(),
+            momentums={
+                "SMALL": Momentum(4.0, -10.0, -12.0, -20.0, 35.0),
+                "MEGA": Momentum(28.0, 45.0, 82.0, 0.0, 100.0),
+            },
+        )
+
+        self.assertEqual(report.early_growth_scores[0].stock_score.stock.ticker, "SMALL")
+        self.assertGreater(report.early_growth_scores[0].pullback_score, 70)
+        self.assertLess(report.early_growth_scores[1].size_score, 20)
 
 
 class ConfigTests(unittest.TestCase):
@@ -312,6 +349,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["payload"]["stocks"][0]["ticker"], payload["stocks"][0]["ticker"])
         self.assertIn("decisionGrade", rows[0]["payload"]["stocks"][0])
+        self.assertIn("earlyGrowthCandidates", rows[0]["payload"])
 
 
 def _annual_fact(start: str, end: str, filed: str, value: float) -> dict:

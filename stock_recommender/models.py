@@ -37,6 +37,8 @@ class Momentum:
     one_month_pct: float | None = None
     three_month_pct: float | None = None
     six_month_pct: float | None = None
+    drawdown_from_high_pct: float | None = None
+    range_position_pct: float | None = None
 
 
 @dataclass(frozen=True)
@@ -151,11 +153,26 @@ class StockScore:
 
 
 @dataclass(frozen=True)
+class EarlyGrowthScore:
+    stock_score: StockScore
+    score: float
+    size_score: float
+    growth_score: float
+    pullback_score: float
+    quality_anchor_score: float
+    valuation_anchor_score: float
+    entry_label: str
+    reasons: tuple[str, ...]
+    cautions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class RecommendationReport:
     created_at: datetime
     macro_context: str
     industry_scores: tuple[IndustryScore, ...]
     stock_scores: tuple[StockScore, ...]
     news_items: tuple[NewsItem, ...]
+    early_growth_scores: tuple[EarlyGrowthScore, ...] = ()
     macro_snapshot: MacroSnapshot | None = None
     data_quality: DataQuality = field(default_factory=DataQuality)

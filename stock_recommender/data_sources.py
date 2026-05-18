@@ -110,10 +110,15 @@ def fetch_momentum(ticker: str, timeout: float = 8.0) -> Momentum:
     if len(closes) < 22:
         return Momentum()
 
+    latest = closes[-1]
+    high = max(closes)
+    low = min(closes)
     return Momentum(
         one_month_pct=_pct_change(closes, 21),
         three_month_pct=_pct_change(closes, 63),
         six_month_pct=_pct_change(closes, min(126, len(closes) - 1)),
+        drawdown_from_high_pct=_pct_from_high(latest, high),
+        range_position_pct=_range_position(latest, low, high),
     )
 
 
@@ -161,6 +166,18 @@ def _pct_change(values: list[float], lookback: int) -> float | None:
     if start <= 0:
         return None
     return ((end / start) - 1) * 100
+
+
+def _pct_from_high(latest: float, high: float) -> float | None:
+    if high <= 0:
+        return None
+    return ((latest / high) - 1) * 100
+
+
+def _range_position(latest: float, low: float, high: float) -> float | None:
+    if high <= low:
+        return 50.0
+    return _clamp((latest - low) / (high - low) * 100, 0, 100)
 
 
 def _open_url(url: str, timeout: float):

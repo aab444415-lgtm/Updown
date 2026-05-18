@@ -1017,6 +1017,11 @@ main {
   color: #5b21b6;
 }
 
+.tag.growth {
+  background: #fff8e9;
+  color: #815a16;
+}
+
 .stock-scores {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1042,6 +1047,23 @@ main {
   display: block;
   margin-top: 3px;
   font-size: 17px;
+}
+
+.early-growth-note {
+  margin: -4px 0 16px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.early-growth-reason {
+  margin: 12px 0 0;
+  color: #334155;
+  font-weight: 750;
+  line-height: 1.5;
+}
+
+.early-growth-scores {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .detail-hero {
@@ -1099,7 +1121,7 @@ main {
 
 .detail-score-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   margin-top: 14px;
 }
