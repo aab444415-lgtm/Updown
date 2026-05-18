@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 from stock_recommender.backtest import PricePoint, run_backtest
 from stock_recommender.config import configured_source_names, load_config, missing_optional_source_names
 from stock_recommender.macro_data import industry_macro_data_score
-from stock_recommender.models import DataQuality, Fundamentals, MacroIndicator, MacroSnapshot, Momentum, StockProfile
+from stock_recommender.models import DataQuality, Fundamentals, MacroIndicator, MacroSnapshot, Momentum, NewsItem, StockProfile
 from stock_recommender.opendart_financials import extract_opendart_fundamentals
 from stock_recommender.report import render_markdown
 from stock_recommender.scoring import build_report, decision_grade_for_stock, quality_score, valuation_score
@@ -79,6 +79,7 @@ class ScoringTests(unittest.TestCase):
         self.assertIn("## 데이터 품질", markdown)
         self.assertIn("테스트 경고", markdown)
         self.assertIn("## 추천 종목 후보", markdown)
+        self.assertIn("## 단기 매매 후보", markdown)
         self.assertIn("## 저점 성장주 후보", markdown)
 
     def test_report_contains_macro_snapshot(self):
@@ -150,6 +151,53 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(report.early_growth_scores[0].stock_score.stock.ticker, "SMALL")
         self.assertGreater(report.early_growth_scores[0].pullback_score, 70)
         self.assertLess(report.early_growth_scores[1].size_score, 20)
+
+    def test_short_term_ranking_uses_news_market_chart_and_company_data(self):
+        industry = INDUSTRIES[0]
+        strong = StockProfile(
+            ticker="FAST",
+            name="Fast AI",
+            industry=industry.name,
+            role="adjacent",
+            thesis="단기 AI 인프라 수주 모멘텀을 가진 후보입니다.",
+            risks=("단기 급등 변동성",),
+            fundamentals=Fundamentals(36.0, 18.0, 16.0, 30.0, 28.0, 22.0, 1_500_000_000),
+            recent_issues=("AI chip 공급 계약과 데이터센터 고객 확대",),
+        )
+        weak = StockProfile(
+            ticker="SLOW",
+            name="Slow AI",
+            industry=industry.name,
+            role="adjacent",
+            thesis="실적과 가격 흐름이 약한 비교 후보입니다.",
+            risks=("실적 둔화",),
+            fundamentals=Fundamentals(-5.0, -8.0, -4.0, 260.0, 20.0, 18.0, 1_500_000_000),
+        )
+
+        report = build_report(
+            macro_context=DEFAULT_MACRO_CONTEXT,
+            industries=(industry,),
+            stocks=(strong, weak),
+            news_items=(
+                NewsItem(
+                    title="Fast AI wins AI chip data center contract",
+                    source="Test News",
+                    summary="GPU accelerator order expands near-term demand.",
+                ),
+            ),
+            momentums={
+                "FAST": Momentum(12.0, 24.0, 42.0, -8.0, 72.0),
+                "SLOW": Momentum(-18.0, -28.0, -35.0, -45.0, 8.0),
+            },
+        )
+
+        top = report.short_term_scores[0]
+
+        self.assertEqual(top.stock_score.stock.ticker, "FAST")
+        self.assertGreater(top.news_score, report.short_term_scores[1].news_score)
+        self.assertGreater(top.market_score, 70)
+        self.assertGreater(top.chart_score, 70)
+        self.assertIn(top.signal_label, {"단기 강세 후보", "단기 관심"})
 
 
 class ConfigTests(unittest.TestCase):
@@ -350,6 +398,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(rows[0]["payload"]["stocks"][0]["ticker"], payload["stocks"][0]["ticker"])
         self.assertIn("decisionGrade", rows[0]["payload"]["stocks"][0])
         self.assertIn("earlyGrowthCandidates", rows[0]["payload"])
+        self.assertIn("shortTermCandidates", rows[0]["payload"])
 
 
 def _annual_fact(start: str, end: str, filed: str, value: float) -> dict:

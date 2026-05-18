@@ -25,6 +25,7 @@ const elements = {
   warnings: document.querySelector("#warnings"),
   industryList: document.querySelector("#industryList"),
   stockList: document.querySelector("#stockList"),
+  shortTermList: document.querySelector("#shortTermList"),
   earlyGrowthList: document.querySelector("#earlyGrowthList"),
   industryFilter: document.querySelector("#industryFilter"),
   detailTitle: document.querySelector("#detailTitle"),
@@ -64,6 +65,7 @@ const PAGE_IDS = new Set([
   "macro",
   "industries",
   "stocks",
+  "short-term",
   "early-growth",
   "detail",
   "news",
@@ -163,6 +165,7 @@ function render() {
   renderIndustryFilter();
   renderIndustries();
   renderStocks();
+  renderShortTerm();
   renderEarlyGrowth();
   renderNews();
   renderOverview();
@@ -391,6 +394,7 @@ function renderStocks() {
           <span class="tag role">${escapeHtml(stock.role)}</span>
           <span class="tag style">${escapeHtml(stock.analysisStyle || "분석")}</span>
           <span class="tag risk">리스크 ${escapeHtml(stock.riskLevel)}</span>
+          ${stock.shortTerm ? `<span class="tag short-term">${escapeHtml(stock.shortTerm.signalLabel)}</span>` : ""}
           ${stock.earlyGrowth ? `<span class="tag growth">${escapeHtml(stock.earlyGrowth.entryLabel)}</span>` : ""}
         </div>
         <div class="stock-scores">
@@ -412,6 +416,55 @@ function renderStocks() {
   });
 
   renderDetail();
+}
+
+function renderShortTerm() {
+  if (!elements.shortTermList) return;
+  const candidates = state.report.shortTermCandidates || [];
+  elements.shortTermList.innerHTML = "";
+
+  if (!candidates.length) {
+    elements.shortTermList.innerHTML = `<div class="empty-state">단기 후보가 없습니다.</div>`;
+    return;
+  }
+
+  candidates.slice(0, 12).forEach((candidate, index) => {
+    const stock = state.report.stocks.find((item) => item.ticker === candidate.ticker) || candidate;
+    const technicalStock = { ...candidate, technical: stock.technical || candidate.technical };
+    const button = document.createElement("button");
+    button.className = `stock-card short-term-card ${candidate.ticker === state.selectedTicker ? "active" : ""}`;
+    button.type = "button";
+    button.innerHTML = `
+      <div class="stock-card-inner">
+        <div class="stock-head">
+          <h3>${index + 1}. ${escapeHtml(candidate.name)} (${escapeHtml(candidate.ticker)})</h3>
+          <span class="score">${formatScore(candidate.score)}</span>
+        </div>
+        <div class="stock-meta">
+          <span class="tag short-term">${escapeHtml(candidate.signalLabel)}</span>
+          <span class="tag">${escapeHtml(candidate.industry)}</span>
+          <span class="tag decision">${escapeHtml(candidate.timeHorizon || "당일~2주")}</span>
+          <span class="tag risk">리스크 ${escapeHtml(candidate.riskLevel)}</span>
+          ${technicalStock.technical ? technicalTopBadge(technicalStock) : ""}
+        </div>
+        <p class="candidate-reason">${escapeHtml((candidate.reasons || [])[0] || pickPrimaryReason(stock))}</p>
+        <div class="stock-scores short-term-scores">
+          ${scoreTile("뉴스", candidate.newsScore)}
+          ${scoreTile("시장", candidate.marketScore)}
+          ${scoreTile("차트", candidate.chartScore)}
+          ${scoreTile("기업", candidate.companyScore)}
+        </div>
+      </div>
+    `;
+    button.addEventListener("click", () => {
+      state.selectedTicker = candidate.ticker;
+      renderStocks();
+      renderShortTerm();
+      renderEarlyGrowth();
+      window.location.hash = "detail";
+    });
+    elements.shortTermList.appendChild(button);
+  });
 }
 
 function renderEarlyGrowth() {
@@ -443,7 +496,7 @@ function renderEarlyGrowth() {
           <span class="tag risk">리스크 ${escapeHtml(candidate.riskLevel)}</span>
           ${technicalStock.technical ? technicalTopBadge(technicalStock) : ""}
         </div>
-        <p class="early-growth-reason">${escapeHtml((candidate.reasons || [])[0] || pickPrimaryReason(stock))}</p>
+        <p class="candidate-reason">${escapeHtml((candidate.reasons || [])[0] || pickPrimaryReason(stock))}</p>
         <div class="stock-scores early-growth-scores">
           ${scoreTile("규모", candidate.sizeScore)}
           ${scoreTile("성장", candidate.growthScore)}
@@ -476,6 +529,7 @@ function renderDetail() {
     <span class="tag style">${escapeHtml(stock.analysisStyle || "분석")}</span>
     <span class="tag risk">리스크 ${escapeHtml(stock.riskLevel)}</span>
     <span class="tag valuation">${escapeHtml(stock.valuationLabel)}</span>
+    ${stock.shortTerm ? `<span class="tag short-term">${escapeHtml(stock.shortTerm.signalLabel)}</span>` : ""}
     ${stock.earlyGrowth ? `<span class="tag growth">${escapeHtml(stock.earlyGrowth.entryLabel)}</span>` : ""}
   `;
   elements.detailInsight.textContent = pickPrimaryReason(stock);
@@ -484,15 +538,18 @@ function renderDetail() {
     ${detailScoreTile("기본적 분석", stock.qualityScore)}
     ${detailScoreTile("밸류에이션", stock.valuationScore)}
     ${detailScoreTile("모멘텀", stock.momentumScore)}
+    ${stock.shortTerm ? detailScoreTile("단기", stock.shortTerm.score) : ""}
     ${stock.earlyGrowth ? detailScoreTile("저점 성장", stock.earlyGrowth.score) : ""}
   `;
   renderTechnical(stock);
   elements.metricGrid.innerHTML = metricItems(stock).join("");
   elements.reasonList.innerHTML = [
     `투자 판단: ${stock.decisionGrade}`,
+    stock.shortTerm ? `단기 분류: ${stock.shortTerm.signalLabel} (${formatScore(stock.shortTerm.score)}점, ${stock.shortTerm.timeHorizon})` : null,
     stock.earlyGrowth ? `저점 성장 분류: ${stock.earlyGrowth.entryLabel} (${formatScore(stock.earlyGrowth.score)}점)` : null,
     `밸류에이션 해석: ${stock.valuationNote || stock.valuationLabel}`,
     `약식 적정 시총 범위: ${formatValuationRange(stock)}`,
+    ...(stock.shortTerm?.reasons || []),
     ...(stock.earlyGrowth?.reasons || []),
     ...stock.reasons,
   ]
@@ -508,7 +565,7 @@ function renderDetail() {
   elements.issueList.innerHTML = detailIssues(stock)
     .map((issue) => `<li>${escapeHtml(issue)}</li>`)
     .join("");
-  elements.riskList.innerHTML = [...(stock.earlyGrowth?.cautions || []), ...stock.cautions]
+  elements.riskList.innerHTML = [...(stock.shortTerm?.cautions || []), ...(stock.earlyGrowth?.cautions || []), ...stock.cautions]
     .map((risk) => `<li>${escapeHtml(risk)}</li>`)
     .join("");
 }

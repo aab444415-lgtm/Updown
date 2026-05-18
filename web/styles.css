@@ -1017,6 +1017,11 @@ main {
   color: #5b21b6;
 }
 
+.tag.short-term {
+  background: #eef5ff;
+  color: #174ea6;
+}
+
 .tag.growth {
   background: #fff8e9;
   color: #815a16;
@@ -1049,17 +1054,21 @@ main {
   font-size: 17px;
 }
 
-.early-growth-note {
+.candidate-note {
   margin: -4px 0 16px;
   color: var(--muted);
   line-height: 1.55;
 }
 
-.early-growth-reason {
+.candidate-reason {
   margin: 12px 0 0;
   color: #334155;
   font-weight: 750;
   line-height: 1.5;
+}
+
+.short-term-scores {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .early-growth-scores {
@@ -1121,7 +1130,7 @@ main {
 
 .detail-score-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
   margin-top: 14px;
 }

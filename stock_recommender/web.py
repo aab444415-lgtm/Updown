@@ -31,6 +31,9 @@ def report_to_dict(report: RecommendationReport) -> dict:
     early_growth_by_ticker = {
         item.stock_score.stock.ticker.upper(): item for item in report.early_growth_scores
     }
+    short_term_by_ticker = {
+        item.stock_score.stock.ticker.upper(): item for item in report.short_term_scores
+    }
     return {
         "createdAt": report.created_at.strftime("%Y-%m-%d %H:%M:%S"),
         "macroContext": report.macro_context,
@@ -109,8 +112,25 @@ def report_to_dict(report: RecommendationReport) -> dict:
                 "earlyGrowth": _early_growth_to_dict(
                     early_growth_by_ticker.get(item.stock.ticker.upper())
                 ),
+                "shortTerm": _short_term_to_dict(
+                    short_term_by_ticker.get(item.stock.ticker.upper())
+                ),
             }
             for item in report.stock_scores
+        ],
+        "shortTermCandidates": [
+            {
+                "ticker": item.stock_score.stock.ticker,
+                "name": item.stock_score.stock.name,
+                "industry": item.stock_score.stock.industry,
+                "country": item.stock_score.stock.country,
+                "currency": item.stock_score.stock.currency,
+                "baseScore": item.stock_score.score,
+                "decisionGrade": item.stock_score.decision_grade,
+                "riskLevel": item.stock_score.risk_level,
+                **_short_term_to_dict(item),
+            }
+            for item in report.short_term_scores
         ],
         "earlyGrowthCandidates": [
             {
@@ -176,6 +196,22 @@ def _early_growth_to_dict(item) -> dict | None:
         "qualityAnchorScore": item.quality_anchor_score,
         "valuationAnchorScore": item.valuation_anchor_score,
         "entryLabel": item.entry_label,
+        "reasons": list(item.reasons),
+        "cautions": list(item.cautions),
+    }
+
+
+def _short_term_to_dict(item) -> dict | None:
+    if item is None:
+        return None
+    return {
+        "score": item.score,
+        "newsScore": item.news_score,
+        "marketScore": item.market_score,
+        "chartScore": item.chart_score,
+        "companyScore": item.company_score,
+        "signalLabel": item.signal_label,
+        "timeHorizon": item.time_horizon,
         "reasons": list(item.reasons),
         "cautions": list(item.cautions),
     }

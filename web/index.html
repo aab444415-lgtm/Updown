@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>주식 추천 대시보드</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/assets/styles.css?v=early-growth-v1" />
+    <link rel="stylesheet" href="/assets/styles.css?v=short-term-v1" />
   </head>
   <body>
     <header class="topbar">
@@ -30,6 +30,7 @@
         <a class="page-tab" href="#macro" data-page-link="macro">시장 배경</a>
         <a class="page-tab" href="#industries" data-page-link="industries">산업</a>
         <a class="page-tab" href="#stocks" data-page-link="stocks">종목</a>
+        <a class="page-tab" href="#short-term" data-page-link="short-term">단기</a>
         <a class="page-tab" href="#early-growth" data-page-link="early-growth">저점 성장</a>
         <a class="page-tab" href="#detail" data-page-link="detail">종목 상세</a>
         <a class="page-tab" href="#news" data-page-link="news">뉴스</a>
@@ -115,13 +116,18 @@
             <strong>종목 상세</strong>
             <small>회계 지표, 가격 차트, 추천 근거</small>
           </a>
-          <a href="#early-growth">
+          <a href="#short-term">
             <span>07</span>
+            <strong>단기 매매 후보</strong>
+            <small>뉴스, 시장 데이터, 차트, 기업 점수</small>
+          </a>
+          <a href="#early-growth">
+            <span>08</span>
             <strong>저점 성장주 후보</strong>
             <small>소형 성장성과 가격 조정 구간</small>
           </a>
           <a href="#news">
-            <span>08</span>
+            <span>09</span>
             <strong>참고 뉴스</strong>
             <small>분석에 참고한 뉴스 목록</small>
           </a>
@@ -215,13 +221,26 @@
         </div>
       </section>
 
+      <section class="page-view panel-page" data-page="short-term" aria-label="단기 매매 후보">
+        <div class="panel">
+          <div class="section-title">
+            <p class="eyebrow">Short Term</p>
+            <h2>단기 매매 후보</h2>
+          </div>
+          <p class="candidate-note">
+            뉴스 30%, 시장 데이터 35%, 차트 25%, 기업 데이터 10%로 당일~2주 관점의 후보를 정렬합니다.
+          </p>
+          <div class="stock-list" id="shortTermList"></div>
+        </div>
+      </section>
+
       <section class="page-view panel-page" data-page="early-growth" aria-label="저점 성장주 후보">
         <div class="panel">
           <div class="section-title">
             <p class="eyebrow">Early Growth</p>
             <h2>저점 성장주 후보</h2>
           </div>
-          <p class="early-growth-note">
+          <p class="candidate-note">
             소형/중소형 규모, 매출 성장, 재무 버팀목, 가격 조정 후 반등 가능성을 별도 점수로 정렬합니다.
           </p>
           <div class="stock-list" id="earlyGrowthList"></div>
@@ -294,6 +313,6 @@
     </main>
 
     <div class="loading" id="loading" aria-live="polite">데이터 불러오는 중</div>
-    <script src="/assets/app.js?v=early-growth-v1"></script>
+    <script src="/assets/app.js?v=short-term-v1"></script>
   </body>
 </html>
