@@ -1027,6 +1027,11 @@ main {
   color: #0f766e;
 }
 
+.tag.long-term {
+  background: #f0f9ff;
+  color: #075985;
+}
+
 .tag.growth {
   background: #fff8e9;
   color: #815a16;
@@ -1077,6 +1082,10 @@ main {
 }
 
 .medium-term-scores {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.long-term-scores {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 

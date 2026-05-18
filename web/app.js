@@ -27,6 +27,7 @@ const elements = {
   stockList: document.querySelector("#stockList"),
   shortTermList: document.querySelector("#shortTermList"),
   mediumTermList: document.querySelector("#mediumTermList"),
+  longTermList: document.querySelector("#longTermList"),
   earlyGrowthList: document.querySelector("#earlyGrowthList"),
   industryFilter: document.querySelector("#industryFilter"),
   detailTitle: document.querySelector("#detailTitle"),
@@ -68,6 +69,7 @@ const PAGE_IDS = new Set([
   "stocks",
   "short-term",
   "medium-term",
+  "long-term",
   "early-growth",
   "detail",
   "news",
@@ -169,6 +171,7 @@ function render() {
   renderStocks();
   renderShortTerm();
   renderMediumTerm();
+  renderLongTerm();
   renderEarlyGrowth();
   renderNews();
   renderOverview();
@@ -399,6 +402,7 @@ function renderStocks() {
           <span class="tag risk">리스크 ${escapeHtml(stock.riskLevel)}</span>
           ${stock.shortTerm ? `<span class="tag short-term">${escapeHtml(stock.shortTerm.signalLabel)}</span>` : ""}
           ${stock.mediumTerm ? `<span class="tag medium-term">${escapeHtml(stock.mediumTerm.signalLabel)}</span>` : ""}
+          ${stock.longTerm ? `<span class="tag long-term">${escapeHtml(stock.longTerm.signalLabel)}</span>` : ""}
           ${stock.earlyGrowth ? `<span class="tag growth">${escapeHtml(stock.earlyGrowth.entryLabel)}</span>` : ""}
         </div>
         <div class="stock-scores">
@@ -420,6 +424,57 @@ function renderStocks() {
   });
 
   renderDetail();
+}
+
+function renderLongTerm() {
+  if (!elements.longTermList) return;
+  const candidates = state.report.longTermCandidates || [];
+  elements.longTermList.innerHTML = "";
+
+  if (!candidates.length) {
+    elements.longTermList.innerHTML = `<div class="empty-state">장기 후보가 없습니다.</div>`;
+    return;
+  }
+
+  candidates.slice(0, 12).forEach((candidate, index) => {
+    const stock = state.report.stocks.find((item) => item.ticker === candidate.ticker) || candidate;
+    const technicalStock = { ...candidate, technical: stock.technical || candidate.technical };
+    const button = document.createElement("button");
+    button.className = `stock-card long-term-card ${candidate.ticker === state.selectedTicker ? "active" : ""}`;
+    button.type = "button";
+    button.innerHTML = `
+      <div class="stock-card-inner">
+        <div class="stock-head">
+          <h3>${index + 1}. ${escapeHtml(candidate.name)} (${escapeHtml(candidate.ticker)})</h3>
+          <span class="score">${formatScore(candidate.score)}</span>
+        </div>
+        <div class="stock-meta">
+          <span class="tag long-term">${escapeHtml(candidate.signalLabel)}</span>
+          <span class="tag">${escapeHtml(candidate.industry)}</span>
+          <span class="tag decision">${escapeHtml(candidate.timeHorizon || "3개월~1년 이상")}</span>
+          <span class="tag risk">리스크 ${escapeHtml(candidate.riskLevel)}</span>
+          ${technicalStock.technical ? technicalTopBadge(technicalStock) : ""}
+        </div>
+        <p class="candidate-reason">${escapeHtml((candidate.reasons || [])[0] || pickPrimaryReason(stock))}</p>
+        <div class="stock-scores long-term-scores">
+          ${scoreTile("기업", candidate.companyScore)}
+          ${scoreTile("시장", candidate.marketScore)}
+          ${scoreTile("차트", candidate.chartScore)}
+          ${scoreTile("이슈", candidate.newsScore)}
+        </div>
+      </div>
+    `;
+    button.addEventListener("click", () => {
+      state.selectedTicker = candidate.ticker;
+      renderStocks();
+      renderShortTerm();
+      renderMediumTerm();
+      renderLongTerm();
+      renderEarlyGrowth();
+      window.location.hash = "detail";
+    });
+    elements.longTermList.appendChild(button);
+  });
 }
 
 function renderMediumTerm() {
@@ -465,6 +520,7 @@ function renderMediumTerm() {
       renderStocks();
       renderShortTerm();
       renderMediumTerm();
+      renderLongTerm();
       renderEarlyGrowth();
       window.location.hash = "detail";
     });
@@ -515,6 +571,7 @@ function renderShortTerm() {
       renderStocks();
       renderShortTerm();
       renderMediumTerm();
+      renderLongTerm();
       renderEarlyGrowth();
       window.location.hash = "detail";
     });
@@ -566,6 +623,7 @@ function renderEarlyGrowth() {
       renderStocks();
       renderShortTerm();
       renderMediumTerm();
+      renderLongTerm();
       renderEarlyGrowth();
       window.location.hash = "detail";
     });
@@ -588,6 +646,7 @@ function renderDetail() {
     <span class="tag valuation">${escapeHtml(stock.valuationLabel)}</span>
     ${stock.shortTerm ? `<span class="tag short-term">${escapeHtml(stock.shortTerm.signalLabel)}</span>` : ""}
     ${stock.mediumTerm ? `<span class="tag medium-term">${escapeHtml(stock.mediumTerm.signalLabel)}</span>` : ""}
+    ${stock.longTerm ? `<span class="tag long-term">${escapeHtml(stock.longTerm.signalLabel)}</span>` : ""}
     ${stock.earlyGrowth ? `<span class="tag growth">${escapeHtml(stock.earlyGrowth.entryLabel)}</span>` : ""}
   `;
   elements.detailInsight.textContent = pickPrimaryReason(stock);
@@ -598,6 +657,7 @@ function renderDetail() {
     ${detailScoreTile("모멘텀", stock.momentumScore)}
     ${stock.shortTerm ? detailScoreTile("단기", stock.shortTerm.score) : ""}
     ${stock.mediumTerm ? detailScoreTile("중기", stock.mediumTerm.score) : ""}
+    ${stock.longTerm ? detailScoreTile("장기", stock.longTerm.score) : ""}
     ${stock.earlyGrowth ? detailScoreTile("저점 성장", stock.earlyGrowth.score) : ""}
   `;
   renderTechnical(stock);
@@ -606,11 +666,13 @@ function renderDetail() {
     `투자 판단: ${stock.decisionGrade}`,
     stock.shortTerm ? `단기 분류: ${stock.shortTerm.signalLabel} (${formatScore(stock.shortTerm.score)}점, ${stock.shortTerm.timeHorizon})` : null,
     stock.mediumTerm ? `중기 분류: ${stock.mediumTerm.signalLabel} (${formatScore(stock.mediumTerm.score)}점, ${stock.mediumTerm.timeHorizon})` : null,
+    stock.longTerm ? `장기 분류: ${stock.longTerm.signalLabel} (${formatScore(stock.longTerm.score)}점, ${stock.longTerm.timeHorizon})` : null,
     stock.earlyGrowth ? `저점 성장 분류: ${stock.earlyGrowth.entryLabel} (${formatScore(stock.earlyGrowth.score)}점)` : null,
     `밸류에이션 해석: ${stock.valuationNote || stock.valuationLabel}`,
     `약식 적정 시총 범위: ${formatValuationRange(stock)}`,
     ...(stock.shortTerm?.reasons || []),
     ...(stock.mediumTerm?.reasons || []),
+    ...(stock.longTerm?.reasons || []),
     ...(stock.earlyGrowth?.reasons || []),
     ...stock.reasons,
   ]
@@ -629,6 +691,7 @@ function renderDetail() {
   elements.riskList.innerHTML = [
     ...(stock.shortTerm?.cautions || []),
     ...(stock.mediumTerm?.cautions || []),
+    ...(stock.longTerm?.cautions || []),
     ...(stock.earlyGrowth?.cautions || []),
     ...stock.cautions,
   ]

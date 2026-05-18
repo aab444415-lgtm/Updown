@@ -61,7 +61,7 @@ def snapshot_history(limit: int = 30) -> dict:
 def report_to_snapshot_payload(report: RecommendationReport, mode: str) -> dict:
     created_at = report.created_at
     return {
-        "version": 7,
+        "version": 8,
         "mode": mode,
         "snapshotDate": created_at.date().isoformat(),
         "createdAt": created_at.isoformat(),
@@ -201,6 +201,27 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str) -> dict:
                 "cautions": list(item.cautions),
             }
             for item in report.medium_term_scores
+        ],
+        "longTermCandidates": [
+            {
+                "ticker": item.stock_score.stock.ticker,
+                "name": item.stock_score.stock.name,
+                "country": item.stock_score.stock.country,
+                "industry": item.stock_score.stock.industry,
+                "score": item.score,
+                "baseScore": item.stock_score.score,
+                "signalLabel": item.signal_label,
+                "timeHorizon": item.time_horizon,
+                "companyScore": item.company_score,
+                "marketScore": item.market_score,
+                "chartScore": item.chart_score,
+                "newsScore": item.news_score,
+                "decisionGrade": item.stock_score.decision_grade,
+                "riskLevel": item.stock_score.risk_level,
+                "reasons": list(item.reasons),
+                "cautions": list(item.cautions),
+            }
+            for item in report.long_term_scores
         ],
         "news": [
             {

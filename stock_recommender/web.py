@@ -37,6 +37,9 @@ def report_to_dict(report: RecommendationReport) -> dict:
     medium_term_by_ticker = {
         item.stock_score.stock.ticker.upper(): item for item in report.medium_term_scores
     }
+    long_term_by_ticker = {
+        item.stock_score.stock.ticker.upper(): item for item in report.long_term_scores
+    }
     return {
         "createdAt": report.created_at.strftime("%Y-%m-%d %H:%M:%S"),
         "macroContext": report.macro_context,
@@ -121,6 +124,9 @@ def report_to_dict(report: RecommendationReport) -> dict:
                 "mediumTerm": _medium_term_to_dict(
                     medium_term_by_ticker.get(item.stock.ticker.upper())
                 ),
+                "longTerm": _long_term_to_dict(
+                    long_term_by_ticker.get(item.stock.ticker.upper())
+                ),
             }
             for item in report.stock_scores
         ],
@@ -151,6 +157,20 @@ def report_to_dict(report: RecommendationReport) -> dict:
                 **_medium_term_to_dict(item),
             }
             for item in report.medium_term_scores
+        ],
+        "longTermCandidates": [
+            {
+                "ticker": item.stock_score.stock.ticker,
+                "name": item.stock_score.stock.name,
+                "industry": item.stock_score.stock.industry,
+                "country": item.stock_score.stock.country,
+                "currency": item.stock_score.stock.currency,
+                "baseScore": item.stock_score.score,
+                "decisionGrade": item.stock_score.decision_grade,
+                "riskLevel": item.stock_score.risk_level,
+                **_long_term_to_dict(item),
+            }
+            for item in report.long_term_scores
         ],
         "earlyGrowthCandidates": [
             {
@@ -238,6 +258,22 @@ def _short_term_to_dict(item) -> dict | None:
 
 
 def _medium_term_to_dict(item) -> dict | None:
+    if item is None:
+        return None
+    return {
+        "score": item.score,
+        "companyScore": item.company_score,
+        "marketScore": item.market_score,
+        "chartScore": item.chart_score,
+        "newsScore": item.news_score,
+        "signalLabel": item.signal_label,
+        "timeHorizon": item.time_horizon,
+        "reasons": list(item.reasons),
+        "cautions": list(item.cautions),
+    }
+
+
+def _long_term_to_dict(item) -> dict | None:
     if item is None:
         return None
     return {

@@ -13,6 +13,7 @@ from .models import (
     Fundamentals,
     IndustryProfile,
     IndustryScore,
+    LongTermScore,
     MacroSnapshot,
     MediumTermScore,
     Momentum,
@@ -60,6 +61,9 @@ def build_report(
     medium_term_scores = score_medium_term_candidates(
         stock_scores, industry_scores, news_tuple, momentums
     )
+    long_term_scores = score_long_term_candidates(
+        stock_scores, industry_scores, news_tuple, momentums, macro_snapshot
+    )
     return RecommendationReport(
         created_at=datetime.now(),
         macro_context=macro_context,
@@ -69,6 +73,7 @@ def build_report(
         early_growth_scores=early_growth_scores,
         short_term_scores=short_term_scores,
         medium_term_scores=medium_term_scores,
+        long_term_scores=long_term_scores,
         macro_snapshot=macro_snapshot,
         data_quality=data_quality or DataQuality(),
     )
@@ -308,6 +313,50 @@ def score_medium_term_candidates(
                 time_horizon="2주~3개월",
                 reasons=medium_term_reasons(stock, momentum, company, market, chart, news),
                 cautions=medium_term_cautions(stock, momentum, news_tuple, company, market, chart),
+            )
+        )
+    return tuple(sorted(results, key=lambda item: item.score, reverse=True))
+
+
+def score_long_term_candidates(
+    stock_scores: Iterable[StockScore],
+    industry_scores: Iterable[IndustryScore],
+    news_items: Iterable[NewsItem],
+    momentums: dict[str, Momentum],
+    macro_snapshot: MacroSnapshot | None = None,
+) -> tuple[LongTermScore, ...]:
+    industry_score_by_name = {item.industry.name: item for item in industry_scores}
+    news_tuple = tuple(news_items)
+    news_counter = _counter(
+        " ".join(
+            " ".join(part for part in (item.title, item.summary or "") if part)
+            for item in news_tuple
+        )
+    )
+    results: list[LongTermScore] = []
+    for item in stock_scores:
+        stock = item.stock
+        industry_score = industry_score_by_name[stock.industry]
+        momentum = momentums.get(stock.ticker.upper(), Momentum())
+        company = long_term_company_score(stock, item.quality_score, item.valuation_score)
+        market = long_term_market_score(momentum, industry_score, macro_snapshot)
+        chart = long_term_chart_score(momentum)
+        news = long_term_news_score(stock, industry_score.industry, news_counter, bool(news_tuple))
+        total = company * 0.45 + market * 0.25 + chart * 0.15 + news * 0.15
+        total -= long_term_penalty(stock, momentum, news_tuple, company, market, chart)
+        score = _clamp(total, 0, 100)
+        results.append(
+            LongTermScore(
+                stock_score=item,
+                score=round(score, 1),
+                company_score=round(company, 1),
+                market_score=round(market, 1),
+                chart_score=round(chart, 1),
+                news_score=round(news, 1),
+                signal_label=long_term_signal_label(score, company, market),
+                time_horizon="3개월~1년 이상",
+                reasons=long_term_reasons(stock, momentum, company, market, chart, news),
+                cautions=long_term_cautions(stock, momentum, news_tuple, company, market, chart),
             )
         )
     return tuple(sorted(results, key=lambda item: item.score, reverse=True))
@@ -811,6 +860,212 @@ def medium_term_cautions(
     if chart < 50:
         cautions.append("중기 차트 위치가 애매해 20일/60일선 지지 여부 확인 필요")
     cautions.append("컨센서스 추정치가 아직 없어 분기 실적 전망 변화는 별도 확인 필요")
+    cautions.extend(stock.risks[:1])
+    return tuple(dict.fromkeys(cautions))
+
+
+def long_term_company_score(
+    stock: StockProfile, quality: float, valuation: float
+) -> float:
+    fundamentals = stock.fundamentals
+    growth = _scale(fundamentals.revenue_growth_pct, low=-5, high=30)
+    margin = _scale(fundamentals.operating_margin_pct, low=0, high=35)
+    roe = _scale(fundamentals.roe_pct, low=0, high=30)
+    leverage = _inverse_scale(fundamentals.debt_to_equity_pct, low=30, high=200)
+    fcf_margin = _ratio_pct(fundamentals.free_cash_flow, fundamentals.revenue)
+    cash_flow = _scale(fcf_margin, low=-5, high=20)
+    liquidity = _scale(fundamentals.current_ratio_pct, low=90, high=220)
+    interest_safety = _scale(fundamentals.interest_coverage, low=2, high=10)
+    score = (
+        quality * 0.26
+        + growth * 0.20
+        + margin * 0.16
+        + roe * 0.13
+        + valuation * 0.12
+        + leverage * 0.06
+        + cash_flow * 0.04
+        + liquidity * 0.02
+        + interest_safety * 0.01
+    )
+    if fundamentals.operating_margin_pct is not None and fundamentals.operating_margin_pct < 0:
+        score -= 10
+    if fundamentals.free_cash_flow is not None and fundamentals.free_cash_flow < 0:
+        score -= 8
+    if fundamentals.debt_to_equity_pct is not None and fundamentals.debt_to_equity_pct > 220:
+        score -= 8
+    if fundamentals.interest_coverage is not None and fundamentals.interest_coverage < 3:
+        score -= 5
+    return _clamp(score, 0, 100)
+
+
+def long_term_market_score(
+    momentum: Momentum,
+    industry_score: IndustryScore,
+    macro_snapshot: MacroSnapshot | None,
+) -> float:
+    score = industry_score.score * 0.55 + industry_score.market_score * 0.25
+    if macro_snapshot is not None:
+        macro_average = (
+            macro_snapshot.growth_score * 0.35
+            + macro_snapshot.defensive_score * 0.20
+            + macro_snapshot.infrastructure_score * 0.25
+            + macro_snapshot.korea_fx_score * 0.20
+        )
+        score += macro_average * 0.20
+    else:
+        score += 50 * 0.20
+
+    if _finite(momentum.six_month_pct):
+        if 0 <= momentum.six_month_pct <= 80:
+            score += 8
+        elif momentum.six_month_pct > 120 and _finite(momentum.range_position_pct) and momentum.range_position_pct > 90:
+            score -= 8
+        elif momentum.six_month_pct < -30:
+            score -= 8
+    if _finite(momentum.three_month_pct):
+        if momentum.three_month_pct > 0:
+            score += 4
+        elif momentum.three_month_pct < -20:
+            score -= 5
+
+    return _clamp(score, 0, 100)
+
+
+def long_term_chart_score(momentum: Momentum) -> float:
+    if not _has_momentum_data(momentum):
+        return 50
+
+    score = 50.0
+    position = momentum.range_position_pct
+    drawdown = momentum.drawdown_from_high_pct
+    three_month = momentum.three_month_pct
+    six_month = momentum.six_month_pct
+
+    if _finite(position):
+        if 35 <= position <= 78:
+            score += 20
+        elif 20 <= position < 35:
+            score += 12
+        elif 78 < position <= 90:
+            score += 6
+        elif position > 90:
+            score -= 5
+        elif position < 20:
+            score -= 8
+
+    if _finite(drawdown):
+        decline = abs(min(drawdown, 0))
+        if 8 <= decline <= 28:
+            score += 16
+        elif 0 <= decline < 8:
+            score += 8
+        elif 28 < decline <= 45:
+            score += 2
+        elif decline > 45:
+            score -= 12
+
+    if _finite(three_month) and _finite(six_month):
+        if three_month > 0 and six_month > 0:
+            score += 9
+        elif three_month < 0 and six_month < 0:
+            score -= 9
+
+    return _clamp(score, 0, 100)
+
+
+def long_term_news_score(
+    stock: StockProfile,
+    industry: IndustryProfile,
+    news_counter: Counter[str],
+    has_live_news: bool,
+) -> float:
+    if not has_live_news:
+        return 50 if stock.recent_issues else 45
+
+    direct_terms = (stock.ticker, stock.name)
+    industry_terms = (*industry.news_terms, industry.name, *industry.macro_terms)
+    issue_terms = stock.recent_issues or (stock.thesis,)
+    direct_score = _term_score(news_counter, direct_terms, baseline=35, scale=8)
+    industry_score = _term_score(news_counter, industry_terms, baseline=35, scale=9)
+    issue_score = _term_score(news_counter, issue_terms, baseline=35, scale=4)
+    return _clamp(direct_score * 0.20 + industry_score * 0.60 + issue_score * 0.20, 0, 100)
+
+
+def long_term_penalty(
+    stock: StockProfile,
+    momentum: Momentum,
+    news_items: tuple[NewsItem, ...],
+    company: float,
+    market: float,
+    chart: float,
+) -> float:
+    penalty = 0.0
+    if not news_items:
+        penalty += 1
+    if not _has_momentum_data(momentum):
+        penalty += 3
+    if company < 45:
+        penalty += 8
+    if market < 40:
+        penalty += 5
+    if chart < 35:
+        penalty += 4
+    fundamentals = stock.fundamentals
+    if fundamentals.operating_margin_pct is not None and fundamentals.operating_margin_pct < 0:
+        penalty += 6
+    if fundamentals.free_cash_flow is not None and fundamentals.free_cash_flow < 0:
+        penalty += 5
+    if fundamentals.debt_to_equity_pct is not None and fundamentals.debt_to_equity_pct > 220:
+        penalty += 6
+    return penalty
+
+
+def long_term_signal_label(score: float, company: float, market: float) -> str:
+    if score >= 76 and company >= 68 and market >= 55:
+        return "장기 핵심 후보"
+    if score >= 67 and company >= 60:
+        return "장기 관심"
+    if score >= 58:
+        return "장기 관찰"
+    return "후순위"
+
+
+def long_term_reasons(
+    stock: StockProfile,
+    momentum: Momentum,
+    company: float,
+    market: float,
+    chart: float,
+    news: float,
+) -> tuple[str, ...]:
+    return (
+        f"기업 가치 점수 {company:.1f}/100: {_long_term_company_reason(stock)}",
+        f"시장/산업 점수 {market:.1f}/100: {_long_term_market_reason(stock)}",
+        f"장기 차트 점수 {chart:.1f}/100: {_long_term_chart_reason(momentum)}",
+        f"구조적 이슈 점수 {news:.1f}/100: {_long_term_news_reason(stock)}",
+    )
+
+
+def long_term_cautions(
+    stock: StockProfile,
+    momentum: Momentum,
+    news_items: tuple[NewsItem, ...],
+    company: float,
+    market: float,
+    chart: float,
+) -> tuple[str, ...]:
+    cautions: list[str] = []
+    if not news_items:
+        cautions.append("라이브 뉴스가 없으면 장기 산업 변화 점수는 보수적으로 해석")
+    if not _has_momentum_data(momentum):
+        cautions.append("가격 데이터 부족으로 월봉/주봉과 120일/200일선 추세 확인 필요")
+    if company < 55:
+        cautions.append("장기 보유 전 매출 성장, 수익성, 현금흐름의 지속성 추가 확인 필요")
+    if market < 50:
+        cautions.append("산업/거시 점수가 약해 구조적 성장 지속성 확인 필요")
+    if chart < 45:
+        cautions.append("장기 차트 추세가 약해 분할 접근 또는 추세 회복 확인 필요")
+    cautions.append("장기 판단에는 경쟁력, 시장점유율, 컨센서스 장기 추정치를 별도 확인해야 함")
     cautions.extend(stock.risks[:1])
     return tuple(dict.fromkeys(cautions))
 
@@ -1353,6 +1608,49 @@ def _medium_term_news_reason(stock: StockProfile) -> str:
     if stock.recent_issues:
         return stock.recent_issues[0]
     return "산업 키워드와 기업 이슈의 지속 가능성을 반영"
+
+
+def _long_term_company_reason(stock: StockProfile) -> str:
+    fundamentals = stock.fundamentals
+    checks = [
+        _growth_check(fundamentals),
+        _profitability_check(fundamentals),
+        _cash_flow_check(fundamentals),
+        _stability_check(fundamentals),
+    ]
+    return " / ".join(checks)
+
+
+def _long_term_market_reason(stock: StockProfile) -> str:
+    return f"{stock.industry}의 구조적 성장성과 거시 민감도를 반영"
+
+
+def _long_term_chart_reason(momentum: Momentum) -> str:
+    if not _has_momentum_data(momentum):
+        return "차트 데이터 부족으로 중립 처리"
+
+    parts: list[str] = []
+    if _finite(momentum.range_position_pct):
+        if momentum.range_position_pct >= 80:
+            zone = "장기 상단권"
+        elif momentum.range_position_pct >= 35:
+            zone = "장기 추세권"
+        elif momentum.range_position_pct >= 20:
+            zone = "장기 저점 확인권"
+        else:
+            zone = "장기 약세권"
+        parts.append(f"6개월 위치 {momentum.range_position_pct:.1f}% ({zone})")
+    if _finite(momentum.drawdown_from_high_pct):
+        parts.append(f"고점 대비 {momentum.drawdown_from_high_pct:.1f}%")
+    if _finite(momentum.six_month_pct):
+        parts.append(f"6개월 {momentum.six_month_pct:.1f}%")
+    return ", ".join(parts) if parts else "가격 위치 데이터 부족"
+
+
+def _long_term_news_reason(stock: StockProfile) -> str:
+    if stock.recent_issues:
+        return stock.recent_issues[0]
+    return "일회성 뉴스보다 산업 구조 변화와 장기 성장 스토리를 반영"
 
 
 def _growth_check(fundamentals: Fundamentals) -> str:

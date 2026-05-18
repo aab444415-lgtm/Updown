@@ -81,6 +81,7 @@ class ScoringTests(unittest.TestCase):
         self.assertIn("## 추천 종목 후보", markdown)
         self.assertIn("## 단기 매매 후보", markdown)
         self.assertIn("## 중기 매매 후보", markdown)
+        self.assertIn("## 장기 투자 후보", markdown)
         self.assertIn("## 저점 성장주 후보", markdown)
 
     def test_report_contains_macro_snapshot(self):
@@ -246,6 +247,77 @@ class ScoringTests(unittest.TestCase):
         self.assertGreater(top.market_score, 70)
         self.assertGreater(top.chart_score, 70)
         self.assertIn(top.signal_label, {"중기 강세 후보", "중기 관심"})
+
+    def test_long_term_ranking_uses_company_value_industry_chart_and_structural_news(self):
+        industry = INDUSTRIES[0]
+        compounder = StockProfile(
+            ticker="COMPOUND",
+            name="Compound AI",
+            industry=industry.name,
+            role="core",
+            thesis="높은 수익성, 현금흐름, 구조적 산업 성장성을 가진 장기 후보입니다.",
+            risks=("산업 경쟁 심화",),
+            fundamentals=Fundamentals(
+                revenue_growth_pct=28.0,
+                operating_margin_pct=32.0,
+                roe_pct=26.0,
+                debt_to_equity_pct=25.0,
+                pe=28.0,
+                forward_pe=22.0,
+                market_cap_usd=30_000_000_000,
+                revenue=10_000_000_000,
+                free_cash_flow=2_000_000_000,
+                current_ratio_pct=180.0,
+                interest_coverage=12.0,
+            ),
+            recent_issues=("AI infrastructure demand and market share expansion",),
+        )
+        fragile = StockProfile(
+            ticker="FRAGILE",
+            name="Fragile AI",
+            industry=industry.name,
+            role="adjacent",
+            thesis="성장 둔화와 재무 부담이 큰 비교 후보입니다.",
+            risks=("현금흐름 악화",),
+            fundamentals=Fundamentals(
+                revenue_growth_pct=-4.0,
+                operating_margin_pct=-8.0,
+                roe_pct=-6.0,
+                debt_to_equity_pct=260.0,
+                pe=90.0,
+                forward_pe=70.0,
+                market_cap_usd=30_000_000_000,
+                revenue=10_000_000_000,
+                free_cash_flow=-800_000_000,
+                current_ratio_pct=80.0,
+                interest_coverage=1.5,
+            ),
+        )
+
+        report = build_report(
+            macro_context=DEFAULT_MACRO_CONTEXT,
+            industries=(industry,),
+            stocks=(compounder, fragile),
+            news_items=(
+                NewsItem(
+                    title="AI infrastructure demand expands long-term semiconductor opportunity",
+                    source="Test News",
+                    summary="Data center capex supports durable market growth.",
+                ),
+            ),
+            momentums={
+                "COMPOUND": Momentum(5.0, 16.0, 34.0, -12.0, 62.0),
+                "FRAGILE": Momentum(-12.0, -25.0, -38.0, -50.0, 8.0),
+            },
+        )
+
+        top = report.long_term_scores[0]
+
+        self.assertEqual(top.stock_score.stock.ticker, "COMPOUND")
+        self.assertGreater(top.company_score, report.long_term_scores[1].company_score)
+        self.assertGreater(top.market_score, 45)
+        self.assertGreater(top.chart_score, 70)
+        self.assertIn(top.signal_label, {"장기 핵심 후보", "장기 관심"})
 
 
 class ConfigTests(unittest.TestCase):
@@ -448,6 +520,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn("earlyGrowthCandidates", rows[0]["payload"])
         self.assertIn("shortTermCandidates", rows[0]["payload"])
         self.assertIn("mediumTermCandidates", rows[0]["payload"])
+        self.assertIn("longTermCandidates", rows[0]["payload"])
 
 
 def _annual_fact(start: str, end: str, filed: str, value: float) -> dict:
