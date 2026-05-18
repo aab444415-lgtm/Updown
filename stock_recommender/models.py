@@ -93,6 +93,7 @@ class MacroSnapshot:
     infrastructure_score: float = 50
     korea_fx_score: float = 50
     summary: str = "거시지표가 아직 연결되지 않았습니다."
+    investment_guidance: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
 
 

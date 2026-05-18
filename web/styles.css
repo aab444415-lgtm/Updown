@@ -478,6 +478,31 @@ main {
   line-height: 1.5;
 }
 
+.macro-guidance {
+  padding: 14px 16px;
+  border: 1px solid #b8d8cc;
+  border-radius: 8px;
+  background: #eef8f4;
+}
+
+.macro-guidance h3 {
+  margin: 0 0 10px;
+  font-size: 17px;
+}
+
+.macro-guidance ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.macro-guidance li::marker {
+  color: var(--green);
+}
+
 .macro-score-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

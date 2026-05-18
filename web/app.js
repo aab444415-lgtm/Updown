@@ -294,8 +294,20 @@ function renderMacroSnapshot() {
       `
     )
     .join("");
+  const guidanceItems = (snapshot.investmentGuidance || [])
+    .map((item) => `<li>${escapeHtml(item)}</li>`)
+    .join("");
+  const guidanceBlock = guidanceItems
+    ? `
+      <div class="macro-guidance">
+        <h3>데이터 기반 투자 방향</h3>
+        <ul>${guidanceItems}</ul>
+      </div>
+    `
+    : "";
   elements.macroSnapshot.innerHTML = `
     <div class="macro-summary">${escapeHtml(snapshot.summary)}</div>
+    ${guidanceBlock}
     <div class="macro-score-grid">${scoreCards}</div>
     <div class="macro-indicator-grid">${indicators}</div>
   `;

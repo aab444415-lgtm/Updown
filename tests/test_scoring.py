@@ -94,6 +94,7 @@ class ScoringTests(unittest.TestCase):
             infrastructure_score=55,
             korea_fx_score=45,
             summary="테스트 거시 환경",
+            investment_guidance=("방어 업종과 현금흐름 안정성을 우선 확인합니다.",),
         )
         report = build_report(
             macro_context=DEFAULT_MACRO_CONTEXT,
@@ -108,6 +109,8 @@ class ScoringTests(unittest.TestCase):
 
         self.assertIn("## 거시경제 지표", markdown)
         self.assertIn("테스트 거시 환경", markdown)
+        self.assertIn("### 투자 방향", markdown)
+        self.assertIn("방어 업종과 현금흐름 안정성", markdown)
         self.assertIn("미국 기준금리", markdown)
 
     def test_industry_macro_data_score_uses_industry_sensitivity(self):

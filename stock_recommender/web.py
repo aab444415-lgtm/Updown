@@ -295,6 +295,7 @@ def _macro_snapshot_to_dict(report: RecommendationReport) -> dict | None:
     snapshot = report.macro_snapshot
     return {
         "summary": snapshot.summary,
+        "investmentGuidance": list(snapshot.investment_guidance),
         "growthScore": snapshot.growth_score,
         "defensiveScore": snapshot.defensive_score,
         "infrastructureScore": snapshot.infrastructure_score,

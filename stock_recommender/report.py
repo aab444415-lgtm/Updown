@@ -46,6 +46,12 @@ def render_markdown(
         lines.append("")
         lines.append(report.macro_snapshot.summary)
         lines.append("")
+        if report.macro_snapshot.investment_guidance:
+            lines.append("### 투자 방향")
+            lines.append("")
+            for guidance in report.macro_snapshot.investment_guidance:
+                lines.append(f"- {guidance}")
+            lines.append("")
         for indicator in report.macro_snapshot.indicators:
             value = "N/A" if indicator.value is None else f"{indicator.value:,.2f}{indicator.unit}"
             date = indicator.latest_date or "날짜 없음"
