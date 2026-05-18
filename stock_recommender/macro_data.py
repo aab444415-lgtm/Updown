@@ -7,6 +7,7 @@ from .config import AppConfig
 from .models import MacroIndicator, MacroSnapshot
 from .official_sources import EcosClient, FredClient, SourceResponse
 from .storage import CacheStore
+from .time_utils import now_in_app_timezone
 
 
 FRED_SERIES = {
@@ -22,7 +23,7 @@ FRED_SERIES = {
 def fetch_macro_snapshot(config: AppConfig, cache: CacheStore) -> MacroSnapshot:
     warnings: list[str] = []
     indicators: list[MacroIndicator] = []
-    today = date.today()
+    today = now_in_app_timezone(config).date()
     start_2y = (today - timedelta(days=760)).isoformat()
     start_6m = (today - timedelta(days=220)).isoformat()
 

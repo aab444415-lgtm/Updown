@@ -262,7 +262,7 @@ def _format_fundamentals(fundamentals: Fundamentals) -> str:
         ("FCF", _amount(fundamentals.free_cash_flow, currency)),
         ("PER", _multiple(fundamentals.pe)),
         ("Forward PER", _multiple(fundamentals.forward_pe)),
-        ("시가총액", _market_cap(fundamentals.market_cap_usd, fundamentals.market_cap_currency)),
+        ("시가총액", _market_cap(fundamentals.market_cap, fundamentals.market_cap_currency)),
     ]
     return ", ".join(f"{name} {value}" for name, value in parts if value != "N/A")
 

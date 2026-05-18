@@ -61,11 +61,12 @@ def snapshot_history(limit: int = 30) -> dict:
 def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live") -> dict:
     created_at = report.created_at
     return {
-        "version": 8,
+        "version": 9,
         "mode": mode,
         "snapshotDate": created_at.date().isoformat(),
         "createdAt": created_at.isoformat(),
         "createdAtDisplay": created_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "createdAtTimezone": _timezone_name(created_at),
         "macroContext": report.macro_context,
         "dataQuality": {
             "liveNews": report.data_quality.live_news,
@@ -121,6 +122,7 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                     "debtToEquityPct": item.stock.fundamentals.debt_to_equity_pct,
                     "pe": item.stock.fundamentals.pe,
                     "forwardPe": item.stock.fundamentals.forward_pe,
+                    "marketCap": item.stock.fundamentals.market_cap,
                     "marketCapUsd": item.stock.fundamentals.market_cap_usd,
                     "marketCapCurrency": item.stock.fundamentals.market_cap_currency,
                     "revenue": item.stock.fundamentals.revenue,
@@ -320,6 +322,12 @@ def _display_created_at(value: object) -> str | None:
         return datetime.fromisoformat(value).strftime("%Y-%m-%d %H:%M:%S")
     except ValueError:
         return value
+
+
+def _timezone_name(value: datetime) -> str:
+    if value.tzinfo is None:
+        return ""
+    return getattr(value.tzinfo, "key", None) or value.tzname() or str(value.tzinfo)
 
 
 def _readiness_score(unique_days: int) -> float:

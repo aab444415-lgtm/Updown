@@ -51,12 +51,9 @@ def build_shell() -> None:
 
 
 def report_payload() -> dict:
-    try:
-        return report_to_dict(
-            create_recommendation_report(macro_context=DEFAULT_MACRO_CONTEXT)
-        )
-    except Exception as exc:
-        return empty_report_payload(f"Cloudflare 배포용 정적 생성 중 리포트 생성 실패: {exc}")
+    return report_to_dict(
+        create_recommendation_report(macro_context=DEFAULT_MACRO_CONTEXT)
+    )
 
 
 def empty_report_payload(warning: str) -> dict:
@@ -116,6 +113,14 @@ def snapshots_payload() -> dict:
 def empty_backtest_payload(months: int, top_n: int, benchmark: str, warning: str) -> dict:
     return {
         "createdAt": "",
+        "createdAtDisplay": "",
+        "createdAtTimezone": "",
+        "snapshotDate": "",
+        "method": "snapshot",
+        "pointInTime": True,
+        "snapshotDays": 0,
+        "snapshotCoveragePct": 0,
+        "requiredSnapshotDays": months + 1,
         "months": months,
         "topN": top_n,
         "benchmarkTicker": benchmark,

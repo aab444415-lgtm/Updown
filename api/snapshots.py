@@ -5,7 +5,9 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
+from stock_recommender.config import load_config
 from stock_recommender.snapshots import snapshot_history
+from stock_recommender.storage import CacheStore
 
 
 class handler(BaseHTTPRequestHandler):
@@ -15,7 +17,8 @@ class handler(BaseHTTPRequestHandler):
         try:
             payload = snapshot_history(limit=limit)
         except Exception as exc:  # pragma: no cover - serverless boundary
-            self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+            _record_api_error("api/snapshots", exc)
+            self._send_json({"error": "스냅샷 기록을 불러오지 못했습니다."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
             return
         self._send_json(payload)
 
@@ -33,3 +36,11 @@ def _int_query(query: dict[str, list[str]], name: str, default: int) -> int:
         return int(query.get(name, [str(default)])[0])
     except (TypeError, ValueError):
         return default
+
+
+def _record_api_error(source: str, exc: Exception) -> None:
+    try:
+        config = load_config()
+        CacheStore(config.cache_db_path).record_source_event(source, "error", str(exc))
+    except Exception:
+        return

@@ -143,7 +143,7 @@ function render() {
   const report = state.report;
   if (!report) return;
 
-  elements.createdAt.textContent = report.createdAt;
+  elements.createdAt.textContent = report.createdAtDisplay || report.createdAt;
   elements.newsStatus.textContent = report.dataQuality.liveNews ? "수집됨" : "미수집";
   elements.marketStatus.textContent = report.dataQuality.liveMarketData ? "수집됨" : "중립";
   elements.fundamentalStatus.textContent = report.dataQuality.liveFundamentals ? "공식 반영" : "보조지표";
@@ -177,6 +177,7 @@ function renderBacktest() {
     ${backtestMetric("최대낙폭", formatReturn(backtest.maxDrawdownPct))}
     ${backtestMetric("변동성", formatReturn(backtest.volatilityPct))}
     ${backtestMetric("데이터", formatReturn(backtest.dataCoveragePct))}
+    ${backtestMetric("스냅샷", formatReturn(backtest.snapshotCoveragePct))}
   `;
 
   elements.backtestBenchmarks.innerHTML = (backtest.benchmarks || [])
@@ -1128,7 +1129,7 @@ function periodRow(period) {
   return `
     <div class="period-row">
       <span>${escapeHtml(period.startDate)} → ${escapeHtml(period.endDate)}</span>
-      <span>${escapeHtml((period.tickers || []).join(", "))}</span>
+      <span>${escapeHtml((period.tickers || []).join(", "))}${period.snapshotDate ? ` · ${escapeHtml(period.snapshotDate)}` : ""}</span>
       <strong>${formatReturn(period.returnPct, true)}</strong>
       <strong>${formatReturn(period.benchmarkReturnPct, true)}</strong>
       <strong class="${period.alphaPct >= 0 ? "positive-text" : "negative-text"}">${formatReturn(period.alphaPct, true)}</strong>
@@ -1182,7 +1183,7 @@ function metricItems(stock) {
     ["FCF", formatFinancialAmount(fundamentals.freeCashFlow, currency)],
     ["PER", formatMultiple(fundamentals.pe)],
     ["Forward PER", formatMultiple(fundamentals.forwardPe)],
-    ["시가총액", formatMarketCap(fundamentals.marketCapUsd, currency)],
+    ["시가총액", formatMarketCap(fundamentals.marketCap ?? fundamentals.marketCapUsd, currency)],
     ["적정 시총 하단", formatFinancialAmount(stock.valuationRange?.marketCapLow, currency)],
     ["적정 시총 상단", formatFinancialAmount(stock.valuationRange?.marketCapHigh, currency)],
     ["상승여력 범위", formatPctRange(stock.valuationRange?.upsideLowPct, stock.valuationRange?.upsideHighPct)],

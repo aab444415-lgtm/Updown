@@ -6,5 +6,6 @@ __pycache__/
 *.pyc
 .DS_Store
 reports/
+artifacts/
 tests/
 stock-dashboard-*.png

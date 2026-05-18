@@ -53,6 +53,12 @@ python3 -m stock_recommender.sources_status
 python3 -m stock_recommender.backtest_cli --months 12 --top 5 --benchmark SPY --output reports/backtest_12m.md
 ```
 
+기본 백테스트는 저장된 추천 스냅샷을 사용하는 포인트인타임 방식입니다. 현재 유니버스 기반의 예전 방식은 명시적으로 선택할 수 있습니다.
+
+```bash
+python3 -m stock_recommender.backtest_cli --method legacy --months 12 --top 5 --benchmark SPY
+```
+
 오늘의 추천 결과를 포인트인타임 스냅샷으로 저장하려면:
 
 ```bash
@@ -77,6 +83,7 @@ cp .env.example .env
 
 ```bash
 SEC_USER_AGENT="stock-recommender/0.1 your-email@example.com"
+STOCK_RECOMMENDER_TIMEZONE="Asia/Seoul"
 OPENDART_API_KEY=""
 FRED_API_KEY=""
 ECOS_API_KEY=""
@@ -128,7 +135,7 @@ ECOS_API_KEY=""
 
 ## 3단계 백테스트 실험실
 
-현재는 월말 리밸런싱 기준으로 과거 가격 데이터를 가져와 Top N 동일비중 성과를 계산합니다.
+기본은 저장된 추천 스냅샷을 기준으로 월말 리밸런싱 Top N 동일비중 성과를 계산합니다.
 
 - 기간: 최근 6개월, 12개월, 24개월
 - 보유 종목 수: Top 3, Top 5, Top 10
@@ -137,9 +144,10 @@ ECOS_API_KEY=""
 
 주의할 점:
 
-- 과거 시점의 뉴스/재무 스냅샷이 아직 저장되어 있지 않아, 현재 기본 지표와 과거 가격 모멘텀을 함께 사용하는 검증입니다.
+- 스냅샷 기록이 부족하면 현재 유니버스/재무 지표로 자동 대체하지 않고, 검증 불가 경고를 표시합니다.
+- `--method legacy`는 현재 기본 지표와 과거 가격 모멘텀을 함께 사용하는 참고용 검증입니다.
 - 거래비용, 세금, 환율 환산, 슬리피지는 아직 반영하지 않습니다.
-- 실제 투자 판단용으로 올리려면 매일 추천 점수 스냅샷을 저장한 뒤 그 기록으로 다시 백테스트해야 합니다.
+- 실제 투자 판단용으로 올리려면 매일 추천 점수 스냅샷을 꾸준히 저장한 뒤 그 기록으로 검증해야 합니다.
 
 ## 4단계 포인트인타임 스냅샷
 
@@ -200,6 +208,6 @@ web/
 - World Bank, OECD, IMF 같은 추가 거시경제 지표 연결
 - 분기 재무제표와 컨센서스 추정치 연결
 - 뉴스 원문 요약, 감성 분석, 일회성/구조적 이슈 분류
-- 저장된 스냅샷 기반의 더 정확한 포인트인타임 백테스트
+- 더 긴 스냅샷 히스토리와 거래비용을 반영한 포인트인타임 검증
 - 포트폴리오 비중, 손절/리밸런싱 규칙
 - 사용자 관심 종목 저장, 알림, 모바일 앱 UI

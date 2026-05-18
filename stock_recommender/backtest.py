@@ -6,6 +6,7 @@ import statistics
 import urllib.error
 import urllib.parse
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
@@ -14,10 +15,12 @@ from .data_sources import _open_url
 from .models import IndustryProfile, Momentum, StockProfile
 from .scoring import score_industries, score_stocks
 from .storage import CacheStore
+from .time_utils import now_in_app_timezone
 from .universe import DEFAULT_MACRO_CONTEXT, INDUSTRIES, STOCKS
 
 
 BENCHMARKS = ("SPY", "QQQ", "^KS11")
+BACKTEST_METHODS = ("snapshot", "legacy")
 
 
 @dataclass(frozen=True)
@@ -35,12 +38,19 @@ class BacktestPeriod:
     return_pct: float
     benchmark_return_pct: float
     alpha_pct: float
+    snapshot_date: str | None = None
 
 
 @dataclass(frozen=True)
 class BenchmarkResult:
     ticker: str
     return_pct: float | None
+
+
+@dataclass(frozen=True)
+class SnapshotRecord:
+    snapshot_date: date
+    payload: dict
 
 
 @dataclass(frozen=True)
@@ -61,6 +71,12 @@ class BacktestResult:
     data_coverage_pct: float
     benchmark_results: tuple[BenchmarkResult, ...]
     warnings: tuple[str, ...]
+    method: str = "legacy"
+    point_in_time: bool = False
+    snapshot_days: int = 0
+    snapshot_coverage_pct: float = 0
+    required_snapshot_days: int = 0
+    created_at_timezone: str = ""
 
     @property
     def period_count(self) -> int:
@@ -72,22 +88,38 @@ def create_backtest(
     top_n: int = 5,
     benchmark_ticker: str = "SPY",
     timeout: float = 8.0,
+    method: str = "snapshot",
 ) -> BacktestResult:
     months = _clamp_int(months, 3, 36)
     top_n = _clamp_int(top_n, 3, 10)
     benchmark_ticker = benchmark_ticker.upper()
     if benchmark_ticker not in BENCHMARKS:
         benchmark_ticker = "SPY"
+    method = _normalize_method(method)
 
     config = load_config()
     cache = CacheStore(config.cache_db_path)
+    created_at = now_in_app_timezone(config)
+    if method == "snapshot":
+        return create_snapshot_backtest(
+            cache=cache,
+            months=months,
+            top_n=top_n,
+            benchmark_ticker=benchmark_ticker,
+            timeout=timeout,
+            created_at=created_at,
+            timezone_name=config.timezone_name,
+        )
+
     tickers = tuple(dict.fromkeys(stock.ticker.upper() for stock in STOCKS))
     benchmark_tickers = tuple(dict.fromkeys((benchmark_ticker, *BENCHMARKS)))
     range_value = _history_range_for_months(months)
-    histories = {
-        ticker: fetch_price_history(ticker, cache=cache, range_value=range_value, timeout=timeout)
-        for ticker in (*tickers, *benchmark_tickers)
-    }
+    histories = fetch_price_histories(
+        (*tickers, *benchmark_tickers),
+        cache=cache,
+        range_value=range_value,
+        timeout=timeout,
+    )
     return run_backtest(
         stocks=STOCKS,
         industries=INDUSTRIES,
@@ -95,6 +127,59 @@ def create_backtest(
         months=months,
         top_n=top_n,
         benchmark_ticker=benchmark_ticker,
+        created_at=created_at,
+        timezone_name=config.timezone_name,
+        method="legacy",
+    )
+
+
+def create_snapshot_backtest(
+    cache: CacheStore,
+    months: int,
+    top_n: int,
+    benchmark_ticker: str,
+    timeout: float,
+    created_at: datetime,
+    timezone_name: str,
+) -> BacktestResult:
+    rows = cache.list_recommendation_snapshots(limit=max(365, months * 40), mode="live")
+    snapshots = _snapshot_records(rows)
+    if len({snapshot.snapshot_date for snapshot in snapshots}) < 2:
+        return run_snapshot_backtest(
+            snapshots=snapshots,
+            histories={},
+            months=months,
+            top_n=top_n,
+            benchmark_ticker=benchmark_ticker,
+            created_at=created_at,
+            timezone_name=timezone_name,
+        )
+
+    snapshot_tickers = tuple(
+        sorted(
+            {
+                ticker
+                for snapshot in snapshots
+                for ticker in _snapshot_tickers(snapshot.payload, top_n=top_n)
+            }
+        )
+    )
+    benchmark_tickers = tuple(dict.fromkeys((benchmark_ticker, *BENCHMARKS)))
+    range_value = _history_range_for_months(months)
+    histories = fetch_price_histories(
+        (*snapshot_tickers, *benchmark_tickers),
+        cache=cache,
+        range_value=range_value,
+        timeout=timeout,
+    )
+    return run_snapshot_backtest(
+        snapshots=snapshots,
+        histories=histories,
+        months=months,
+        top_n=top_n,
+        benchmark_ticker=benchmark_ticker,
+        created_at=created_at,
+        timezone_name=timezone_name,
     )
 
 
@@ -105,6 +190,9 @@ def run_backtest(
     months: int = 12,
     top_n: int = 5,
     benchmark_ticker: str = "SPY",
+    created_at: datetime | None = None,
+    timezone_name: str = "",
+    method: str = "legacy",
 ) -> BacktestResult:
     stocks_tuple = tuple(stocks)
     industries_tuple = tuple(industries)
@@ -113,7 +201,15 @@ def run_backtest(
     benchmark_history = histories.get(benchmark_ticker, ())
     month_ends = _month_end_dates(benchmark_history)
     if len(month_ends) < 2:
-        return _empty_result(months, top_n, benchmark_ticker, "벤치마크 가격 데이터를 충분히 가져오지 못했습니다.")
+        return _empty_result(
+            months,
+            top_n,
+            benchmark_ticker,
+            "벤치마크 가격 데이터를 충분히 가져오지 못했습니다.",
+            created_at=created_at,
+            timezone_name=timezone_name,
+            method=method,
+        )
 
     period_dates = month_ends[-(months + 1) :]
     if len(period_dates) < months + 1:
@@ -176,7 +272,16 @@ def run_backtest(
         )
 
     if not periods:
-        return _empty_result(months, top_n, benchmark_ticker, "검증 가능한 월별 구간을 만들지 못했습니다.", data_coverage)
+        return _empty_result(
+            months,
+            top_n,
+            benchmark_ticker,
+            "검증 가능한 월별 구간을 만들지 못했습니다.",
+            data_coverage,
+            created_at=created_at,
+            timezone_name=timezone_name,
+            method=method,
+        )
 
     strategy_returns = [period.return_pct for period in periods]
     benchmark_returns = [period.benchmark_return_pct for period in periods]
@@ -185,7 +290,7 @@ def run_backtest(
     benchmark_results = tuple(_benchmark_result(ticker, histories, periods) for ticker in BENCHMARKS)
 
     return BacktestResult(
-        created_at=datetime.now(),
+        created_at=created_at or now_in_app_timezone(),
         months=months,
         top_n=top_n,
         benchmark_ticker=benchmark_ticker,
@@ -201,6 +306,165 @@ def run_backtest(
         data_coverage_pct=round(data_coverage, 1),
         benchmark_results=benchmark_results,
         warnings=tuple(dict.fromkeys(warnings)),
+        method=method,
+        point_in_time=False,
+        created_at_timezone=timezone_name,
+    )
+
+
+def run_snapshot_backtest(
+    snapshots: tuple[SnapshotRecord, ...],
+    histories: dict[str, tuple[PricePoint, ...]],
+    months: int = 12,
+    top_n: int = 5,
+    benchmark_ticker: str = "SPY",
+    created_at: datetime | None = None,
+    timezone_name: str = "",
+) -> BacktestResult:
+    benchmark_ticker = benchmark_ticker.upper()
+    benchmark_history = histories.get(benchmark_ticker, ())
+    month_ends = _month_end_dates(benchmark_history)
+    required_snapshot_days = months + 1
+    snapshot_days = len({snapshot.snapshot_date for snapshot in snapshots})
+    if snapshot_days < 2:
+        return _empty_result(
+            months,
+            top_n,
+            benchmark_ticker,
+            "저장된 추천 스냅샷이 부족해 포인트인타임 백테스트를 만들지 못했습니다. 먼저 2일 이상 스냅샷을 저장하세요.",
+            created_at=created_at,
+            timezone_name=timezone_name,
+            method="snapshot",
+            point_in_time=True,
+            snapshot_days=snapshot_days,
+            snapshot_coverage_pct=0,
+            required_snapshot_days=required_snapshot_days,
+        )
+
+    if len(month_ends) < 2:
+        return _empty_result(
+            months,
+            top_n,
+            benchmark_ticker,
+            "벤치마크 가격 데이터를 충분히 가져오지 못했습니다.",
+            created_at=created_at,
+            timezone_name=timezone_name,
+            method="snapshot",
+            point_in_time=True,
+            snapshot_days=snapshot_days,
+            required_snapshot_days=required_snapshot_days,
+        )
+
+    period_dates = month_ends[-(months + 1) :]
+    possible_periods = max(0, len(period_dates) - 1)
+
+    warnings: list[str] = []
+    periods: list[BacktestPeriod] = []
+    periods_with_snapshot = 0
+    unique_selected_tickers: set[str] = set()
+    price_ready_tickers: set[str] = set()
+    for start_date, end_date in zip(period_dates, period_dates[1:]):
+        snapshot = _latest_snapshot_on_or_before(snapshots, start_date)
+        if snapshot is None:
+            continue
+        periods_with_snapshot += 1
+        selected = _snapshot_top_stocks(snapshot.payload, top_n)
+        if len(selected) < top_n:
+            warnings.append(f"{snapshot.snapshot_date.isoformat()} 스냅샷의 종목 수가 Top {top_n}보다 부족합니다.")
+            continue
+
+        selected_returns: list[float] = []
+        selected_tickers: list[str] = []
+        selected_names: list[str] = []
+        missing_tickers: list[str] = []
+        for item in selected:
+            ticker = str(item.get("ticker", "")).upper()
+            name = str(item.get("name") or ticker)
+            if not ticker:
+                continue
+            unique_selected_tickers.add(ticker)
+            history = histories.get(ticker, ())
+            start_price = _price_on_or_before(history, start_date)
+            end_price = _price_on_or_before(history, end_date)
+            if start_price is None or end_price is None or start_price <= 0:
+                missing_tickers.append(ticker)
+                continue
+            price_ready_tickers.add(ticker)
+            selected_tickers.append(ticker)
+            selected_names.append(name)
+            selected_returns.append(((end_price / start_price) - 1) * 100)
+
+        benchmark_return = _period_return(benchmark_history, start_date, end_date)
+        if len(selected_returns) < top_n or benchmark_return is None:
+            if missing_tickers:
+                warnings.append("가격 데이터 부족으로 스냅샷 구간 제외: " + ", ".join(missing_tickers[:8]))
+            continue
+
+        period_return = statistics.fmean(selected_returns)
+        periods.append(
+            BacktestPeriod(
+                start_date=start_date,
+                end_date=end_date,
+                tickers=tuple(selected_tickers),
+                names=tuple(selected_names),
+                return_pct=round(period_return, 2),
+                benchmark_return_pct=round(benchmark_return, 2),
+                alpha_pct=round(period_return - benchmark_return, 2),
+                snapshot_date=snapshot.snapshot_date.isoformat(),
+            )
+        )
+
+    snapshot_coverage = (periods_with_snapshot / possible_periods * 100) if possible_periods else 0
+    data_coverage = (
+        len(price_ready_tickers) / len(unique_selected_tickers) * 100
+        if unique_selected_tickers
+        else 0
+    )
+    if not periods:
+        return _empty_result(
+            months,
+            top_n,
+            benchmark_ticker,
+            "스냅샷은 있으나 가격 데이터와 리밸런싱 구간을 연결하지 못했습니다.",
+            data_coverage,
+            created_at=created_at,
+            timezone_name=timezone_name,
+            method="snapshot",
+            point_in_time=True,
+            snapshot_days=snapshot_days,
+            snapshot_coverage_pct=snapshot_coverage,
+            required_snapshot_days=required_snapshot_days,
+        )
+
+    strategy_returns = [period.return_pct for period in periods]
+    benchmark_returns = [period.benchmark_return_pct for period in periods]
+    strategy_total = _compound_return(strategy_returns)
+    benchmark_total = _compound_return(benchmark_returns)
+    benchmark_results = tuple(_benchmark_result(ticker, histories, periods) for ticker in BENCHMARKS)
+
+    return BacktestResult(
+        created_at=created_at or now_in_app_timezone(),
+        months=months,
+        top_n=top_n,
+        benchmark_ticker=benchmark_ticker,
+        periods=tuple(periods),
+        strategy_return_pct=round(strategy_total, 2),
+        benchmark_return_pct=round(benchmark_total, 2),
+        alpha_pct=round(strategy_total - benchmark_total, 2),
+        average_monthly_return_pct=round(statistics.fmean(strategy_returns), 2),
+        win_rate_pct=round(_ratio(value > 0 for value in strategy_returns), 1),
+        hit_rate_pct=round(_ratio(period.return_pct > period.benchmark_return_pct for period in periods), 1),
+        max_drawdown_pct=round(_max_drawdown(strategy_returns), 2),
+        volatility_pct=round(_annualized_volatility(strategy_returns), 2),
+        data_coverage_pct=round(data_coverage, 1),
+        benchmark_results=benchmark_results,
+        warnings=tuple(dict.fromkeys(warnings)),
+        method="snapshot",
+        point_in_time=True,
+        snapshot_days=snapshot_days,
+        snapshot_coverage_pct=round(snapshot_coverage, 1),
+        required_snapshot_days=required_snapshot_days,
+        created_at_timezone=timezone_name,
     )
 
 
@@ -227,14 +491,54 @@ def fetch_price_history(
                 payload = json.loads(response.read().decode("utf-8"))
             if cache is not None:
                 cache.set_json(cache_key, "Yahoo Finance", url, payload, ttl_seconds=60 * 60 * 12)
+                _record_event(cache, "Yahoo Finance", "success", f"{symbol} 가격 히스토리를 수집했습니다.")
         except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
             if cache is not None:
                 cached = cache.get_json(cache_key, allow_expired=True)
                 if isinstance(cached, dict):
+                    _record_event(cache, "Yahoo Finance", "stale", f"{symbol} 가격 히스토리 호출 실패로 만료 캐시를 사용했습니다.")
                     payload = cached
+                else:
+                    _record_event(cache, "Yahoo Finance", "error", f"{symbol} 가격 히스토리 호출 또는 파싱에 실패했습니다.")
     if payload is None:
         return ()
     return parse_yahoo_history(payload)
+
+
+def fetch_price_histories(
+    tickers: Iterable[str],
+    cache: CacheStore | None = None,
+    range_value: str = "3y",
+    interval: str = "1d",
+    timeout: float = 8.0,
+    max_workers: int = 6,
+) -> dict[str, tuple[PricePoint, ...]]:
+    symbols = tuple(dict.fromkeys(ticker.upper() for ticker in tickers if ticker))
+    if not symbols:
+        return {}
+    histories: dict[str, tuple[PricePoint, ...]] = {}
+    workers = max(1, min(max_workers, len(symbols)))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(
+                fetch_price_history,
+                ticker,
+                cache=cache,
+                range_value=range_value,
+                interval=interval,
+                timeout=timeout,
+            ): ticker
+            for ticker in symbols
+        }
+        for future in as_completed(futures):
+            ticker = futures[future]
+            try:
+                histories[ticker] = future.result()
+            except Exception as exc:  # pragma: no cover - defensive worker boundary
+                if cache is not None:
+                    _record_event(cache, "Yahoo Finance", "error", f"{ticker} 가격 히스토리 처리 실패: {exc}")
+                histories[ticker] = ()
+    return histories
 
 
 def parse_yahoo_history(payload: dict) -> tuple[PricePoint, ...]:
@@ -267,7 +571,15 @@ def parse_yahoo_history(payload: dict) -> tuple[PricePoint, ...]:
 
 def backtest_to_dict(result: BacktestResult) -> dict:
     return {
-        "createdAt": result.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "createdAt": result.created_at.isoformat(),
+        "createdAtDisplay": result.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "createdAtTimezone": result.created_at_timezone,
+        "snapshotDate": result.created_at.date().isoformat(),
+        "method": result.method,
+        "pointInTime": result.point_in_time,
+        "snapshotDays": result.snapshot_days,
+        "snapshotCoveragePct": result.snapshot_coverage_pct,
+        "requiredSnapshotDays": result.required_snapshot_days,
         "months": result.months,
         "topN": result.top_n,
         "benchmarkTicker": result.benchmark_ticker,
@@ -294,14 +606,11 @@ def backtest_to_dict(result: BacktestResult) -> dict:
                 "returnPct": period.return_pct,
                 "benchmarkReturnPct": period.benchmark_return_pct,
                 "alphaPct": period.alpha_pct,
+                "snapshotDate": period.snapshot_date,
             }
             for period in result.periods
         ],
-        "assumptions": [
-            "월말 리밸런싱, 동일비중 Top N 보유로 계산합니다.",
-            "과거 시점의 뉴스/재무 스냅샷이 없어 현재 기본 지표와 과거 가격 모멘텀을 함께 사용합니다.",
-            "거래비용, 세금, 환율 환산, 슬리피지는 아직 반영하지 않았습니다.",
-        ],
+        "assumptions": _backtest_assumptions(result),
     }
 
 
@@ -312,6 +621,7 @@ def render_backtest_markdown(result: BacktestResult) -> str:
         f"- 생성 시각: {result.created_at.strftime('%Y-%m-%d %H:%M:%S')}",
         f"- 검증 기간: 최근 {result.period_count}개월",
         f"- 규칙: 월말 리밸런싱, Top {result.top_n} 동일비중",
+        f"- 검증 방식: {'포인트인타임 스냅샷' if result.point_in_time else '현재 유니버스 기반 legacy'}",
         f"- 벤치마크: {result.benchmark_ticker}",
         "",
         "## 요약",
@@ -324,6 +634,7 @@ def render_backtest_markdown(result: BacktestResult) -> str:
         f"- 최대낙폭: {_pct_text(result.max_drawdown_pct)}",
         f"- 연율화 변동성: {_pct_text(result.volatility_pct)}",
         f"- 가격 데이터 커버리지: {_pct_text(result.data_coverage_pct)}",
+        f"- 스냅샷 커버리지: {_pct_text(result.snapshot_coverage_pct)}",
         "",
     ]
     if result.benchmark_results:
@@ -338,17 +649,23 @@ def render_backtest_markdown(result: BacktestResult) -> str:
         lines.append("")
     lines.extend(["## 월별 결과", ""])
     for period in result.periods:
+        snapshot_text = f" / 스냅샷 {period.snapshot_date}" if period.snapshot_date else ""
         lines.append(
             f"- {period.start_date.isoformat()} -> {period.end_date.isoformat()}: "
             f"전략 {_pct_text(period.return_pct)}, 벤치마크 {_pct_text(period.benchmark_return_pct)}, "
-            f"초과 {_pct_text(period.alpha_pct)} / {', '.join(period.tickers)}"
+            f"초과 {_pct_text(period.alpha_pct)} / {', '.join(period.tickers)}{snapshot_text}"
         )
+    source_limitation = (
+        "- 각 구간은 리밸런싱일 이전에 저장된 최신 추천 스냅샷의 순위를 사용합니다."
+        if result.point_in_time
+        else "- legacy 방식은 현재 기본 지표와 과거 가격 모멘텀을 함께 사용합니다."
+    )
     lines.extend(
         [
             "",
             "## 해석상 한계",
             "",
-            "- 과거 시점의 뉴스/재무 스냅샷이 없어 현재 기본 지표와 과거 가격 모멘텀을 함께 사용합니다.",
+            source_limitation,
             "- 거래비용, 세금, 환율 환산, 슬리피지는 아직 반영하지 않았습니다.",
             "- 실제 투자 판단용으로 쓰려면 점수 스냅샷을 매일 저장한 뒤 그 기록으로 다시 검증해야 합니다.",
         ]
@@ -483,9 +800,16 @@ def _empty_result(
     benchmark_ticker: str,
     warning: str,
     data_coverage_pct: float = 0,
+    created_at: datetime | None = None,
+    timezone_name: str = "",
+    method: str = "legacy",
+    point_in_time: bool = False,
+    snapshot_days: int = 0,
+    snapshot_coverage_pct: float = 0,
+    required_snapshot_days: int = 0,
 ) -> BacktestResult:
     return BacktestResult(
-        created_at=datetime.now(),
+        created_at=created_at or now_in_app_timezone(),
         months=months,
         top_n=top_n,
         benchmark_ticker=benchmark_ticker,
@@ -501,6 +825,12 @@ def _empty_result(
         data_coverage_pct=round(data_coverage_pct, 1),
         benchmark_results=(),
         warnings=(warning,),
+        method=method,
+        point_in_time=point_in_time,
+        snapshot_days=snapshot_days,
+        snapshot_coverage_pct=round(snapshot_coverage_pct, 1),
+        required_snapshot_days=required_snapshot_days,
+        created_at_timezone=timezone_name,
     )
 
 
@@ -510,6 +840,58 @@ def _history_range_for_months(months: int) -> str:
     if months <= 24:
         return "3y"
     return "5y"
+
+
+def _normalize_method(method: str) -> str:
+    normalized = str(method or "snapshot").lower()
+    return normalized if normalized in BACKTEST_METHODS else "snapshot"
+
+
+def _snapshot_records(rows: list[dict]) -> tuple[SnapshotRecord, ...]:
+    records: list[SnapshotRecord] = []
+    for row in rows:
+        payload = row.get("payload")
+        raw_date = row.get("snapshotDate")
+        if isinstance(payload, dict) and isinstance(raw_date, str):
+            try:
+                records.append(SnapshotRecord(date.fromisoformat(raw_date), payload))
+            except ValueError:
+                continue
+    return tuple(sorted(records, key=lambda item: item.snapshot_date))
+
+
+def _snapshot_tickers(payload: dict, top_n: int) -> tuple[str, ...]:
+    return tuple(
+        ticker
+        for item in _snapshot_top_stocks(payload, top_n)
+        if (ticker := str(item.get("ticker", "")).upper())
+    )
+
+
+def _snapshot_top_stocks(payload: dict, top_n: int) -> tuple[dict, ...]:
+    stocks = payload.get("stocks")
+    if not isinstance(stocks, list):
+        return ()
+    valid = [item for item in stocks if isinstance(item, dict) and item.get("ticker")]
+    return tuple(valid[:top_n])
+
+
+def _latest_snapshot_on_or_before(
+    snapshots: tuple[SnapshotRecord, ...], target: date
+) -> SnapshotRecord | None:
+    selected: SnapshotRecord | None = None
+    for snapshot in snapshots:
+        if snapshot.snapshot_date > target:
+            break
+        selected = snapshot
+    return selected
+
+
+def _record_event(cache: CacheStore, source: str, event_type: str, message: str) -> None:
+    try:
+        cache.record_source_event(source, event_type, message)
+    except Exception:
+        return
 
 
 def _list_value(values: list, index: int) -> float | None:
@@ -525,3 +907,13 @@ def _clamp_int(value: int, low: int, high: int) -> int:
 
 def _pct_text(value: float | None) -> str:
     return "N/A" if value is None else f"{value:.2f}%"
+
+
+def _backtest_assumptions(result: BacktestResult) -> list[str]:
+    assumptions = ["월말 리밸런싱, 동일비중 Top N 보유로 계산합니다."]
+    if result.point_in_time:
+        assumptions.append("각 리밸런싱일 이전에 저장된 최신 추천 스냅샷의 순위를 사용합니다.")
+    else:
+        assumptions.append("legacy 방식은 현재 유니버스/재무 지표와 과거 가격 모멘텀을 함께 사용합니다.")
+    assumptions.append("거래비용, 세금, 환율 환산, 슬리피지는 아직 반영하지 않았습니다.")
+    return assumptions

@@ -1,0 +1,9 @@
+[project]
+name = "stock-recommender"
+version = "0.1.0"
+description = "Stock recommendation research dashboard and point-in-time backtest tools"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

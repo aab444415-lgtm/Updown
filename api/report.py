@@ -6,6 +6,8 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 from stock_recommender.pipeline import create_recommendation_report
+from stock_recommender.config import load_config
+from stock_recommender.storage import CacheStore
 from stock_recommender.universe import DEFAULT_MACRO_CONTEXT
 from stock_recommender.web import report_to_dict
 
@@ -17,7 +19,8 @@ class handler(BaseHTTPRequestHandler):
         try:
             payload = report_to_dict(create_recommendation_report(macro_context=macro_context))
         except Exception as exc:  # pragma: no cover - serverless boundary
-            self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+            _record_api_error("api/report", exc)
+            self._send_json({"error": "추천 리포트를 생성하지 못했습니다."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
             return
         self._send_json(payload)
 
@@ -28,3 +31,11 @@ class handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()
         self.wfile.write(content)
+
+
+def _record_api_error(source: str, exc: Exception) -> None:
+    try:
+        config = load_config()
+        CacheStore(config.cache_db_path).record_source_event(source, "error", str(exc))
+    except Exception:
+        return

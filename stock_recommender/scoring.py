@@ -4,6 +4,7 @@ import math
 import re
 from collections import Counter
 from collections.abc import Iterable
+from datetime import datetime
 
 from .data_sources import average_industry_momentum, momentum_to_score
 from .macro_data import industry_macro_data_score
@@ -24,6 +25,7 @@ from .models import (
     StockScore,
     ValuationRange,
 )
+from .time_utils import now_in_app_timezone
 
 
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9가-힣][A-Za-z0-9가-힣+.-]*")
@@ -37,9 +39,8 @@ def build_report(
     momentums: dict[str, Momentum] | None = None,
     macro_snapshot: MacroSnapshot | None = None,
     data_quality: DataQuality | None = None,
+    created_at: datetime | None = None,
 ) -> RecommendationReport:
-    from datetime import datetime
-
     industries_tuple = tuple(industries)
     stocks_tuple = tuple(stocks)
     news_tuple = tuple(news_items)
@@ -65,7 +66,7 @@ def build_report(
         stock_scores, industry_scores, news_tuple, momentums, macro_snapshot
     )
     return RecommendationReport(
-        created_at=datetime.now(),
+        created_at=created_at or now_in_app_timezone(),
         macro_context=macro_context,
         industry_scores=tuple(sorted(industry_scores, key=lambda item: item.score, reverse=True)),
         stock_scores=tuple(sorted(stock_scores, key=lambda item: item.score, reverse=True)),
@@ -200,7 +201,7 @@ def score_early_growth_candidates(
         stock = item.stock
         fundamentals = stock.fundamentals
         momentum = momentums.get(stock.ticker.upper(), Momentum())
-        size = company_size_score(fundamentals.market_cap_usd, fundamentals.market_cap_currency)
+        size = company_size_score(fundamentals.market_cap, fundamentals.market_cap_currency)
         growth = early_revenue_growth_score(fundamentals.revenue_growth_pct)
         pullback = pullback_entry_score(momentum)
         quality_anchor = _early_quality_anchor_score(fundamentals, item.quality_score)
@@ -1199,8 +1200,8 @@ def valuation_range_for_stock(stock: StockProfile, analysis_style: str) -> Valua
     multiple_low, multiple_high = _multiple_range(multiple, analysis_style, stock.role)
     market_cap_low = profit_value * multiple_low
     market_cap_high = profit_value * multiple_high
-    upside_low = _upside_pct(market_cap_low, fundamentals.market_cap_usd)
-    upside_high = _upside_pct(market_cap_high, fundamentals.market_cap_usd)
+    upside_low = _upside_pct(market_cap_low, fundamentals.market_cap)
+    upside_high = _upside_pct(market_cap_high, fundamentals.market_cap)
     note = (
         f"{profit_metric}을 기준 이익으로 두고 {multiple_low:.1f}~{multiple_high:.1f}배 멀티플을 적용한 약식 범위입니다."
     )
@@ -1400,7 +1401,7 @@ def early_growth_reasons(
 ) -> tuple[str, ...]:
     fundamentals = stock.fundamentals
     reasons = [
-        f"규모 점수 {size_score:.1f}/100: {_size_reason(fundamentals.market_cap_usd, fundamentals.market_cap_currency)}",
+        f"규모 점수 {size_score:.1f}/100: {_size_reason(fundamentals.market_cap, fundamentals.market_cap_currency)}",
         f"매출 성장 점수 {growth_score:.1f}/100: {_growth_check(fundamentals)}",
         f"저점 진입 점수 {pullback_score:.1f}/100: {_pullback_reason(momentum)}",
         f"재무 버팀목 {quality_anchor:.1f}/100: 영업이익률과 부채 부담을 함께 반영",
@@ -1418,7 +1419,7 @@ def early_growth_cautions(
 ) -> tuple[str, ...]:
     fundamentals = stock.fundamentals
     cautions: list[str] = []
-    if fundamentals.market_cap_usd is None:
+    if fundamentals.market_cap is None:
         cautions.append("시가총액 데이터가 부족해 규모 필터를 다시 확인해야 함")
     if size_score <= 30:
         cautions.append("이미 대형주에 가까워 작은 회사 리레이팅 효과는 제한적일 수 있음")
@@ -1738,12 +1739,12 @@ def _profit_base_for_valuation(
     if fundamentals.ebitda is not None and fundamentals.ebitda > 0:
         return "EBITDA 보정", fundamentals.ebitda * 0.65
     if (
-        fundamentals.market_cap_usd is not None
-        and fundamentals.market_cap_usd > 0
+        fundamentals.market_cap is not None
+        and fundamentals.market_cap > 0
         and multiple is not None
         and multiple > 0
     ):
-        return "PER 역산 이익", fundamentals.market_cap_usd / multiple
+        return "PER 역산 이익", fundamentals.market_cap / multiple
     return "이익 데이터 부족", None
 
 

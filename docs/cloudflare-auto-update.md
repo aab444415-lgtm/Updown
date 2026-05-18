@@ -35,6 +35,7 @@ Cloudflare Pages 프로젝트의 Environment variables에 아래 값을 넣으�
 
 ```text
 SEC_USER_AGENT=stock-recommender/0.1 your-email@example.com
+STOCK_RECOMMENDER_TIMEZONE=Asia/Seoul
 OPENDART_API_KEY=발급받은키
 FRED_API_KEY=발급받은키
 ECOS_API_KEY=발급받은키

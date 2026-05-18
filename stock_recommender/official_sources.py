@@ -12,6 +12,7 @@ from datetime import date, timedelta
 
 from .config import AppConfig
 from .storage import CacheStore
+from .time_utils import now_in_app_timezone
 
 
 @dataclass(frozen=True)
@@ -51,7 +52,7 @@ class OpenDartClient:
     def fetch_recent_filings(self) -> SourceResponse:
         if not self.config.opendart_api_key:
             return SourceResponse(False, self.source, warning="OpenDART API 키가 없습니다.")
-        start_date = (date.today() - timedelta(days=60)).strftime("%Y%m%d")
+        start_date = (now_in_app_timezone(self.config).date() - timedelta(days=60)).strftime("%Y%m%d")
         params = {
             "crtfc_key": self.config.opendart_api_key,
             "bgn_de": start_date,
@@ -83,9 +84,11 @@ class OpenDartClient:
                 raw = response.read()
             payload = _parse_corp_code_zip(raw)
         except (OSError, urllib.error.URLError, TimeoutError, zipfile.BadZipFile, ET.ParseError) as exc:
+            _record_event(self.cache, self.source, "error", f"OpenDART 고유번호 목록 호출 실패: {exc}")
             return SourceResponse(False, self.source, warning=f"OpenDART 고유번호 목록 호출 실패: {exc}")
 
         self.cache.set_json(cache_key, self.source, _redact_url(url), payload, ttl_seconds=60 * 60 * 24 * 7)
+        _record_event(self.cache, self.source, "success", "OpenDART 고유번호 목록을 갱신했습니다.")
         return SourceResponse(True, self.source, payload=payload)
 
     def _fetch_cached(self, url: str, cache_key: str) -> SourceResponse:
@@ -182,9 +185,11 @@ def _fetch_json(
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        _record_event(cache, source, "error", f"{source} 호출 실패: {exc}")
         return SourceResponse(False, source, warning=f"{source} 호출 실패: {exc}")
 
     cache.set_json(cache_key, source, _redact_url(url), payload, ttl_seconds=60 * 60 * 6)
+    _record_event(cache, source, "success", f"{source} 응답을 캐시에 저장했습니다.")
     return SourceResponse(True, source, payload=payload)
 
 
@@ -226,3 +231,10 @@ def _redact_url(url: str) -> str:
         if len(part) >= 20 and part.isalnum():
             parts[index] = "***"
     return "/".join(parts)
+
+
+def _record_event(cache: CacheStore, source: str, event_type: str, message: str) -> None:
+    try:
+        cache.record_source_event(source, event_type, message)
+    except Exception:
+        return

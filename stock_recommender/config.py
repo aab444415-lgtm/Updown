@@ -4,9 +4,11 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import gettempdir
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_TIMEZONE = "Asia/Seoul"
 
 
 @dataclass(frozen=True)
@@ -20,6 +22,7 @@ class AppConfig:
     ecos_api_key: str | None = None
     polygon_api_key: str | None = None
     news_api_key: str | None = None
+    timezone_name: str = DEFAULT_TIMEZONE
 
 
 def load_config(env_path: Path | None = None) -> AppConfig:
@@ -37,6 +40,7 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         ecos_api_key=_clean(merged.get("ECOS_API_KEY")),
         polygon_api_key=_clean(merged.get("POLYGON_API_KEY")),
         news_api_key=_clean(merged.get("NEWS_API_KEY")),
+        timezone_name=_timezone_name(_clean(merged.get("STOCK_RECOMMENDER_TIMEZONE"))),
     )
 
 
@@ -103,3 +107,12 @@ def _clean(value: str | None) -> str | None:
         return None
     cleaned = value.strip()
     return cleaned or None
+
+
+def _timezone_name(value: str | None) -> str:
+    name = value or DEFAULT_TIMEZONE
+    try:
+        ZoneInfo(name)
+    except ZoneInfoNotFoundError:
+        return DEFAULT_TIMEZONE
+    return name

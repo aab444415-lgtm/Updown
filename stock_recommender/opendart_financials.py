@@ -8,6 +8,7 @@ from .config import AppConfig
 from .models import Fundamentals, StockProfile
 from .official_sources import OpenDartClient
 from .storage import CacheStore
+from .time_utils import now_in_app_timezone
 
 
 REVENUE_NAMES = ("매출액", "수익(매출액)", "영업수익")
@@ -31,6 +32,7 @@ INTEREST_EXPENSE_NAMES = ("이자비용", "금융비용")
 
 class OpenDartFinancialClient:
     def __init__(self, config: AppConfig, cache: CacheStore, timeout: float = 10.0):
+        self.config = config
         self.dart = OpenDartClient(config, cache, timeout=timeout)
 
     def enrich_stocks(self, stocks: Iterable[StockProfile]) -> OpenDartFinancialResult:
@@ -62,7 +64,7 @@ class OpenDartFinancialClient:
                 continue
 
             fundamentals = None
-            for business_year in _candidate_years():
+            for business_year in _candidate_years(self.config):
                 response = self.dart.fetch_single_company_accounts(
                     corp_code=str(corp_info["corp_code"]),
                     business_year=str(business_year),
@@ -129,7 +131,7 @@ def extract_opendart_fundamentals(payload: dict, fallback: Fundamentals | None =
         debt_to_equity_pct=_coalesce(debt_to_equity_pct, fallback.debt_to_equity_pct),
         pe=fallback.pe,
         forward_pe=fallback.forward_pe,
-        market_cap_usd=fallback.market_cap_usd,
+        market_cap=fallback.market_cap,
         market_cap_currency=fallback.market_cap_currency or "KRW",
         revenue=_coalesce(revenue_current, fallback.revenue),
         operating_income=_coalesce(operating_income, fallback.operating_income),
@@ -146,8 +148,8 @@ def extract_opendart_fundamentals(payload: dict, fallback: Fundamentals | None =
     )
 
 
-def _candidate_years() -> tuple[int, ...]:
-    current_year = date.today().year
+def _candidate_years(config: AppConfig | None = None) -> tuple[int, ...]:
+    current_year = now_in_app_timezone(config).year
     return (current_year - 1, current_year - 2, current_year - 3)
 
 

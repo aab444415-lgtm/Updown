@@ -8,6 +8,7 @@ from .opendart_financials import OpenDartFinancialClient
 from .scoring import build_report
 from .sec_edgar import SecEdgarClient
 from .storage import CacheStore
+from .time_utils import now_in_app_timezone
 from .universe import DEFAULT_MACRO_CONTEXT, INDUSTRIES, STOCKS
 
 
@@ -30,11 +31,11 @@ def create_recommendation_report(
     warnings.extend(macro_snapshot.warnings)
 
     all_terms = tuple(term for industry in INDUSTRIES for term in industry.news_terms)
-    news_items = fetch_news(all_terms)
+    news_items = fetch_news(all_terms, cache=cache)
     if not news_items:
         warnings.append("뉴스 RSS 수집에 실패해 산업 테마 키워드만 사용했습니다.")
 
-    stocks = enrich_with_live_market_data(stocks)
+    stocks = enrich_with_live_market_data(stocks, cache=cache)
 
     if use_sec_fundamentals:
         sec_result = SecEdgarClient(config, cache).enrich_stocks(stocks)
@@ -48,7 +49,7 @@ def create_recommendation_report(
     warnings.extend(dart_result.warnings)
     live_fundamentals = live_fundamentals or live_korea_fundamentals
 
-    momentums = fetch_many_momentums(stock.ticker for stock in stocks)
+    momentums = fetch_many_momentums((stock.ticker for stock in stocks), cache=cache)
     live_market_data = any(
         any(value is not None for value in vars(momentum).values()) for momentum in momentums.values()
     )
@@ -65,6 +66,7 @@ def create_recommendation_report(
         news_items=news_items,
         momentums=momentums,
         macro_snapshot=macro_snapshot,
+        created_at=now_in_app_timezone(config),
         data_quality=DataQuality(
             live_news=bool(news_items),
             live_market_data=live_market_data,

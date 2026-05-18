@@ -8,7 +8,7 @@ from typing import Literal
 StockRole = Literal["core", "adjacent"]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class Fundamentals:
     revenue_growth_pct: float | None = None
     operating_margin_pct: float | None = None
@@ -16,7 +16,7 @@ class Fundamentals:
     debt_to_equity_pct: float | None = None
     pe: float | None = None
     forward_pe: float | None = None
-    market_cap_usd: float | None = None
+    market_cap: float | None = None
     market_cap_currency: str = "USD"
     revenue: float | None = None
     operating_income: float | None = None
@@ -30,6 +30,61 @@ class Fundamentals:
     current_ratio_pct: float | None = None
     interest_expense: float | None = None
     interest_coverage: float | None = None
+
+    def __init__(
+        self,
+        revenue_growth_pct: float | None = None,
+        operating_margin_pct: float | None = None,
+        roe_pct: float | None = None,
+        debt_to_equity_pct: float | None = None,
+        pe: float | None = None,
+        forward_pe: float | None = None,
+        market_cap: float | None = None,
+        market_cap_currency: str = "USD",
+        revenue: float | None = None,
+        operating_income: float | None = None,
+        ebitda: float | None = None,
+        net_income: float | None = None,
+        operating_cash_flow: float | None = None,
+        capital_expenditure: float | None = None,
+        free_cash_flow: float | None = None,
+        current_assets: float | None = None,
+        current_liabilities: float | None = None,
+        current_ratio_pct: float | None = None,
+        interest_expense: float | None = None,
+        interest_coverage: float | None = None,
+        market_cap_usd: float | None = None,
+    ) -> None:
+        if market_cap is None:
+            market_cap = market_cap_usd
+        values = {
+            "revenue_growth_pct": revenue_growth_pct,
+            "operating_margin_pct": operating_margin_pct,
+            "roe_pct": roe_pct,
+            "debt_to_equity_pct": debt_to_equity_pct,
+            "pe": pe,
+            "forward_pe": forward_pe,
+            "market_cap": market_cap,
+            "market_cap_currency": market_cap_currency,
+            "revenue": revenue,
+            "operating_income": operating_income,
+            "ebitda": ebitda,
+            "net_income": net_income,
+            "operating_cash_flow": operating_cash_flow,
+            "capital_expenditure": capital_expenditure,
+            "free_cash_flow": free_cash_flow,
+            "current_assets": current_assets,
+            "current_liabilities": current_liabilities,
+            "current_ratio_pct": current_ratio_pct,
+            "interest_expense": interest_expense,
+            "interest_coverage": interest_coverage,
+        }
+        for key, value in values.items():
+            object.__setattr__(self, key, value)
+
+    @property
+    def market_cap_usd(self) -> float | None:
+        return self.market_cap
 
 
 @dataclass(frozen=True)

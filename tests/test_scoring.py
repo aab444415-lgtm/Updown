@@ -1,9 +1,13 @@
+import json
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
+from http import HTTPStatus
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
-from stock_recommender.backtest import PricePoint, run_backtest
+from stock_recommender.backtest import PricePoint, SnapshotRecord, backtest_to_dict, run_backtest, run_snapshot_backtest
 from stock_recommender.config import configured_source_names, load_config, missing_optional_source_names
 from stock_recommender.macro_data import industry_macro_data_score
 from stock_recommender.models import DataQuality, Fundamentals, MacroIndicator, MacroSnapshot, Momentum, NewsItem, StockProfile
@@ -345,6 +349,16 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("FRED", configured_source_names(config))
         self.assertIn("OpenDART", missing_optional_source_names(config))
 
+    def test_load_config_defaults_to_korea_timezone(self):
+        with TemporaryDirectory() as tmpdir:
+            env_path = Path(tmpdir) / ".env"
+            env_path.write_text("", encoding="utf-8")
+
+            with patch.dict("os.environ", {"STOCK_RECOMMENDER_TIMEZONE": ""}):
+                config = load_config(env_path)
+
+        self.assertEqual(config.timezone_name, "Asia/Seoul")
+
 
 class SecEdgarTests(unittest.TestCase):
     def test_extract_fundamentals_from_companyfacts(self):
@@ -413,6 +427,28 @@ class SecEdgarTests(unittest.TestCase):
         self.assertEqual(fundamentals.free_cash_flow, 22)
         self.assertAlmostEqual(fundamentals.current_ratio_pct, 200.0)
         self.assertAlmostEqual(fundamentals.interest_coverage, 5.0)
+
+    def test_extract_fundamentals_uses_period_not_filed_date(self):
+        facts = {
+            "facts": {
+                "us-gaap": {
+                    "RevenueFromContractWithCustomerExcludingAssessedTax": {
+                        "units": {
+                            "USD": [
+                                _annual_fact("2023-01-01", "2023-12-31", "2025-02-01", 100),
+                                _annual_fact("2024-01-01", "2024-12-31", "2025-02-01", 130),
+                                _annual_fact("2024-01-01", "2024-12-31", "2026-02-01", 150),
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+
+        fundamentals = extract_fundamentals(facts)
+
+        self.assertEqual(fundamentals.revenue, 150)
+        self.assertAlmostEqual(fundamentals.revenue_growth_pct, 50.0)
 
 
 class OpenDartTests(unittest.TestCase):
@@ -485,6 +521,88 @@ class BacktestTests(unittest.TestCase):
         self.assertGreater(result.data_coverage_pct, 90)
         self.assertIn("NVDA", result.periods[-1].tickers)
 
+    def test_snapshot_backtest_uses_saved_snapshot_rankings(self):
+        histories = {
+            "AAA": _monthly_history(
+                {
+                    date(2025, 1, 31): 100,
+                    date(2025, 2, 28): 110,
+                    date(2025, 3, 31): 90,
+                    date(2025, 4, 30): 120,
+                }
+            ),
+            "BBB": _monthly_history(
+                {
+                    date(2025, 1, 31): 100,
+                    date(2025, 2, 28): 90,
+                    date(2025, 3, 31): 120,
+                    date(2025, 4, 30): 100,
+                }
+            ),
+            "SPY": _monthly_history(
+                {
+                    date(2025, 1, 31): 100,
+                    date(2025, 2, 28): 101,
+                    date(2025, 3, 31): 102,
+                    date(2025, 4, 30): 103,
+                }
+            ),
+            "QQQ": _monthly_history(
+                {
+                    date(2025, 1, 31): 100,
+                    date(2025, 2, 28): 101,
+                    date(2025, 3, 31): 102,
+                    date(2025, 4, 30): 103,
+                }
+            ),
+            "^KS11": _monthly_history(
+                {
+                    date(2025, 1, 31): 100,
+                    date(2025, 2, 28): 101,
+                    date(2025, 3, 31): 102,
+                    date(2025, 4, 30): 103,
+                }
+            ),
+        }
+        snapshots = (
+            _snapshot(date(2025, 1, 31), "AAA", "Alpha"),
+            _snapshot(date(2025, 2, 28), "BBB", "Beta"),
+            _snapshot(date(2025, 3, 31), "AAA", "Alpha"),
+        )
+
+        result = run_snapshot_backtest(
+            snapshots=snapshots,
+            histories=histories,
+            months=3,
+            top_n=1,
+            benchmark_ticker="SPY",
+            created_at=datetime(2025, 5, 1, 9, 0, tzinfo=ZoneInfo("Asia/Seoul")),
+            timezone_name="Asia/Seoul",
+        )
+        payload = backtest_to_dict(result)
+
+        self.assertTrue(result.point_in_time)
+        self.assertEqual(result.method, "snapshot")
+        self.assertEqual(result.periods[0].tickers, ("AAA",))
+        self.assertEqual(result.periods[1].tickers, ("BBB",))
+        self.assertEqual(payload["periods"][0]["snapshotDate"], "2025-01-31")
+
+    def test_snapshot_backtest_returns_clear_warning_when_snapshots_are_missing(self):
+        result = run_snapshot_backtest(
+            snapshots=(),
+            histories={},
+            months=3,
+            top_n=1,
+            benchmark_ticker="SPY",
+            created_at=datetime(2025, 5, 1, 9, 0, tzinfo=ZoneInfo("Asia/Seoul")),
+            timezone_name="Asia/Seoul",
+        )
+
+        self.assertTrue(result.point_in_time)
+        self.assertEqual(result.method, "snapshot")
+        self.assertEqual(result.periods, ())
+        self.assertIn("스냅샷이 부족", result.warnings[0])
+
 
 class SnapshotTests(unittest.TestCase):
     def test_snapshot_payload_and_daily_upsert(self):
@@ -525,6 +643,111 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn("mediumTermCandidates", rows[0]["payload"])
         self.assertIn("longTermCandidates", rows[0]["payload"])
 
+    def test_snapshot_payload_uses_v9_timezone_and_market_cap(self):
+        report = build_report(
+            macro_context=DEFAULT_MACRO_CONTEXT,
+            industries=INDUSTRIES,
+            stocks=STOCKS[:1],
+            news_items=(),
+            created_at=datetime(2026, 5, 18, 6, 30, tzinfo=ZoneInfo("Asia/Seoul")),
+        )
+
+        payload = report_to_snapshot_payload(report, mode="live")
+
+        self.assertEqual(payload["version"], 9)
+        self.assertEqual(payload["snapshotDate"], "2026-05-18")
+        self.assertEqual(payload["createdAtTimezone"], "Asia/Seoul")
+        self.assertIn("marketCap", payload["stocks"][0]["fundamentals"])
+        self.assertIn("marketCapUsd", payload["stocks"][0]["fundamentals"])
+
+    def test_snapshot_payload_uses_korea_date_after_utc_market_close(self):
+        created_at = datetime(2026, 5, 17, 21, 30, tzinfo=timezone.utc).astimezone(
+            ZoneInfo("Asia/Seoul")
+        )
+        report = build_report(
+            macro_context=DEFAULT_MACRO_CONTEXT,
+            industries=INDUSTRIES,
+            stocks=STOCKS[:1],
+            news_items=(),
+            created_at=created_at,
+        )
+
+        payload = report_to_snapshot_payload(report, mode="live")
+
+        self.assertEqual(payload["snapshotDate"], "2026-05-18")
+        self.assertEqual(payload["createdAtTimezone"], "Asia/Seoul")
+
+    def test_cache_store_records_source_events(self):
+        with TemporaryDirectory() as tmpdir:
+            cache = CacheStore(Path(tmpdir) / "cache.sqlite")
+            cache.record_source_event("Yahoo Finance", "error", "테스트 실패")
+            rows = cache.list_source_events(limit=5)
+
+        self.assertEqual(rows[0]["source"], "Yahoo Finance")
+        self.assertEqual(rows[0]["eventType"], "error")
+
+
+class ApiBoundaryTests(unittest.TestCase):
+    def test_backtest_api_hides_exception_detail_and_records_event(self):
+        import api.backtest as backtest_api
+
+        original_create = backtest_api.create_backtest
+        original_record = backtest_api._record_api_error
+        captured: dict[str, object] = {}
+        events: list[tuple[str, str]] = []
+
+        def explode(**kwargs):
+            raise RuntimeError("secret stack detail")
+
+        def send_json(payload, status=HTTPStatus.OK):
+            captured["payload"] = payload
+            captured["status"] = status
+
+        try:
+            backtest_api.create_backtest = explode
+            backtest_api._record_api_error = lambda source, exc: events.append((source, str(exc)))
+            fake_handler = object.__new__(backtest_api.handler)
+            fake_handler.path = "/api/backtest?method=snapshot"
+            fake_handler._send_json = send_json
+
+            backtest_api.handler.do_GET(fake_handler)
+        finally:
+            backtest_api.create_backtest = original_create
+            backtest_api._record_api_error = original_record
+
+        self.assertEqual(captured["status"], HTTPStatus.INTERNAL_SERVER_ERROR)
+        self.assertEqual(captured["payload"], {"error": "백테스트를 생성하지 못했습니다."})
+        self.assertNotIn("secret stack detail", json.dumps(captured["payload"], ensure_ascii=False))
+        self.assertEqual(events, [("api/backtest", "secret stack detail")])
+
+
+class StaticExportTests(unittest.TestCase):
+    def test_report_payload_raises_on_report_failure(self):
+        import scripts.export_cloudflare_static as export_static
+
+        original_create = export_static.create_recommendation_report
+
+        def explode(**kwargs):
+            raise RuntimeError("report failed")
+
+        try:
+            export_static.create_recommendation_report = explode
+            with self.assertRaisesRegex(RuntimeError, "report failed"):
+                export_static.report_payload()
+        finally:
+            export_static.create_recommendation_report = original_create
+
+    def test_empty_backtest_payload_keeps_public_fields_and_warning(self):
+        import scripts.export_cloudflare_static as export_static
+
+        payload = export_static.empty_backtest_payload(12, 5, "SPY", "partial failure")
+
+        self.assertEqual(payload["method"], "snapshot")
+        self.assertTrue(payload["pointInTime"])
+        self.assertEqual(payload["requiredSnapshotDays"], 13)
+        self.assertEqual(payload["warnings"], ["partial failure"])
+        self.assertIn("createdAtTimezone", payload)
+
 
 def _annual_fact(start: str, end: str, filed: str, value: float) -> dict:
     return {
@@ -556,6 +779,25 @@ def _history(start_price: float, daily_return: float) -> tuple[PricePoint, ...]:
             points.append(PricePoint(current, price))
         current += timedelta(days=1)
     return tuple(points)
+
+
+def _monthly_history(values: dict[date, float]) -> tuple[PricePoint, ...]:
+    return tuple(PricePoint(day, close) for day, close in sorted(values.items()))
+
+
+def _snapshot(snapshot_date: date, ticker: str, name: str) -> SnapshotRecord:
+    return SnapshotRecord(
+        snapshot_date=snapshot_date,
+        payload={
+            "stocks": [
+                {
+                    "ticker": ticker,
+                    "name": name,
+                    "score": 90,
+                }
+            ]
+        },
+    )
 
 
 if __name__ == "__main__":

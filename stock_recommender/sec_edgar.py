@@ -117,6 +117,7 @@ class SecEdgarClient:
         except DataSourceError:
             stale = self.cache.get_json(cache_key, allow_expired=True)
             if isinstance(stale, dict):
+                self._record_event("stale", "SEC 티커 목록 호출 실패로 만료 캐시를 사용했습니다.")
                 return {str(item["ticker"]).upper(): str(item["cik_str"]).zfill(10) for item in stale.values()}
             raise
         if not isinstance(payload, dict):
@@ -137,6 +138,7 @@ class SecEdgarClient:
         except DataSourceError:
             stale = self.cache.get_json(cache_key, allow_expired=True)
             if isinstance(stale, dict):
+                self._record_event("stale", f"CIK {normalized_cik} companyfacts 호출 실패로 만료 캐시를 사용했습니다.")
                 return CompanyFactsResult(stale, stale=True)
             raise
         if not isinstance(payload, dict):
@@ -160,12 +162,22 @@ class SecEdgarClient:
                 if response.headers.get("Content-Encoding") == "gzip":
                     raw = gzip.decompress(raw)
         except (OSError, urllib.error.URLError, TimeoutError) as exc:
+            self._record_event("error", f"SEC EDGAR 호출 실패: {exc}")
             raise DataSourceError(str(exc)) from exc
 
         try:
-            return json.loads(raw.decode("utf-8"))
+            payload = json.loads(raw.decode("utf-8"))
+            self._record_event("success", "SEC EDGAR 응답을 수집했습니다.")
+            return payload
         except json.JSONDecodeError as exc:
+            self._record_event("error", "SEC EDGAR JSON 파싱 실패")
             raise DataSourceError("JSON 파싱 실패") from exc
+
+    def _record_event(self, event_type: str, message: str) -> None:
+        try:
+            self.cache.record_source_event("SEC EDGAR", event_type, message)
+        except Exception:
+            return
 
 
 def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> Fundamentals:
@@ -218,7 +230,7 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
         debt_to_equity_pct=_coalesce(debt_to_equity_pct, fallback.debt_to_equity_pct),
         pe=fallback.pe,
         forward_pe=fallback.forward_pe,
-        market_cap_usd=fallback.market_cap_usd,
+        market_cap=fallback.market_cap,
         market_cap_currency=fallback.market_cap_currency,
         revenue=_coalesce(latest_revenue, fallback.revenue),
         operating_income=_coalesce(latest_operating_income, fallback.operating_income),
@@ -236,7 +248,7 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
 
 
 def _latest_and_previous(us_gaap: dict, tags: tuple[str, ...]) -> tuple[float | None, float | None]:
-    candidates: list[tuple[str, float]] = []
+    candidates: dict[str, tuple[str, float]] = {}
     for tag in tags:
         concept = us_gaap.get(tag)
         if not isinstance(concept, dict):
@@ -249,23 +261,31 @@ def _latest_and_previous(us_gaap: dict, tags: tuple[str, ...]) -> tuple[float | 
             if not _is_annual_fact(fact):
                 continue
             value = fact.get("val")
-            filed = fact.get("filed") or fact.get("end")
-            if isinstance(value, (int, float)) and math.isfinite(value) and filed:
-                candidates.append((str(filed), float(value)))
+            period = _annual_period_key(fact)
+            filed = str(fact.get("filed") or "")
+            if not isinstance(value, (int, float)) or not math.isfinite(value) or not period:
+                continue
+            existing = candidates.get(period)
+            if existing is None or filed >= existing[0]:
+                candidates[period] = (filed, float(value))
 
-    candidates.sort(key=lambda item: item[0])
-    unique: list[tuple[str, float]] = []
-    seen_periods: set[str] = set()
-    for period, value in reversed(candidates):
-        if period in seen_periods:
-            continue
-        seen_periods.add(period)
-        unique.append((period, value))
-        if len(unique) == 2:
-            break
+    unique = sorted(((period, value) for period, (_, value) in candidates.items()), key=lambda item: item[0], reverse=True)[:2]
     latest = unique[0][1] if unique else None
     previous = unique[1][1] if len(unique) > 1 else None
     return latest, previous
+
+
+def _annual_period_key(fact: dict) -> str | None:
+    end = fact.get("end")
+    if isinstance(end, str) and end:
+        return end
+    fy = fact.get("fy")
+    if isinstance(fy, (int, str)) and str(fy):
+        return str(fy)
+    frame = fact.get("frame")
+    if isinstance(frame, str) and frame.startswith("CY"):
+        return frame[:6]
+    return None
 
 
 def _is_annual_fact(fact: dict) -> bool:

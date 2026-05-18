@@ -5,6 +5,7 @@
 data/
 dist/
 reports/
+artifacts/
 node_modules/
 __pycache__/
 *.pyc

@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .backtest import BENCHMARKS, backtest_to_dict, create_backtest, fetch_price_history
+from .backtest import BACKTEST_METHODS, BENCHMARKS, backtest_to_dict, create_backtest, fetch_price_history
 from .config import load_config
 from .models import RecommendationReport
 from .pipeline import create_recommendation_report
@@ -41,7 +41,10 @@ def report_to_dict(report: RecommendationReport) -> dict:
         item.stock_score.stock.ticker.upper(): item for item in report.long_term_scores
     }
     return {
-        "createdAt": report.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "createdAt": report.created_at.isoformat(),
+        "createdAtDisplay": report.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "createdAtTimezone": _timezone_name(report.created_at),
+        "snapshotDate": report.created_at.date().isoformat(),
         "macroContext": report.macro_context,
         "dataQuality": {
             "liveNews": report.data_quality.live_news,
@@ -97,6 +100,7 @@ def report_to_dict(report: RecommendationReport) -> dict:
                     "debtToEquityPct": item.stock.fundamentals.debt_to_equity_pct,
                     "pe": item.stock.fundamentals.pe,
                     "forwardPe": item.stock.fundamentals.forward_pe,
+                    "marketCap": item.stock.fundamentals.market_cap,
                     "marketCapUsd": item.stock.fundamentals.market_cap_usd,
                     "marketCapCurrency": item.stock.fundamentals.market_cap_currency,
                     "revenue": item.stock.fundamentals.revenue,
@@ -315,6 +319,12 @@ def _macro_snapshot_to_dict(report: RecommendationReport) -> dict | None:
     }
 
 
+def _timezone_name(value) -> str:
+    if value.tzinfo is None:
+        return ""
+    return getattr(value.tzinfo, "key", None) or value.tzname() or str(value.tzinfo)
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     server_version = "StockRecommenderWeb/0.1"
 
@@ -326,7 +336,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/assets/"):
             requested = parsed.path.removeprefix("/assets/")
             asset_path = (WEB_DIR / requested).resolve()
-            if not str(asset_path).startswith(str(WEB_DIR.resolve())):
+            if not asset_path.is_relative_to(WEB_DIR.resolve()):
                 self.send_error(HTTPStatus.FORBIDDEN)
                 return
             self._serve_file(asset_path, include_body=False)
@@ -354,7 +364,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             try:
                 payload = report_to_dict(create_report(macro_context=macro_context))
             except Exception as exc:  # pragma: no cover - defensive server boundary
-                self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                _record_api_error("web/report", exc)
+                self._send_json({"error": "추천 리포트를 생성하지 못했습니다."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
             self._send_json(payload)
             return
@@ -364,14 +375,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
             months = _int_query(query, "months", 12)
             top_n = _int_query(query, "top", 5)
             benchmark = query.get("benchmark", ["SPY"])[0].upper()
+            method = query.get("method", ["snapshot"])[0].lower()
             if benchmark not in BENCHMARKS:
                 benchmark = "SPY"
+            if method not in BACKTEST_METHODS:
+                method = "snapshot"
             try:
                 payload = backtest_to_dict(
-                    create_backtest(months=months, top_n=top_n, benchmark_ticker=benchmark)
+                    create_backtest(
+                        months=months,
+                        top_n=top_n,
+                        benchmark_ticker=benchmark,
+                        method=method,
+                    )
                 )
             except Exception as exc:  # pragma: no cover - defensive server boundary
-                self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                _record_api_error("web/backtest", exc)
+                self._send_json({"error": "백테스트를 생성하지 못했습니다."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
             self._send_json(payload)
             return
@@ -382,7 +402,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             try:
                 payload = snapshot_history(limit=limit)
             except Exception as exc:  # pragma: no cover - defensive server boundary
-                self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                _record_api_error("web/snapshots", exc)
+                self._send_json({"error": "스냅샷 기록을 불러오지 못했습니다."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
             self._send_json(payload)
             return
@@ -390,7 +411,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/assets/"):
             requested = parsed.path.removeprefix("/assets/")
             asset_path = (WEB_DIR / requested).resolve()
-            if not str(asset_path).startswith(str(WEB_DIR.resolve())):
+            if not asset_path.is_relative_to(WEB_DIR.resolve()):
                 self.send_error(HTTPStatus.FORBIDDEN)
                 return
             self._serve_file(asset_path)
@@ -433,6 +454,14 @@ def _int_query(query: dict[str, list[str]], name: str, default: int) -> int:
         return int(query.get(name, [str(default)])[0])
     except (TypeError, ValueError):
         return default
+
+
+def _record_api_error(source: str, exc: Exception) -> None:
+    try:
+        config = load_config()
+        CacheStore(config.cache_db_path).record_source_event(source, "error", str(exc))
+    except Exception:
+        return
 
 
 def main(argv: list[str] | None = None) -> int:
