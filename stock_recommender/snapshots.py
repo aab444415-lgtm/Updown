@@ -18,7 +18,7 @@ class SavedSnapshot:
     top_score: float | None
 
 
-def save_recommendation_snapshot(report: RecommendationReport, mode: str) -> SavedSnapshot:
+def save_recommendation_snapshot(report: RecommendationReport, mode: str = "live") -> SavedSnapshot:
     config = load_config()
     cache = CacheStore(config.cache_db_path)
     payload = report_to_snapshot_payload(report, mode=mode)
@@ -44,7 +44,7 @@ def save_recommendation_snapshot(report: RecommendationReport, mode: str) -> Sav
 def snapshot_history(limit: int = 30) -> dict:
     config = load_config()
     cache = CacheStore(config.cache_db_path)
-    rows = cache.list_recommendation_snapshots(limit=limit)
+    rows = cache.list_recommendation_snapshots(limit=limit, mode="live")
     unique_dates = sorted({row["snapshotDate"] for row in rows})
     latest = rows[0] if rows else None
     return {
@@ -58,7 +58,7 @@ def snapshot_history(limit: int = 30) -> dict:
     }
 
 
-def report_to_snapshot_payload(report: RecommendationReport, mode: str) -> dict:
+def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live") -> dict:
     created_at = report.created_at
     return {
         "version": 8,

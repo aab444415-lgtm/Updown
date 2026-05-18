@@ -73,32 +73,11 @@ select {
   gap: 12px;
 }
 
-.segmented {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(78px, 1fr));
-  min-width: 172px;
-  padding: 4px;
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 8px;
-}
-
-.segment,
 .refresh-button {
   min-height: 38px;
   border: 0;
   border-radius: 6px;
   cursor: pointer;
-}
-
-.segment {
-  color: rgba(255, 255, 255, 0.78);
-  background: transparent;
-}
-
-.segment.active {
-  color: var(--surface-strong);
-  background: #fff;
 }
 
 .refresh-button {
@@ -1521,10 +1500,6 @@ main {
 
   .toolbar {
     display: grid;
-  }
-
-  .segmented {
-    min-width: 0;
   }
 
   .refresh-button {

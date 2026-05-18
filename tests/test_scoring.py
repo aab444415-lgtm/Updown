@@ -491,13 +491,13 @@ class SnapshotTests(unittest.TestCase):
             stocks=STOCKS,
             news_items=(),
         )
-        payload = report_to_snapshot_payload(report, mode="sample")
+        payload = report_to_snapshot_payload(report, mode="live")
 
         with TemporaryDirectory() as tmpdir:
             cache = CacheStore(Path(tmpdir) / "cache.sqlite")
             first_id = cache.save_recommendation_snapshot(
                 snapshot_date=payload["snapshotDate"],
-                mode="sample",
+                mode="live",
                 top_ticker=payload["stocks"][0]["ticker"],
                 top_name=payload["stocks"][0]["name"],
                 top_score=payload["stocks"][0]["score"],
@@ -505,7 +505,7 @@ class SnapshotTests(unittest.TestCase):
             )
             second_id = cache.save_recommendation_snapshot(
                 snapshot_date=payload["snapshotDate"],
-                mode="sample",
+                mode="live",
                 top_ticker=payload["stocks"][0]["ticker"],
                 top_name=payload["stocks"][0]["name"],
                 top_score=payload["stocks"][0]["score"],

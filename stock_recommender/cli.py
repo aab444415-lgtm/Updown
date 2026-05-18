@@ -14,7 +14,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="뉴스, 거시경제, 산업, 기업 지표를 합쳐 주식 리서치 후보를 추천합니다."
     )
-    parser.add_argument("--live", action="store_true", help="뉴스와 시장 데이터를 실시간으로 가져옵니다.")
     parser.add_argument("--macro", default=DEFAULT_MACRO_CONTEXT, help="거시경제/시장 상황 설명 문장")
     parser.add_argument("--top-industries", type=int, default=3, help="표시할 산업 수")
     parser.add_argument("--top-stocks", type=int, default=6, help="표시할 종목 수")
@@ -23,12 +22,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--skip-sec",
         action="store_true",
-        help="라이브 모드에서 SEC EDGAR 재무제표 갱신을 건너뜁니다.",
+        help="SEC EDGAR 재무제표 갱신을 건너뜁니다.",
     )
     args = parser.parse_args(argv)
 
     report = create_recommendation_report(
-        live=args.live,
         macro_context=args.macro,
         use_sec_fundamentals=not args.skip_sec,
     )
@@ -42,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
         print(output)
 
     if args.save_snapshot:
-        mode = "live" if args.live else "sample"
+        mode = "live"
         saved = save_recommendation_snapshot(report, mode=mode)
         top = f"{saved.top_name} ({saved.top_ticker}) {saved.top_score:.1f}점" if saved.top_ticker else "-"
         print(f"스냅샷 저장 완료: {saved.snapshot_date} / {mode} / 상위 종목 {top}")

@@ -12,7 +12,6 @@ from .universe import DEFAULT_MACRO_CONTEXT, INDUSTRIES, STOCKS
 
 
 def create_recommendation_report(
-    live: bool = False,
     macro_context: str = DEFAULT_MACRO_CONTEXT,
     use_sec_fundamentals: bool = True,
 ) -> RecommendationReport:
@@ -27,37 +26,34 @@ def create_recommendation_report(
     live_korea_fundamentals = False
     macro_snapshot = None
 
-    if live:
-        macro_snapshot = fetch_macro_snapshot(config, cache)
-        warnings.extend(macro_snapshot.warnings)
+    macro_snapshot = fetch_macro_snapshot(config, cache)
+    warnings.extend(macro_snapshot.warnings)
 
-        all_terms = tuple(term for industry in INDUSTRIES for term in industry.news_terms)
-        news_items = fetch_news(all_terms)
-        if not news_items:
-            warnings.append("뉴스 RSS 수집에 실패해 내장 산업 테마만 사용했습니다.")
+    all_terms = tuple(term for industry in INDUSTRIES for term in industry.news_terms)
+    news_items = fetch_news(all_terms)
+    if not news_items:
+        warnings.append("뉴스 RSS 수집에 실패해 산업 테마 키워드만 사용했습니다.")
 
-        stocks = enrich_with_live_market_data(stocks)
+    stocks = enrich_with_live_market_data(stocks)
 
-        if use_sec_fundamentals:
-            sec_result = SecEdgarClient(config, cache).enrich_stocks(stocks)
-            stocks = sec_result.stocks
-            live_fundamentals = sec_result.updated_count > 0
-            warnings.extend(sec_result.warnings)
+    if use_sec_fundamentals:
+        sec_result = SecEdgarClient(config, cache).enrich_stocks(stocks)
+        stocks = sec_result.stocks
+        live_fundamentals = sec_result.updated_count > 0
+        warnings.extend(sec_result.warnings)
 
-        dart_result = OpenDartFinancialClient(config, cache).enrich_stocks(stocks)
-        stocks = dart_result.stocks
-        live_korea_fundamentals = dart_result.updated_count > 0
-        warnings.extend(dart_result.warnings)
-        live_fundamentals = live_fundamentals or live_korea_fundamentals
+    dart_result = OpenDartFinancialClient(config, cache).enrich_stocks(stocks)
+    stocks = dart_result.stocks
+    live_korea_fundamentals = dart_result.updated_count > 0
+    warnings.extend(dart_result.warnings)
+    live_fundamentals = live_fundamentals or live_korea_fundamentals
 
-        momentums = fetch_many_momentums(stock.ticker for stock in stocks)
-        live_market_data = any(
-            any(value is not None for value in vars(momentum).values()) for momentum in momentums.values()
-        )
-        if not live_market_data:
-            warnings.append("시장 가격 모멘텀 수집에 실패해 중립 점수로 계산했습니다.")
-    else:
-        warnings.append("샘플 모드입니다. 내장 지표와 중립 모멘텀으로 계산했습니다.")
+    momentums = fetch_many_momentums(stock.ticker for stock in stocks)
+    live_market_data = any(
+        any(value is not None for value in vars(momentum).values()) for momentum in momentums.values()
+    )
+    if not live_market_data:
+        warnings.append("시장 가격 모멘텀 수집에 실패해 중립 점수로 계산했습니다.")
 
     if "your-email@example.com" in config.sec_user_agent:
         warnings.append(".env의 SEC_USER_AGENT를 본인 이메일이 포함된 값으로 바꾸면 SEC 접근 정책에 더 잘 맞습니다.")

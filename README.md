@@ -21,13 +21,7 @@ python3 -m stock_recommender.web
 
 Cloudflare Pages 자동 업데이트는 [docs/cloudflare-auto-update.md](docs/cloudflare-auto-update.md)를 참고하세요.
 
-라이브 데이터 수집을 시도하려면:
-
-```bash
-python3 -m stock_recommender.cli --live
-```
-
-`--live`는 Google News/Yahoo Finance 공개 데이터, SEC EDGAR, OpenDART, FRED, ECOS 갱신을 시도합니다.
+기본 실행은 항상 Google News/Yahoo Finance 공개 데이터, SEC EDGAR, OpenDART, FRED, ECOS 갱신을 시도합니다. 외부 데이터가 일부 실패하면 기본 유니버스 지표와 중립 모멘텀을 보조값으로 사용하고 경고에 남깁니다.
 
 특정 산업 개수와 종목 개수를 조정하려면:
 
@@ -62,13 +56,13 @@ python3 -m stock_recommender.backtest_cli --months 12 --top 5 --benchmark SPY --
 오늘의 추천 결과를 포인트인타임 스냅샷으로 저장하려면:
 
 ```bash
-python3 -m stock_recommender.snapshot_cli --live
+python3 -m stock_recommender.snapshot_cli
 ```
 
 리포트 생성과 동시에 저장하려면:
 
 ```bash
-python3 -m stock_recommender.cli --live --save-snapshot --output reports/today.md
+python3 -m stock_recommender.cli --save-snapshot --output reports/today.md
 ```
 
 ## 1단계 데이터 연결 설정
@@ -149,7 +143,7 @@ ECOS_API_KEY=""
 
 ## 4단계 포인트인타임 스냅샷
 
-추천 결과를 `data/cache.sqlite`의 `recommendation_snapshots` 테이블에 일별로 저장합니다. 같은 날짜와 같은 모드의 스냅샷은 최신 결과로 갱신됩니다.
+추천 결과를 `data/cache.sqlite`의 `recommendation_snapshots` 테이블에 일별로 저장합니다. 같은 날짜의 라이브 스냅샷은 최신 결과로 갱신됩니다.
 
 저장되는 항목:
 
@@ -169,7 +163,7 @@ ECOS_API_KEY=""
 - FRED와 ECOS에서 금리, 물가, 고용, 달러, 원/달러 환율을 가져와 산업 점수에 반영합니다.
 - 과거 가격 데이터로 월별 리밸런싱 백테스트를 실행합니다.
 - 추천 점수와 근거를 일별 스냅샷으로 저장합니다.
-- 네트워크나 API가 실패하면 내장 샘플 지표로 계속 실행됩니다.
+- 네트워크나 API가 실패하면 기본 유니버스 지표와 중립 모멘텀으로 계속 실행하고 경고를 표시합니다.
 - 산업별 핵심 기업과 부가 기업을 분리해서 추천 후보를 만듭니다.
 - 중소형/초기 성장 후보를 별도 유니버스와 랭킹으로 추적합니다.
 - 단기 매매 후보를 뉴스, 시장 모멘텀, 차트 위치, 기업 데이터 기준으로 따로 정렬합니다.

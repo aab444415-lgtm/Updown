@@ -76,7 +76,7 @@ class OpenDartFinancialClient:
                 break
 
             if fundamentals is None:
-                warnings.append(f"{stock.ticker} OpenDART 연간 재무제표를 찾지 못해 샘플 지표를 유지했습니다.")
+                warnings.append(f"{stock.ticker} OpenDART 연간 재무제표를 찾지 못해 기본 유니버스 지표를 유지했습니다.")
                 enriched.append(stock)
                 continue
 

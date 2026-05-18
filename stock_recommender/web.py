@@ -22,8 +22,8 @@ from .universe import DEFAULT_MACRO_CONTEXT
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 
-def create_report(live: bool = False, macro_context: str = DEFAULT_MACRO_CONTEXT) -> RecommendationReport:
-    return create_recommendation_report(live=live, macro_context=macro_context)
+def create_report(macro_context: str = DEFAULT_MACRO_CONTEXT) -> RecommendationReport:
+    return create_recommendation_report(macro_context=macro_context)
 
 
 def report_to_dict(report: RecommendationReport) -> dict:
@@ -349,10 +349,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/report":
             query = parse_qs(parsed.query)
-            live = query.get("live", ["0"])[0] in {"1", "true", "yes"}
             macro_context = query.get("macro", [DEFAULT_MACRO_CONTEXT])[0] or DEFAULT_MACRO_CONTEXT
             try:
-                payload = report_to_dict(create_report(live=live, macro_context=macro_context))
+                payload = report_to_dict(create_report(macro_context=macro_context))
             except Exception as exc:  # pragma: no cover - defensive server boundary
                 self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return

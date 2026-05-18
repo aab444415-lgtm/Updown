@@ -102,10 +102,12 @@ class CacheStore:
             ).fetchone()
         return int(row["id"]) if row is not None else 0
 
-    def list_recommendation_snapshots(self, limit: int = 30) -> list[dict]:
+    def list_recommendation_snapshots(self, limit: int = 30, mode: str | None = None) -> list[dict]:
+        where_clause = "where mode = ?" if mode else ""
+        params: tuple[object, ...] = (mode, limit) if mode else (limit,)
         with self._connect() as connection:
             rows = connection.execute(
-                """
+                f"""
                 select
                     id,
                     snapshot_date,
@@ -116,10 +118,11 @@ class CacheStore:
                     payload,
                     created_at
                 from recommendation_snapshots
+                {where_clause}
                 order by snapshot_date desc, created_at desc
                 limit ?
                 """,
-                (limit,),
+                params,
             ).fetchall()
         snapshots: list[dict] = []
         for row in rows:

@@ -1,5 +1,4 @@
 const state = {
-  mode: "sample",
   report: null,
   backtest: null,
   snapshots: null,
@@ -75,16 +74,6 @@ const PAGE_IDS = new Set([
   "news",
 ]);
 
-document.querySelectorAll(".segment").forEach((button) => {
-  button.addEventListener("click", () => {
-    state.mode = button.dataset.mode;
-    document.querySelectorAll(".segment").forEach((item) => {
-      item.classList.toggle("active", item.dataset.mode === state.mode);
-    });
-    loadReport();
-  });
-});
-
 elements.refreshButton.addEventListener("click", () => loadReport());
 elements.backtestButton.addEventListener("click", () => loadBacktest());
 elements.snapshotRefreshButton.addEventListener("click", () => loadSnapshots());
@@ -98,10 +87,9 @@ window.addEventListener("hashchange", () => showPage(pageFromHash()));
 async function loadReport() {
   setLoading(true);
   try {
-    const live = state.mode === "live" ? "1" : "0";
     state.report = await fetchJsonWithFallback(
-      `/api/report?live=${live}`,
-      [`/data/report-${state.mode}.json`, "/data/report-sample.json"],
+      "/api/report",
+      ["/data/report-live.json"],
       "리포트를 불러오지 못했습니다."
     );
     state.selectedTicker = state.report.stocks[0]?.ticker ?? null;
@@ -156,9 +144,9 @@ function render() {
   if (!report) return;
 
   elements.createdAt.textContent = report.createdAt;
-  elements.newsStatus.textContent = report.dataQuality.liveNews ? "실시간" : "샘플";
-  elements.marketStatus.textContent = report.dataQuality.liveMarketData ? "실시간" : "중립";
-  elements.fundamentalStatus.textContent = report.dataQuality.liveFundamentals ? "공식 반영" : "샘플";
+  elements.newsStatus.textContent = report.dataQuality.liveNews ? "수집됨" : "미수집";
+  elements.marketStatus.textContent = report.dataQuality.liveMarketData ? "수집됨" : "중립";
+  elements.fundamentalStatus.textContent = report.dataQuality.liveFundamentals ? "공식 반영" : "보조지표";
   elements.topTicker.textContent = report.stocks[0]
     ? `${report.stocks[0].ticker} ${formatScore(report.stocks[0].score)}`
     : "-";
@@ -703,7 +691,7 @@ function renderNews() {
   const news = state.report.news;
   elements.newsList.innerHTML = "";
   if (!news.length) {
-    elements.newsList.innerHTML = `<div class="empty-state">라이브 모드에서 뉴스가 표시됩니다.</div>`;
+    elements.newsList.innerHTML = `<div class="empty-state">뉴스 수집 결과가 없습니다.</div>`;
     return;
   }
   news.forEach((item) => {

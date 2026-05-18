@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import json
 import shutil
 import sys
@@ -22,11 +21,7 @@ DIST_DIR = ROOT_DIR / "dist"
 
 def main() -> int:
     build_shell()
-    sample_payload = report_to_dict(
-        create_recommendation_report(live=False, macro_context=DEFAULT_MACRO_CONTEXT)
-    )
-    write_json(DIST_DIR / "data" / "report-sample.json", sample_payload)
-    write_json(DIST_DIR / "data" / "report-live.json", live_report_payload(sample_payload))
+    write_json(DIST_DIR / "data" / "report-live.json", report_payload())
     export_backtests()
     write_json(DIST_DIR / "data" / "snapshots.json", snapshots_payload())
     return 0
@@ -55,17 +50,38 @@ def build_shell() -> None:
     )
 
 
-def live_report_payload(sample_payload: dict) -> dict:
+def report_payload() -> dict:
     try:
         return report_to_dict(
-            create_recommendation_report(live=True, macro_context=DEFAULT_MACRO_CONTEXT)
+            create_recommendation_report(macro_context=DEFAULT_MACRO_CONTEXT)
         )
     except Exception as exc:
-        payload = copy.deepcopy(sample_payload)
-        payload["dataQuality"]["warnings"].append(
-            f"Cloudflare 배포용 정적 생성 중 라이브 리포트 생성 실패: {exc}"
-        )
-        return payload
+        return empty_report_payload(f"Cloudflare 배포용 정적 생성 중 리포트 생성 실패: {exc}")
+
+
+def empty_report_payload(warning: str) -> dict:
+    return {
+        "createdAt": "",
+        "macroContext": DEFAULT_MACRO_CONTEXT,
+        "dataQuality": {
+            "liveNews": False,
+            "liveMarketData": False,
+            "liveFundamentals": False,
+            "liveMacro": False,
+            "liveKoreaFundamentals": False,
+            "configuredSources": [],
+            "missingSources": [],
+            "warnings": [warning],
+        },
+        "macroSnapshot": None,
+        "industries": [],
+        "stocks": [],
+        "shortTermCandidates": [],
+        "mediumTermCandidates": [],
+        "longTermCandidates": [],
+        "earlyGrowthCandidates": [],
+        "news": [],
+    }
 
 
 def export_backtests() -> None:

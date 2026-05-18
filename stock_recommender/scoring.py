@@ -1419,7 +1419,7 @@ def early_growth_cautions(
     fundamentals = stock.fundamentals
     cautions: list[str] = []
     if fundamentals.market_cap_usd is None:
-        cautions.append("시가총액 데이터가 부족해 라이브 모드에서 규모 필터를 다시 확인해야 함")
+        cautions.append("시가총액 데이터가 부족해 규모 필터를 다시 확인해야 함")
     if size_score <= 30:
         cautions.append("이미 대형주에 가까워 작은 회사 리레이팅 효과는 제한적일 수 있음")
     if pullback_score < 45:
