@@ -2,7 +2,7 @@
 
 이 저장소는 Cloudflare Pages가 빌드할 때 `python3 scripts/export_cloudflare_static.py`를 실행해서 최신 추천 JSON을 생성합니다.
 
-GitHub Actions는 매일 한국시간 06:30에 Cloudflare Pages Deploy Hook을 호출합니다. 그러면 Cloudflare가 다시 빌드하고 사이트의 미국주식 Top3, 국내주식 Top3, 백테스트 JSON을 새로 만듭니다.
+GitHub Actions는 매일 한국시간 06:30에 추천 스냅샷을 `snapshot_store/recommendation_snapshots.json`에 저장해 커밋한 뒤 Cloudflare Pages Deploy Hook을 호출합니다. 그러면 Cloudflare가 다시 빌드하고 사이트의 미국주식 Top3, 국내주식 Top3, 스냅샷 기록, 백테스트 JSON을 새로 만듭니다.
 
 ## 1. Cloudflare Deploy Hook 만들기
 
@@ -29,6 +29,15 @@ GitHub 저장소에서:
 5. Name: `CLOUDFLARE_PAGES_DEPLOY_HOOK`
 6. Secret: Cloudflare에서 복사한 Deploy Hook URL
 
+스냅샷 생성 품질을 높이려면 같은 위치에 아래 secret도 추가합니다.
+
+```text
+SEC_USER_AGENT=stock-recommender/0.1 your-email@example.com
+OPENDART_API_KEY=발급받은키
+FRED_API_KEY=발급받은키
+ECOS_API_KEY=발급받은키
+```
+
 ## 3. Cloudflare 환경변수 확인
 
 Cloudflare Pages 프로젝트의 Environment variables에 아래 값을 넣으면 라이브 데이터 품질이 좋아집니다.
@@ -36,6 +45,7 @@ Cloudflare Pages 프로젝트의 Environment variables에 아래 값을 넣으�
 ```text
 SEC_USER_AGENT=stock-recommender/0.1 your-email@example.com
 STOCK_RECOMMENDER_TIMEZONE=Asia/Seoul
+STOCK_RECOMMENDER_SNAPSHOT_STORE_PATH=snapshot_store/recommendation_snapshots.json
 OPENDART_API_KEY=발급받은키
 FRED_API_KEY=발급받은키
 ECOS_API_KEY=발급받은키

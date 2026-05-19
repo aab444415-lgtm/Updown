@@ -15,7 +15,8 @@ from stock_recommender.opendart_financials import extract_opendart_fundamentals
 from stock_recommender.report import render_markdown
 from stock_recommender.scoring import build_report, decision_grade_for_stock, quality_score, valuation_score
 from stock_recommender.sec_edgar import extract_fundamentals
-from stock_recommender.snapshots import report_to_snapshot_payload
+from stock_recommender.snapshot_store import SnapshotFileStore
+from stock_recommender.snapshots import report_to_snapshot_payload, snapshot_history
 from stock_recommender.storage import CacheStore
 from stock_recommender.universe import DEFAULT_MACRO_CONTEXT, INDUSTRIES, STOCKS
 
@@ -685,6 +686,41 @@ class SnapshotTests(unittest.TestCase):
 
         self.assertEqual(rows[0]["source"], "Yahoo Finance")
         self.assertEqual(rows[0]["eventType"], "error")
+
+    def test_snapshot_history_reads_persistent_file_store(self):
+        with TemporaryDirectory() as tmpdir:
+            ledger_path = Path(tmpdir) / "snapshot_store" / "recommendation_snapshots.json"
+            report = build_report(
+                macro_context=DEFAULT_MACRO_CONTEXT,
+                industries=INDUSTRIES,
+                stocks=STOCKS[:1],
+                news_items=(),
+                created_at=datetime(2026, 5, 19, 6, 30, tzinfo=ZoneInfo("Asia/Seoul")),
+            )
+            payload = report_to_snapshot_payload(report, mode="live")
+            top_stock = report.stock_scores[0]
+            SnapshotFileStore(ledger_path).save_snapshot(
+                snapshot_date=payload["snapshotDate"],
+                mode="live",
+                top_ticker=top_stock.stock.ticker,
+                top_name=top_stock.stock.name,
+                top_score=top_stock.score,
+                payload=payload,
+            )
+
+            with patch.dict(
+                "os.environ",
+                {
+                    "STOCK_RECOMMENDER_DATA_DIR": str(Path(tmpdir) / "data"),
+                    "STOCK_RECOMMENDER_SNAPSHOT_STORE_PATH": str(ledger_path),
+                    "STOCK_RECOMMENDER_TIMEZONE": "Asia/Seoul",
+                },
+            ):
+                history = snapshot_history(limit=10)
+
+        self.assertEqual(history["snapshotCount"], 1)
+        self.assertEqual(history["uniqueDays"], 1)
+        self.assertEqual(history["latest"]["snapshotDate"], "2026-05-19")
 
 
 class ApiBoundaryTests(unittest.TestCase):

@@ -5,6 +5,7 @@ from datetime import datetime
 
 from .config import load_config
 from .models import RecommendationReport
+from .snapshot_store import list_snapshot_rows, save_persistent_snapshot
 from .storage import CacheStore
 
 
@@ -31,8 +32,17 @@ def save_recommendation_snapshot(report: RecommendationReport, mode: str = "live
         top_score=top_stock.score if top_stock else None,
         payload=payload,
     )
+    persistent_id = save_persistent_snapshot(
+        config,
+        snapshot_date=payload["snapshotDate"],
+        mode=mode,
+        top_ticker=top_stock.stock.ticker if top_stock else None,
+        top_name=top_stock.stock.name if top_stock else None,
+        top_score=top_stock.score if top_stock else None,
+        payload=payload,
+    )
     return SavedSnapshot(
-        id=snapshot_id,
+        id=persistent_id or snapshot_id,
         snapshot_date=payload["snapshotDate"],
         mode=mode,
         top_ticker=top_stock.stock.ticker if top_stock else None,
@@ -44,7 +54,7 @@ def save_recommendation_snapshot(report: RecommendationReport, mode: str = "live
 def snapshot_history(limit: int = 30) -> dict:
     config = load_config()
     cache = CacheStore(config.cache_db_path)
-    rows = cache.list_recommendation_snapshots(limit=limit, mode="live")
+    rows = list_snapshot_rows(config, cache, limit=limit, mode="live")
     unique_dates = sorted({row["snapshotDate"] for row in rows})
     latest = rows[0] if rows else None
     return {

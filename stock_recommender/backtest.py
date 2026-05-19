@@ -10,10 +10,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
-from .config import load_config
+from .config import AppConfig, load_config
 from .data_sources import _open_url
 from .models import IndustryProfile, Momentum, StockProfile
 from .scoring import score_industries, score_stocks
+from .snapshot_store import list_snapshot_rows
 from .storage import CacheStore
 from .time_utils import now_in_app_timezone
 from .universe import DEFAULT_MACRO_CONTEXT, INDUSTRIES, STOCKS
@@ -102,6 +103,7 @@ def create_backtest(
     created_at = now_in_app_timezone(config)
     if method == "snapshot":
         return create_snapshot_backtest(
+            config=config,
             cache=cache,
             months=months,
             top_n=top_n,
@@ -134,6 +136,7 @@ def create_backtest(
 
 
 def create_snapshot_backtest(
+    config: AppConfig,
     cache: CacheStore,
     months: int,
     top_n: int,
@@ -142,7 +145,7 @@ def create_snapshot_backtest(
     created_at: datetime,
     timezone_name: str,
 ) -> BacktestResult:
-    rows = cache.list_recommendation_snapshots(limit=max(365, months * 40), mode="live")
+    rows = list_snapshot_rows(config, cache, limit=max(365, months * 40), mode="live")
     snapshots = _snapshot_records(rows)
     if len({snapshot.snapshot_date for snapshot in snapshots}) < 2:
         return run_snapshot_backtest(

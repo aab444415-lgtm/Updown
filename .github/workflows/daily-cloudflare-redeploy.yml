@@ -7,9 +7,43 @@ on:
   workflow_dispatch:
 
 jobs:
-  trigger-cloudflare:
+  snapshot-and-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Save daily recommendation snapshot
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          OPENDART_API_KEY: ${{ secrets.OPENDART_API_KEY }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          ECOS_API_KEY: ${{ secrets.ECOS_API_KEY }}
+          STOCK_RECOMMENDER_TIMEZONE: Asia/Seoul
+        run: |
+          python3 -m stock_recommender.snapshot_cli
+
+      - name: Commit snapshot ledger
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add snapshot_store/recommendation_snapshots.json
+          if git diff --cached --quiet; then
+            echo "No snapshot ledger changes to commit."
+          else
+            git commit -m "Update daily recommendation snapshot"
+            git push
+          fi
+
       - name: Check deploy hook secret
         env:
           CLOUDFLARE_PAGES_DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}

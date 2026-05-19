@@ -65,6 +65,8 @@ python3 -m stock_recommender.backtest_cli --method legacy --months 12 --top 5 --
 python3 -m stock_recommender.snapshot_cli
 ```
 
+스냅샷은 로컬 SQLite 캐시와 함께 `snapshot_store/recommendation_snapshots.json`에도 저장됩니다. 이 JSON ledger는 GitHub Actions가 매일 갱신하고 커밋하므로 Cloudflare의 임시 빌드 환경에서도 과거 스냅샷을 읽을 수 있습니다.
+
 리포트 생성과 동시에 저장하려면:
 
 ```bash
@@ -84,6 +86,7 @@ cp .env.example .env
 ```bash
 SEC_USER_AGENT="stock-recommender/0.1 your-email@example.com"
 STOCK_RECOMMENDER_TIMEZONE="Asia/Seoul"
+STOCK_RECOMMENDER_SNAPSHOT_STORE_PATH=""
 OPENDART_API_KEY=""
 FRED_API_KEY=""
 ECOS_API_KEY=""
@@ -104,6 +107,7 @@ ECOS_API_KEY=""
 - OpenDART/FRED/ECOS 키 응답 상태 진단
 - FRED 금리/물가/고용/달러 지표와 ECOS 원달러 환율을 산업 점수에 반영
 - 웹/리포트의 데이터 품질 표시
+- GitHub Actions가 갱신하는 repo 기반 스냅샷 ledger
 
 비용 기준:
 
