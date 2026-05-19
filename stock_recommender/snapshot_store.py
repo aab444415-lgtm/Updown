@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import AppConfig
@@ -9,6 +9,10 @@ from .storage import CacheStore
 
 
 STORE_VERSION = 1
+
+
+class SnapshotStoreError(RuntimeError):
+    pass
 
 
 class SnapshotFileStore:
@@ -49,6 +53,7 @@ class SnapshotFileStore:
         document = {
             "version": STORE_VERSION,
             "snapshots": _sort_rows(snapshots),
+            "lastUpdatedAt": datetime.now(timezone.utc).isoformat(),
         }
         self._write(document)
         return snapshot_id
@@ -61,13 +66,14 @@ class SnapshotFileStore:
 
     def _read(self) -> dict:
         if not self.path.exists():
-            return {"version": STORE_VERSION, "snapshots": []}
+            return _empty_document()
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return {"version": STORE_VERSION, "snapshots": []}
-        if not isinstance(payload, dict):
-            return {"version": STORE_VERSION, "snapshots": []}
+        except OSError as exc:
+            raise SnapshotStoreError(f"스냅샷 ledger를 읽지 못했습니다: {self.path}") from exc
+        except json.JSONDecodeError as exc:
+            raise SnapshotStoreError(f"스냅샷 ledger JSON 파싱 실패: {self.path}") from exc
+        _validate_document(payload, self.path)
         return payload
 
     def _write(self, document: dict) -> None:
@@ -122,6 +128,28 @@ def _valid_rows(value: object) -> list[dict]:
     if not isinstance(value, list):
         return []
     return [row for row in value if isinstance(row, dict) and isinstance(row.get("payload"), dict)]
+
+
+def _empty_document() -> dict:
+    return {
+        "version": STORE_VERSION,
+        "snapshots": [],
+        "lastUpdatedAt": None,
+    }
+
+
+def _validate_document(payload: object, path: Path) -> None:
+    if not isinstance(payload, dict):
+        raise SnapshotStoreError(f"스냅샷 ledger 최상위 구조가 올바르지 않습니다: {path}")
+    if payload.get("version") != STORE_VERSION:
+        raise SnapshotStoreError(f"스냅샷 ledger version이 올바르지 않습니다: {path}")
+    if not isinstance(payload.get("snapshots"), list):
+        raise SnapshotStoreError(f"스냅샷 ledger snapshots 배열이 올바르지 않습니다: {path}")
+    for index, row in enumerate(payload["snapshots"]):
+        if not isinstance(row, dict):
+            raise SnapshotStoreError(f"스냅샷 ledger row 구조가 올바르지 않습니다: {path}#{index}")
+        if not isinstance(row.get("payload"), dict):
+            raise SnapshotStoreError(f"스냅샷 ledger payload가 올바르지 않습니다: {path}#{index}")
 
 
 def _find_row_index(rows: list[dict], snapshot_date: str, mode: str) -> int | None:

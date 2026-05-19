@@ -98,18 +98,31 @@ def extract_opendart_fundamentals(payload: dict, fallback: Fundamentals | None =
         return fallback
     selected_rows = _preferred_statement_rows(rows)
 
-    revenue_current, revenue_previous = _find_current_previous(selected_rows, REVENUE_NAMES)
-    operating_income, _ = _find_current_previous(selected_rows, OPERATING_INCOME_NAMES)
-    net_income, _ = _find_current_previous(selected_rows, NET_INCOME_NAMES)
-    liabilities, _ = _find_current_previous(selected_rows, LIABILITY_NAMES)
-    equity_current, equity_previous = _find_current_previous(selected_rows, EQUITY_NAMES)
-    current_assets, _ = _find_current_previous(selected_rows, CURRENT_ASSET_NAMES)
-    current_liabilities, _ = _find_current_previous(selected_rows, CURRENT_LIABILITY_NAMES)
-    depreciation, _ = _find_current_previous(selected_rows, DEPRECIATION_NAMES)
-    amortization, _ = _find_current_previous(selected_rows, AMORTIZATION_NAMES)
-    operating_cash_flow, _ = _find_current_previous(selected_rows, OPERATING_CASH_FLOW_NAMES)
-    capital_expenditure, _ = _find_current_previous(selected_rows, CAPEX_NAMES)
-    interest_expense, _ = _find_current_previous(selected_rows, INTEREST_EXPENSE_NAMES)
+    revenue_row = _find_row(selected_rows, REVENUE_NAMES)
+    operating_income_row = _find_row(selected_rows, OPERATING_INCOME_NAMES)
+    net_income_row = _find_row(selected_rows, NET_INCOME_NAMES)
+    liabilities_row = _find_row(selected_rows, LIABILITY_NAMES)
+    equity_row = _find_row(selected_rows, EQUITY_NAMES)
+    current_assets_row = _find_row(selected_rows, CURRENT_ASSET_NAMES)
+    current_liabilities_row = _find_row(selected_rows, CURRENT_LIABILITY_NAMES)
+    depreciation_row = _find_row(selected_rows, DEPRECIATION_NAMES)
+    amortization_row = _find_row(selected_rows, AMORTIZATION_NAMES)
+    operating_cash_flow_row = _find_row(selected_rows, OPERATING_CASH_FLOW_NAMES)
+    capital_expenditure_row = _find_row(selected_rows, CAPEX_NAMES)
+    interest_expense_row = _find_row(selected_rows, INTEREST_EXPENSE_NAMES)
+
+    revenue_current, revenue_previous = _current_previous_from_row(revenue_row)
+    operating_income, _ = _current_previous_from_row(operating_income_row)
+    net_income, _ = _current_previous_from_row(net_income_row)
+    liabilities, _ = _current_previous_from_row(liabilities_row)
+    equity_current, equity_previous = _current_previous_from_row(equity_row)
+    current_assets, _ = _current_previous_from_row(current_assets_row)
+    current_liabilities, _ = _current_previous_from_row(current_liabilities_row)
+    depreciation, _ = _current_previous_from_row(depreciation_row)
+    amortization, _ = _current_previous_from_row(amortization_row)
+    operating_cash_flow, _ = _current_previous_from_row(operating_cash_flow_row)
+    capital_expenditure, _ = _current_previous_from_row(capital_expenditure_row)
+    interest_expense, _ = _current_previous_from_row(interest_expense_row)
 
     revenue_growth_pct = _growth_pct(revenue_current, revenue_previous)
     operating_margin_pct = _ratio_pct(operating_income, revenue_current)
@@ -123,6 +136,25 @@ def extract_opendart_fundamentals(payload: dict, fallback: Fundamentals | None =
     free_cash_flow = _subtract(operating_cash_flow, capex_outflow)
     interest_expense_outflow = _outflow(interest_expense)
     interest_coverage = _ratio(operating_income, interest_expense_outflow)
+    sources = dict(fallback.sources)
+    _set_row_source(sources, "revenue", revenue_row, payload)
+    _set_row_source(sources, "operatingIncome", operating_income_row, payload)
+    _set_row_source(sources, "netIncome", net_income_row, payload)
+    _set_row_source(sources, "operatingCashFlow", operating_cash_flow_row, payload)
+    _set_row_source(sources, "capitalExpenditure", capital_expenditure_row, payload)
+    _set_row_source(sources, "currentAssets", current_assets_row, payload)
+    _set_row_source(sources, "currentLiabilities", current_liabilities_row, payload)
+    _set_row_source(sources, "interestExpense", interest_expense_row, payload)
+    if ebitda is not None:
+        _set_row_source(sources, "ebitda", operating_income_row or depreciation_row or amortization_row, payload)
+    if free_cash_flow is not None:
+        _set_row_source(
+            sources,
+            "freeCashFlow",
+            operating_cash_flow_row or capital_expenditure_row,
+            payload,
+            derived_from=("operatingCashFlow", "capitalExpenditure"),
+        )
 
     return Fundamentals(
         revenue_growth_pct=_coalesce(revenue_growth_pct, fallback.revenue_growth_pct),
@@ -145,6 +177,7 @@ def extract_opendart_fundamentals(payload: dict, fallback: Fundamentals | None =
         current_ratio_pct=_coalesce(current_ratio_pct, fallback.current_ratio_pct),
         interest_expense=_coalesce(interest_expense_outflow, fallback.interest_expense),
         interest_coverage=_coalesce(interest_coverage, fallback.interest_coverage),
+        sources=sources,
     )
 
 
@@ -159,12 +192,45 @@ def _preferred_statement_rows(rows: list[dict]) -> list[dict]:
 
 
 def _find_current_previous(rows: list[dict], names: tuple[str, ...]) -> tuple[float | None, float | None]:
+    return _current_previous_from_row(_find_row(rows, names))
+
+
+def _find_row(rows: list[dict], names: tuple[str, ...]) -> dict | None:
     for row in rows:
         account_name = str(row.get("account_nm", "")).replace(" ", "")
         if not any(name.replace(" ", "") in account_name for name in names):
             continue
-        return _amount(row.get("thstrm_amount")), _amount(row.get("frmtrm_amount"))
-    return None, None
+        return row
+    return None
+
+
+def _current_previous_from_row(row: dict | None) -> tuple[float | None, float | None]:
+    if row is None:
+        return None, None
+    return _amount(row.get("thstrm_amount")), _amount(row.get("frmtrm_amount"))
+
+
+def _set_row_source(
+    sources: dict[str, dict],
+    field: str,
+    row: dict | None,
+    payload: dict,
+    derived_from: tuple[str, ...] = (),
+) -> None:
+    if row is None or _amount(row.get("thstrm_amount")) is None:
+        return
+    source = {
+        "source": "OpenDART",
+        "periodEnd": row.get("thstrm_dt") if isinstance(row.get("thstrm_dt"), str) else None,
+        "fiscalYear": row.get("bsns_year") or payload.get("bsns_year"),
+        "filed": None,
+        "form": None,
+        "reportCode": row.get("reprt_code") or payload.get("reprt_code") or "11011",
+        "fallback": False,
+    }
+    if derived_from:
+        source["derivedFrom"] = list(derived_from)
+    sources[field] = source
 
 
 def _amount(value: object) -> float | None:

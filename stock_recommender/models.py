@@ -30,6 +30,7 @@ class Fundamentals:
     current_ratio_pct: float | None = None
     interest_expense: float | None = None
     interest_coverage: float | None = None
+    sources: dict[str, dict] = field(default_factory=dict)
 
     def __init__(
         self,
@@ -54,6 +55,7 @@ class Fundamentals:
         interest_expense: float | None = None,
         interest_coverage: float | None = None,
         market_cap_usd: float | None = None,
+        sources: dict[str, dict] | None = None,
     ) -> None:
         if market_cap is None:
             market_cap = market_cap_usd
@@ -78,6 +80,7 @@ class Fundamentals:
             "current_ratio_pct": current_ratio_pct,
             "interest_expense": interest_expense,
             "interest_coverage": interest_coverage,
+            "sources": dict(sources or {}),
         }
         for key, value in values.items():
             object.__setattr__(self, key, value)
@@ -94,6 +97,12 @@ class Momentum:
     six_month_pct: float | None = None
     drawdown_from_high_pct: float | None = None
     range_position_pct: float | None = None
+    latest_close: float | None = None
+    latest_close_date: str | None = None
+    six_month_high: float | None = None
+    six_month_low: float | None = None
+    source: str | None = None
+    stale: bool = False
 
 
 @dataclass(frozen=True)
@@ -277,3 +286,5 @@ class RecommendationReport:
     long_term_scores: tuple[LongTermScore, ...] = ()
     macro_snapshot: MacroSnapshot | None = None
     data_quality: DataQuality = field(default_factory=DataQuality)
+    momentums: dict[str, Momentum] = field(default_factory=dict)
+    source_events: tuple[dict, ...] = ()

@@ -186,30 +186,30 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
     if not isinstance(us_gaap, dict):
         return fallback
 
-    revenue = _latest_and_previous(us_gaap, REVENUE_TAGS)
-    operating_income = _latest_and_previous(us_gaap, OPERATING_INCOME_TAGS)
-    net_income = _latest_and_previous(us_gaap, NET_INCOME_TAGS)
-    assets = _latest_and_previous(us_gaap, ASSET_TAGS)
-    liabilities = _latest_and_previous(us_gaap, LIABILITY_TAGS)
-    equity = _latest_and_previous(us_gaap, EQUITY_TAGS)
-    current_assets = _latest_and_previous(us_gaap, CURRENT_ASSET_TAGS)
-    current_liabilities = _latest_and_previous(us_gaap, CURRENT_LIABILITY_TAGS)
-    depreciation_amortization = _latest_and_previous(us_gaap, DEPRECIATION_AMORTIZATION_TAGS)
-    operating_cash_flow = _latest_and_previous(us_gaap, OPERATING_CASH_FLOW_TAGS)
-    capital_expenditure = _latest_and_previous(us_gaap, CAPEX_TAGS)
-    interest_expense = _latest_and_previous(us_gaap, INTEREST_EXPENSE_TAGS)
+    revenue = _latest_and_previous_facts(us_gaap, REVENUE_TAGS)
+    operating_income = _latest_and_previous_facts(us_gaap, OPERATING_INCOME_TAGS)
+    net_income = _latest_and_previous_facts(us_gaap, NET_INCOME_TAGS)
+    assets = _latest_and_previous_facts(us_gaap, ASSET_TAGS)
+    liabilities = _latest_and_previous_facts(us_gaap, LIABILITY_TAGS)
+    equity = _latest_and_previous_facts(us_gaap, EQUITY_TAGS)
+    current_assets = _latest_and_previous_facts(us_gaap, CURRENT_ASSET_TAGS)
+    current_liabilities = _latest_and_previous_facts(us_gaap, CURRENT_LIABILITY_TAGS)
+    depreciation_amortization = _latest_and_previous_facts(us_gaap, DEPRECIATION_AMORTIZATION_TAGS)
+    operating_cash_flow = _latest_and_previous_facts(us_gaap, OPERATING_CASH_FLOW_TAGS)
+    capital_expenditure = _latest_and_previous_facts(us_gaap, CAPEX_TAGS)
+    interest_expense = _latest_and_previous_facts(us_gaap, INTEREST_EXPENSE_TAGS)
 
-    latest_revenue, previous_revenue = revenue
-    latest_operating_income, _ = operating_income
-    latest_net_income, _ = net_income
-    latest_liabilities, _ = liabilities
-    latest_equity, previous_equity = equity
-    latest_current_assets, _ = current_assets
-    latest_current_liabilities, _ = current_liabilities
-    latest_depreciation_amortization, _ = depreciation_amortization
-    latest_operating_cash_flow, _ = operating_cash_flow
-    latest_capex, _ = capital_expenditure
-    latest_interest_expense, _ = interest_expense
+    latest_revenue, previous_revenue = _fact_values(revenue)
+    latest_operating_income, _ = _fact_values(operating_income)
+    latest_net_income, _ = _fact_values(net_income)
+    latest_liabilities, _ = _fact_values(liabilities)
+    latest_equity, previous_equity = _fact_values(equity)
+    latest_current_assets, _ = _fact_values(current_assets)
+    latest_current_liabilities, _ = _fact_values(current_liabilities)
+    latest_depreciation_amortization, _ = _fact_values(depreciation_amortization)
+    latest_operating_cash_flow, _ = _fact_values(operating_cash_flow)
+    latest_capex, _ = _fact_values(capital_expenditure)
+    latest_interest_expense, _ = _fact_values(interest_expense)
 
     revenue_growth_pct = _growth_pct(latest_revenue, previous_revenue)
     operating_margin_pct = _ratio_pct(latest_operating_income, latest_revenue)
@@ -222,6 +222,24 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
     free_cash_flow = _subtract(latest_operating_cash_flow, capex_outflow)
     interest_expense_outflow = _outflow(latest_interest_expense)
     interest_coverage = _ratio(latest_operating_income, interest_expense_outflow)
+    sources = dict(fallback.sources)
+    _set_source(sources, "revenue", revenue[0])
+    _set_source(sources, "operatingIncome", operating_income[0])
+    _set_source(sources, "netIncome", net_income[0])
+    _set_source(sources, "operatingCashFlow", operating_cash_flow[0])
+    _set_source(sources, "capitalExpenditure", capital_expenditure[0])
+    _set_source(sources, "currentAssets", current_assets[0])
+    _set_source(sources, "currentLiabilities", current_liabilities[0])
+    _set_source(sources, "interestExpense", interest_expense[0])
+    if ebitda is not None:
+        _set_source(sources, "ebitda", operating_income[0] or depreciation_amortization[0])
+    if free_cash_flow is not None:
+        _set_source(
+            sources,
+            "freeCashFlow",
+            operating_cash_flow[0] or capital_expenditure[0],
+            derived_from=("operatingCashFlow", "capitalExpenditure"),
+        )
 
     return Fundamentals(
         revenue_growth_pct=_coalesce(revenue_growth_pct, fallback.revenue_growth_pct),
@@ -244,11 +262,19 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
         current_ratio_pct=_coalesce(current_ratio_pct, fallback.current_ratio_pct),
         interest_expense=_coalesce(interest_expense_outflow, fallback.interest_expense),
         interest_coverage=_coalesce(interest_coverage, fallback.interest_coverage),
+        sources=sources,
     )
 
 
 def _latest_and_previous(us_gaap: dict, tags: tuple[str, ...]) -> tuple[float | None, float | None]:
-    candidates: dict[str, tuple[str, float]] = {}
+    latest, previous = _latest_and_previous_facts(us_gaap, tags)
+    return _fact_value(latest), _fact_value(previous)
+
+
+def _latest_and_previous_facts(
+    us_gaap: dict, tags: tuple[str, ...]
+) -> tuple[SelectedFact | None, SelectedFact | None]:
+    candidates: dict[str, tuple[str, SelectedFact]] = {}
     for tag in tags:
         concept = us_gaap.get(tag)
         if not isinstance(concept, dict):
@@ -267,12 +293,51 @@ def _latest_and_previous(us_gaap: dict, tags: tuple[str, ...]) -> tuple[float | 
                 continue
             existing = candidates.get(period)
             if existing is None or filed >= existing[0]:
-                candidates[period] = (filed, float(value))
+                candidates[period] = (filed, SelectedFact(float(value), _fact_source(fact, tag)))
 
-    unique = sorted(((period, value) for period, (_, value) in candidates.items()), key=lambda item: item[0], reverse=True)[:2]
+    unique = sorted(
+        ((period, selected) for period, (_, selected) in candidates.items()),
+        key=lambda item: item[0],
+        reverse=True,
+    )[:2]
     latest = unique[0][1] if unique else None
     previous = unique[1][1] if len(unique) > 1 else None
     return latest, previous
+
+
+def _fact_values(facts: tuple[SelectedFact | None, SelectedFact | None]) -> tuple[float | None, float | None]:
+    return _fact_value(facts[0]), _fact_value(facts[1])
+
+
+def _fact_value(fact: SelectedFact | None) -> float | None:
+    return fact.value if fact is not None else None
+
+
+def _fact_source(fact: dict, tag: str) -> dict:
+    return {
+        "source": "SEC EDGAR",
+        "tag": tag,
+        "periodEnd": fact.get("end") if isinstance(fact.get("end"), str) else None,
+        "fiscalYear": fact.get("fy") if isinstance(fact.get("fy"), (int, str)) else None,
+        "filed": fact.get("filed") if isinstance(fact.get("filed"), str) else None,
+        "form": fact.get("form") if isinstance(fact.get("form"), str) else None,
+        "reportCode": None,
+        "fallback": False,
+    }
+
+
+def _set_source(
+    sources: dict[str, dict],
+    field: str,
+    fact: SelectedFact | None,
+    derived_from: tuple[str, ...] = (),
+) -> None:
+    if fact is None:
+        return
+    source = dict(fact.source)
+    if derived_from:
+        source["derivedFrom"] = list(derived_from)
+    sources[field] = source
 
 
 def _annual_period_key(fact: dict) -> str | None:
@@ -360,3 +425,9 @@ class SecFundamentalResult:
 class CompanyFactsResult:
     payload: dict
     stale: bool
+
+
+@dataclass(frozen=True)
+class SelectedFact:
+    value: float
+    source: dict

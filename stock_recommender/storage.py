@@ -88,6 +88,41 @@ class CacheStore:
             for row in rows
         ]
 
+    def list_source_events_since(
+        self,
+        since: datetime,
+        limit: int = 200,
+        source: str | None = None,
+    ) -> list[dict]:
+        since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
+        if source:
+            where_clause = "where source = ? and created_at >= ?"
+            params: tuple[object, ...] = (source, since_utc.isoformat(), limit)
+        else:
+            where_clause = "where created_at >= ?"
+            params = (since_utc.isoformat(), limit)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                select id, source, event_type, message, created_at
+                from source_events
+                {where_clause}
+                order by id asc
+                limit ?
+                """,
+                params,
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "source": row["source"],
+                "eventType": row["event_type"],
+                "message": row["message"],
+                "createdAt": row["created_at"],
+            }
+            for row in rows
+        ]
+
     def save_recommendation_snapshot(
         self,
         snapshot_date: str,

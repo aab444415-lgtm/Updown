@@ -1,12 +1,35 @@
 from __future__ import annotations
 
+import os
+import re
+import subprocess
+import urllib.parse
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 
+from . import __version__
 from .config import load_config
-from .models import RecommendationReport
+from .models import Momentum, RecommendationReport
 from .snapshot_store import list_snapshot_rows, save_persistent_snapshot
 from .storage import CacheStore
+
+
+SNAPSHOT_PAYLOAD_VERSION = 10
+BENCHMARK_TICKERS = ("SPY", "QQQ", "^KS11")
+FUNDAMENTAL_SOURCE_FIELDS = (
+    "revenue",
+    "operatingIncome",
+    "marketCap",
+    "pe",
+    "forwardPe",
+    "freeCashFlow",
+    "netIncome",
+    "operatingCashFlow",
+)
+SECRET_QUERY_KEYS = {"api_key", "apikey", "crtfc_key", "key", "token", "secret", "access_token"}
+LONG_TOKEN_RE = re.compile(r"\b[A-Za-z0-9_-]{24,}\b")
+SECRET_PAIR_RE = re.compile(r"(?i)\b(api_key|apikey|crtfc_key|key|token|secret|access_token)=([^&\s]+)")
 
 
 @dataclass(frozen=True)
@@ -70,13 +93,17 @@ def snapshot_history(limit: int = 30) -> dict:
 
 def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live") -> dict:
     created_at = report.created_at
+    source_events = _source_events_payload(report.source_events)
     return {
-        "version": 9,
+        "version": SNAPSHOT_PAYLOAD_VERSION,
         "mode": mode,
         "snapshotDate": created_at.date().isoformat(),
         "createdAt": created_at.isoformat(),
         "createdAtDisplay": created_at.strftime("%Y-%m-%d %H:%M:%S"),
         "createdAtTimezone": _timezone_name(created_at),
+        "audit": _audit_payload(created_at),
+        "sourceEvents": source_events,
+        "sourceEventSummary": _source_event_summary(source_events),
         "macroContext": report.macro_context,
         "dataQuality": {
             "liveNews": report.data_quality.live_news,
@@ -148,9 +175,23 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                     "interestExpense": item.stock.fundamentals.interest_expense,
                     "interestCoverage": item.stock.fundamentals.interest_coverage,
                 },
+                "fundamentalSources": _fundamental_sources(item.stock.fundamentals.sources),
+                "momentumRaw": _momentum_payload(report.momentums.get(item.stock.ticker.upper())),
+                "priceAnchor": _price_anchor_payload(
+                    report.momentums.get(item.stock.ticker.upper()),
+                    currency=item.stock.currency,
+                ),
             }
             for item in report.stock_scores
         ],
+        "benchmarks": [
+            {
+                "ticker": ticker,
+                "priceAnchor": _price_anchor_payload(report.momentums.get(ticker), currency=_benchmark_currency(ticker)),
+            }
+            for ticker in BENCHMARK_TICKERS
+        ],
+        "priceAnchors": _price_anchors_payload(report),
         "earlyGrowthCandidates": [
             {
                 "ticker": item.stock_score.stock.ticker,
@@ -288,6 +329,210 @@ def _valuation_range_payload(item) -> dict:
     }
 
 
+def _audit_payload(created_at: datetime) -> dict:
+    commit = os.environ.get("GITHUB_SHA") or _git_output(("rev-parse", "HEAD"))
+    dirty = _git_dirty()
+    if commit is None:
+        dirty = True
+    return {
+        "modelVersion": f"stock-recommender/{__version__}",
+        "gitCommit": commit,
+        "gitDirty": dirty,
+        "runId": os.environ.get("GITHUB_RUN_ID") or f"local-{created_at.strftime('%Y%m%dT%H%M%S')}",
+        "createdAt": created_at.isoformat(),
+        "createdAtTimezone": _timezone_name(created_at),
+    }
+
+
+def _git_output(args: tuple[str, ...]) -> str | None:
+    try:
+        result = subprocess.run(
+            ("git", *args),
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    value = result.stdout.strip()
+    return value or None
+
+
+def _git_dirty() -> bool:
+    status = _git_output(("status", "--porcelain"))
+    if status is None:
+        return True
+    return bool(status.strip())
+
+
+def _source_events_payload(events: tuple[dict, ...]) -> list[dict]:
+    payload: list[dict] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        payload.append(
+            {
+                "source": str(event.get("source") or "unknown"),
+                "eventType": _event_type(event.get("eventType")),
+                "message": _redact_text(str(event.get("message") or "")),
+                "createdAt": str(event.get("createdAt") or ""),
+            }
+        )
+    return payload
+
+
+def _event_type(value: object) -> str:
+    event_type = str(value or "warning").lower()
+    return event_type if event_type in {"success", "warning", "error", "stale"} else "warning"
+
+
+def _source_event_summary(events: list[dict]) -> dict:
+    by_status = Counter(str(event.get("eventType") or "warning") for event in events)
+    by_source: dict[str, dict[str, int]] = {}
+    for event in events:
+        source = str(event.get("source") or "unknown")
+        event_type = str(event.get("eventType") or "warning")
+        by_source.setdefault(source, {})
+        by_source[source][event_type] = by_source[source].get(event_type, 0) + 1
+    return {
+        "total": len(events),
+        "byStatus": dict(sorted(by_status.items())),
+        "bySource": {source: dict(sorted(counts.items())) for source, counts in sorted(by_source.items())},
+        "staleCount": by_status.get("stale", 0),
+        "errorCount": by_status.get("error", 0),
+    }
+
+
+def _redact_text(value: str) -> str:
+    value = SECRET_PAIR_RE.sub(lambda match: f"{match.group(1)}=***", value)
+    value = LONG_TOKEN_RE.sub("***", value)
+    words = value.split()
+    redacted_words = [_redact_url(word) if word.startswith(("http://", "https://")) else word for word in words]
+    return " ".join(redacted_words)
+
+
+def _redact_url(value: str) -> str:
+    parsed = urllib.parse.urlparse(value)
+    if not parsed.scheme or not parsed.netloc:
+        return value
+    pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    safe_pairs = [
+        (key, "***" if key.lower() in SECRET_QUERY_KEYS else _redact_scalar(text))
+        for key, text in pairs
+    ]
+    path_parts = [
+        "***" if len(part) >= 24 and part.replace("_", "").replace("-", "").isalnum() else part
+        for part in parsed.path.split("/")
+    ]
+    return urllib.parse.urlunparse(
+        parsed._replace(path="/".join(path_parts), query=urllib.parse.urlencode(safe_pairs))
+    )
+
+
+def _redact_scalar(value: str) -> str:
+    return LONG_TOKEN_RE.sub("***", value)
+
+
+def _fundamental_sources(sources: dict[str, dict]) -> dict:
+    return {
+        field: _source_payload(sources.get(field), field)
+        for field in FUNDAMENTAL_SOURCE_FIELDS
+    }
+
+
+def _source_payload(source: object, field: str) -> dict:
+    if not isinstance(source, dict):
+        return _universe_fallback_source(field)
+    name = source.get("source")
+    if not isinstance(name, str) or not name:
+        return _universe_fallback_source(field)
+    return {
+        "source": name,
+        "periodEnd": _optional_scalar(source.get("periodEnd")),
+        "fiscalYear": _optional_scalar(source.get("fiscalYear")),
+        "filed": _optional_scalar(source.get("filed")),
+        "form": _optional_scalar(source.get("form")),
+        "reportCode": _optional_scalar(source.get("reportCode")),
+        "fallback": bool(source.get("fallback", False)),
+        **({"tag": source["tag"]} if isinstance(source.get("tag"), str) else {}),
+        **({"derivedFrom": list(source["derivedFrom"])} if isinstance(source.get("derivedFrom"), list) else {}),
+    }
+
+
+def _universe_fallback_source(field: str) -> dict:
+    return {
+        "source": "universeFallback",
+        "field": field,
+        "periodEnd": None,
+        "fiscalYear": None,
+        "filed": None,
+        "form": None,
+        "reportCode": None,
+        "fallback": True,
+    }
+
+
+def _optional_scalar(value: object) -> str | int | float | None:
+    return value if isinstance(value, (str, int, float)) else None
+
+
+def _momentum_payload(momentum: Momentum | None) -> dict:
+    momentum = momentum or Momentum()
+    return {
+        "oneMonthPct": momentum.one_month_pct,
+        "threeMonthPct": momentum.three_month_pct,
+        "sixMonthPct": momentum.six_month_pct,
+        "drawdownFromHighPct": momentum.drawdown_from_high_pct,
+        "rangePositionPct": momentum.range_position_pct,
+        "latestClose": momentum.latest_close,
+        "latestCloseDate": momentum.latest_close_date,
+        "sixMonthHigh": momentum.six_month_high,
+        "sixMonthLow": momentum.six_month_low,
+        "source": momentum.source,
+        "stale": momentum.stale,
+    }
+
+
+def _price_anchor_payload(momentum: Momentum | None, currency: str) -> dict:
+    momentum = momentum or Momentum()
+    return {
+        "latestClose": momentum.latest_close,
+        "latestCloseDate": momentum.latest_close_date,
+        "currency": currency,
+        "source": momentum.source,
+        "stale": momentum.stale,
+    }
+
+
+def _price_anchors_payload(report: RecommendationReport) -> list[dict]:
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for item in report.stock_scores:
+        ticker = item.stock.ticker.upper()
+        seen.add(ticker)
+        rows.append(
+            {
+                "ticker": ticker,
+                "priceAnchor": _price_anchor_payload(report.momentums.get(ticker), currency=item.stock.currency),
+            }
+        )
+    for ticker in BENCHMARK_TICKERS:
+        if ticker in seen:
+            continue
+        rows.append(
+            {
+                "ticker": ticker,
+                "priceAnchor": _price_anchor_payload(report.momentums.get(ticker), currency=_benchmark_currency(ticker)),
+            }
+        )
+    return rows
+
+
+def _benchmark_currency(ticker: str) -> str:
+    return "KRW" if ticker == "^KS11" else "USD"
+
+
 def _summary_row(row: dict | None) -> dict | None:
     if row is None:
         return None
@@ -316,6 +561,10 @@ def _summary_row(row: dict | None) -> dict | None:
             if isinstance(item, dict)
         ],
         "configuredSources": payload.get("dataQuality", {}).get("configuredSources", []),
+        "gitCommit": payload.get("audit", {}).get("gitCommit"),
+        "sourceEventSummary": payload.get("sourceEventSummary") or _source_event_summary([]),
+        "priceAnchorCoveragePct": _price_anchor_coverage_pct(payload),
+        "fundamentalSourceCoveragePct": _fundamental_source_coverage_pct(payload),
         "liveCoverage": {
             "news": payload.get("dataQuality", {}).get("liveNews", False),
             "market": payload.get("dataQuality", {}).get("liveMarketData", False),
@@ -323,6 +572,41 @@ def _summary_row(row: dict | None) -> dict | None:
             "macro": payload.get("dataQuality", {}).get("liveMacro", False),
         },
     }
+
+
+def _price_anchor_coverage_pct(payload: dict) -> float:
+    stocks = payload.get("stocks")
+    if not isinstance(stocks, list) or not stocks:
+        return 0
+    covered = 0
+    for stock in stocks:
+        if not isinstance(stock, dict):
+            continue
+        anchor = stock.get("priceAnchor")
+        if isinstance(anchor, dict) and anchor.get("latestClose") is not None and anchor.get("latestCloseDate"):
+            covered += 1
+    return round(covered / len(stocks) * 100, 1)
+
+
+def _fundamental_source_coverage_pct(payload: dict) -> float:
+    stocks = payload.get("stocks")
+    if not isinstance(stocks, list) or not stocks:
+        return 0
+    total = 0
+    covered = 0
+    for stock in stocks:
+        if not isinstance(stock, dict):
+            continue
+        sources = stock.get("fundamentalSources")
+        if not isinstance(sources, dict):
+            total += len(FUNDAMENTAL_SOURCE_FIELDS)
+            continue
+        for field in FUNDAMENTAL_SOURCE_FIELDS:
+            total += 1
+            source = sources.get(field)
+            if isinstance(source, dict) and not source.get("fallback"):
+                covered += 1
+    return round(covered / total * 100, 1) if total else 0
 
 
 def _display_created_at(value: object) -> str | None:

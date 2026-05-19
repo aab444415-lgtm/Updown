@@ -9,13 +9,14 @@ from zoneinfo import ZoneInfo
 
 from stock_recommender.backtest import PricePoint, SnapshotRecord, backtest_to_dict, run_backtest, run_snapshot_backtest
 from stock_recommender.config import configured_source_names, load_config, missing_optional_source_names
+import stock_recommender.data_sources as data_sources
 from stock_recommender.macro_data import industry_macro_data_score
 from stock_recommender.models import DataQuality, Fundamentals, MacroIndicator, MacroSnapshot, Momentum, NewsItem, StockProfile
 from stock_recommender.opendart_financials import extract_opendart_fundamentals
 from stock_recommender.report import render_markdown
 from stock_recommender.scoring import build_report, decision_grade_for_stock, quality_score, valuation_score
 from stock_recommender.sec_edgar import extract_fundamentals
-from stock_recommender.snapshot_store import SnapshotFileStore
+from stock_recommender.snapshot_store import SnapshotFileStore, SnapshotStoreError
 from stock_recommender.snapshots import report_to_snapshot_payload, snapshot_history
 from stock_recommender.storage import CacheStore
 from stock_recommender.universe import DEFAULT_MACRO_CONTEXT, INDUSTRIES, STOCKS
@@ -428,6 +429,10 @@ class SecEdgarTests(unittest.TestCase):
         self.assertEqual(fundamentals.free_cash_flow, 22)
         self.assertAlmostEqual(fundamentals.current_ratio_pct, 200.0)
         self.assertAlmostEqual(fundamentals.interest_coverage, 5.0)
+        self.assertEqual(fundamentals.sources["revenue"]["source"], "SEC EDGAR")
+        self.assertEqual(fundamentals.sources["revenue"]["periodEnd"], "2024-12-31")
+        self.assertEqual(fundamentals.sources["revenue"]["filed"], "2025-02-01")
+        self.assertEqual(fundamentals.sources["freeCashFlow"]["derivedFrom"], ["operatingCashFlow", "capitalExpenditure"])
 
     def test_extract_fundamentals_uses_period_not_filed_date(self):
         facts = {
@@ -487,6 +492,35 @@ class OpenDartTests(unittest.TestCase):
         self.assertEqual(fundamentals.free_cash_flow, 22_000)
         self.assertAlmostEqual(fundamentals.current_ratio_pct, 200.0)
         self.assertAlmostEqual(fundamentals.interest_coverage, 5.0)
+        self.assertEqual(fundamentals.sources["revenue"]["source"], "OpenDART")
+        self.assertEqual(fundamentals.sources["revenue"]["reportCode"], "11011")
+
+
+class MarketDataSourceTests(unittest.TestCase):
+    def test_yahoo_quote_updates_market_cap_and_source(self):
+        stock = StockProfile(
+            ticker="TEST",
+            name="Test Co",
+            industry=INDUSTRIES[0].name,
+            role="adjacent",
+            thesis="test",
+            risks=(),
+            fundamentals=Fundamentals(pe=30, forward_pe=25, market_cap=1_000_000),
+        )
+        original_fetch = data_sources.fetch_yahoo_quotes
+
+        try:
+            data_sources.fetch_yahoo_quotes = lambda tickers, timeout=8.0, cache=None: {
+                "TEST": {"trailingPE": 20, "forwardPE": 18, "marketCap": 2_000_000, "currency": "USD"}
+            }
+            enriched = data_sources.enrich_with_live_market_data((stock,))
+        finally:
+            data_sources.fetch_yahoo_quotes = original_fetch
+
+        fundamentals = enriched[0].fundamentals
+        self.assertEqual(fundamentals.market_cap, 2_000_000)
+        self.assertEqual(fundamentals.sources["marketCap"]["source"], "Yahoo Finance")
+        self.assertEqual(fundamentals.sources["pe"]["source"], "Yahoo Finance")
 
 
 class DecisionGradeTests(unittest.TestCase):
@@ -588,6 +622,31 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(result.periods[1].tickers, ("BBB",))
         self.assertEqual(payload["periods"][0]["snapshotDate"], "2025-01-31")
 
+    def test_snapshot_backtest_prefers_snapshot_price_anchors(self):
+        snapshots = (
+            _snapshot_with_anchors(date(2025, 1, 31), [("AAA", "Alpha", 100)], spy_close=100),
+            _snapshot_with_anchors(date(2025, 2, 28), [("BBB", "Beta", 90), ("AAA", "Alpha", 120)], spy_close=110),
+            _snapshot_with_anchors(date(2025, 3, 31), [("AAA", "Alpha", 130), ("BBB", "Beta", 99)], spy_close=121),
+        )
+
+        result = run_snapshot_backtest(
+            snapshots=snapshots,
+            histories={},
+            months=2,
+            top_n=1,
+            benchmark_ticker="SPY",
+            created_at=datetime(2025, 4, 1, 9, 0, tzinfo=ZoneInfo("Asia/Seoul")),
+            timezone_name="Asia/Seoul",
+        )
+        payload = backtest_to_dict(result)
+
+        self.assertEqual(result.period_count, 2)
+        self.assertEqual(result.price_source, "snapshotAnchors")
+        self.assertEqual(result.periods[0].tickers, ("AAA",))
+        self.assertEqual(result.periods[0].return_pct, 20.0)
+        self.assertEqual(payload["priceSource"], "snapshotAnchors")
+        self.assertEqual(payload["periods"][0]["priceSource"], "snapshotAnchors")
+
     def test_snapshot_backtest_returns_clear_warning_when_snapshots_are_missing(self):
         result = run_snapshot_backtest(
             snapshots=(),
@@ -644,22 +703,54 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn("mediumTermCandidates", rows[0]["payload"])
         self.assertIn("longTermCandidates", rows[0]["payload"])
 
-    def test_snapshot_payload_uses_v9_timezone_and_market_cap(self):
+    def test_snapshot_payload_uses_v10_timezone_and_audit_fields(self):
+        ticker = STOCKS[0].ticker.upper()
         report = build_report(
             macro_context=DEFAULT_MACRO_CONTEXT,
             industries=INDUSTRIES,
             stocks=STOCKS[:1],
             news_items=(),
+            momentums={
+                ticker: Momentum(
+                    1.0,
+                    2.0,
+                    3.0,
+                    -4.0,
+                    70.0,
+                    latest_close=123.4,
+                    latest_close_date="2026-05-17",
+                    six_month_high=130,
+                    six_month_low=90,
+                    source="Yahoo Finance",
+                ),
+                "SPY": Momentum(latest_close=500, latest_close_date="2026-05-17", source="Yahoo Finance"),
+            },
+            source_events=(
+                {
+                    "source": "Yahoo Finance",
+                    "eventType": "error",
+                    "message": "failed https://example.com/path?api_key=SECRET12345678901234567890",
+                    "createdAt": "2026-05-17T21:30:00+00:00",
+                },
+            ),
             created_at=datetime(2026, 5, 18, 6, 30, tzinfo=ZoneInfo("Asia/Seoul")),
         )
 
         payload = report_to_snapshot_payload(report, mode="live")
 
-        self.assertEqual(payload["version"], 9)
+        self.assertEqual(payload["version"], 10)
         self.assertEqual(payload["snapshotDate"], "2026-05-18")
         self.assertEqual(payload["createdAtTimezone"], "Asia/Seoul")
+        self.assertIn("gitCommit", payload["audit"])
+        self.assertEqual(payload["sourceEventSummary"]["errorCount"], 1)
+        self.assertNotIn("SECRET12345678901234567890", payload["sourceEvents"][0]["message"])
         self.assertIn("marketCap", payload["stocks"][0]["fundamentals"])
         self.assertIn("marketCapUsd", payload["stocks"][0]["fundamentals"])
+        self.assertIn("fundamentalSources", payload["stocks"][0])
+        self.assertEqual(payload["stocks"][0]["momentumRaw"]["latestClose"], 123.4)
+        self.assertEqual(payload["stocks"][0]["priceAnchor"]["latestClose"], 123.4)
+        self.assertEqual(payload["benchmarks"][0]["priceAnchor"]["latestClose"], 500)
+        self.assertEqual(payload["priceAnchors"][0]["priceAnchor"]["latestClose"], 123.4)
 
     def test_snapshot_payload_uses_korea_date_after_utc_market_close(self):
         created_at = datetime(2026, 5, 17, 21, 30, tzinfo=timezone.utc).astimezone(
@@ -686,6 +777,31 @@ class SnapshotTests(unittest.TestCase):
 
         self.assertEqual(rows[0]["source"], "Yahoo Finance")
         self.assertEqual(rows[0]["eventType"], "error")
+
+    def test_cache_store_filters_source_events_since_report_start(self):
+        with TemporaryDirectory() as tmpdir:
+            cache = CacheStore(Path(tmpdir) / "cache.sqlite")
+            with cache._connect() as connection:
+                connection.execute(
+                    """
+                    insert into source_events(source, event_type, message, created_at)
+                    values(?, ?, ?, ?)
+                    """,
+                    ("Yahoo Finance", "error", "old", "2026-05-17T00:00:00+00:00"),
+                )
+            since = datetime(2026, 5, 18, 0, 0, tzinfo=timezone.utc)
+            with cache._connect() as connection:
+                connection.execute(
+                    """
+                    insert into source_events(source, event_type, message, created_at)
+                    values(?, ?, ?, ?)
+                    """,
+                    ("Yahoo Finance", "stale", "new", "2026-05-18T00:00:01+00:00"),
+                )
+            rows = cache.list_source_events_since(since)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["message"], "new")
 
     def test_snapshot_history_reads_persistent_file_store(self):
         with TemporaryDirectory() as tmpdir:
@@ -721,6 +837,27 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(history["snapshotCount"], 1)
         self.assertEqual(history["uniqueDays"], 1)
         self.assertEqual(history["latest"]["snapshotDate"], "2026-05-19")
+        self.assertIn("sourceEventSummary", history["latest"])
+        self.assertIn("priceAnchorCoveragePct", history["latest"])
+        self.assertIn("fundamentalSourceCoveragePct", history["latest"])
+
+    def test_malformed_persistent_snapshot_store_fails_closed(self):
+        with TemporaryDirectory() as tmpdir:
+            ledger_path = Path(tmpdir) / "recommendation_snapshots.json"
+            ledger_path.write_text("{not json", encoding="utf-8")
+            store = SnapshotFileStore(ledger_path)
+
+            with self.assertRaises(SnapshotStoreError):
+                store.save_snapshot(
+                    snapshot_date="2026-05-19",
+                    mode="live",
+                    top_ticker="AAA",
+                    top_name="Alpha",
+                    top_score=90,
+                    payload={"createdAt": "2026-05-19T00:00:00+09:00", "stocks": []},
+                )
+
+            self.assertEqual(ledger_path.read_text(encoding="utf-8"), "{not json")
 
 
 class ApiBoundaryTests(unittest.TestCase):
@@ -780,9 +917,37 @@ class StaticExportTests(unittest.TestCase):
 
         self.assertEqual(payload["method"], "snapshot")
         self.assertTrue(payload["pointInTime"])
+        self.assertEqual(payload["priceSource"], "unknown")
         self.assertEqual(payload["requiredSnapshotDays"], 13)
         self.assertEqual(payload["warnings"], ["partial failure"])
         self.assertIn("createdAtTimezone", payload)
+
+    def test_static_export_does_not_hide_malformed_snapshot_ledger(self):
+        import scripts.export_cloudflare_static as export_static
+
+        with TemporaryDirectory() as tmpdir:
+            ledger_path = Path(tmpdir) / "recommendation_snapshots.json"
+            ledger_path.write_text("{not json", encoding="utf-8")
+            with patch.dict(
+                "os.environ",
+                {
+                    "STOCK_RECOMMENDER_DATA_DIR": str(Path(tmpdir) / "data"),
+                    "STOCK_RECOMMENDER_SNAPSHOT_STORE_PATH": str(ledger_path),
+                },
+            ):
+                with self.assertRaises(SnapshotStoreError):
+                    export_static.snapshots_payload()
+
+    def test_github_actions_snapshot_commit_before_cloudflare_deploy(self):
+        workflow = Path(".github/workflows/daily-cloudflare-redeploy.yml").read_text(encoding="utf-8")
+        save_index = workflow.index("Save daily recommendation snapshot")
+        commit_index = workflow.index("Commit snapshot ledger")
+        deploy_index = workflow.index("Trigger Cloudflare Pages build")
+
+        self.assertLess(save_index, commit_index)
+        self.assertLess(commit_index, deploy_index)
+        self.assertIn("python3 -m stock_recommender.snapshot_cli", workflow)
+        self.assertIn("git add snapshot_store/recommendation_snapshots.json", workflow)
 
 
 def _annual_fact(start: str, end: str, filed: str, value: float) -> dict:
@@ -832,6 +997,41 @@ def _snapshot(snapshot_date: date, ticker: str, name: str) -> SnapshotRecord:
                     "score": 90,
                 }
             ]
+        },
+    )
+
+
+def _snapshot_with_anchors(snapshot_date: date, stocks: list[tuple[str, str, float]], spy_close: float) -> SnapshotRecord:
+    return SnapshotRecord(
+        snapshot_date=snapshot_date,
+        payload={
+            "stocks": [
+                {
+                    "ticker": ticker,
+                    "name": name,
+                    "score": 90,
+                    "priceAnchor": {
+                        "latestClose": close,
+                        "latestCloseDate": snapshot_date.isoformat(),
+                        "currency": "USD",
+                        "source": "Yahoo Finance",
+                        "stale": False,
+                    },
+                }
+                for ticker, name, close in stocks
+            ],
+            "benchmarks": [
+                {
+                    "ticker": "SPY",
+                    "priceAnchor": {
+                        "latestClose": spy_close,
+                        "latestCloseDate": snapshot_date.isoformat(),
+                        "currency": "USD",
+                        "source": "Yahoo Finance",
+                        "stale": False,
+                    },
+                }
+            ],
         },
     )
 

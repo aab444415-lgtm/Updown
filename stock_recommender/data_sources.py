@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Iterable
 from dataclasses import replace
+from datetime import datetime, timezone
 from hashlib import sha1
 
 from .models import Fundamentals, Momentum, NewsItem, StockProfile
@@ -96,6 +97,13 @@ def enrich_with_live_market_data(
         quote = quotes.get(stock.ticker.upper(), {})
         fundamentals = stock.fundamentals
         if quote:
+            sources = dict(fundamentals.sources)
+            if _is_number(quote.get("trailingPE")):
+                sources["pe"] = _field_source(SOURCE_YAHOO)
+            if _is_number(quote.get("forwardPE")):
+                sources["forwardPe"] = _field_source(SOURCE_YAHOO)
+            if _is_number(quote.get("marketCap")):
+                sources["marketCap"] = _field_source(SOURCE_YAHOO)
             fundamentals = replace(
                 fundamentals,
                 pe=_number_or_existing(quote.get("trailingPE"), fundamentals.pe),
@@ -105,6 +113,7 @@ def enrich_with_live_market_data(
                     quote.get("financialCurrency") or quote.get("currency"),
                     fundamentals.market_cap_currency,
                 ),
+                sources=sources,
             )
         enriched.append(replace(stock, fundamentals=fundamentals))
     return tuple(enriched)
@@ -150,6 +159,7 @@ def fetch_momentum(ticker: str, timeout: float = 8.0, cache: CacheStore | None =
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(symbol, safe='')}?{params}"
     cache_key = f"yahoo-momentum:{symbol}:6mo:1d"
     payload: dict | None = None
+    stale = False
     if cache is not None:
         cached = cache.get_json(cache_key)
         if isinstance(cached, dict):
@@ -163,35 +173,57 @@ def fetch_momentum(ticker: str, timeout: float = 8.0, cache: CacheStore | None =
                 _record_event(cache, SOURCE_YAHOO, "success", f"{symbol} momentum을 수집했습니다.")
         except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
             if cache is not None:
-                stale = cache.get_json(cache_key, allow_expired=True)
-                if isinstance(stale, dict):
+                stale_payload = cache.get_json(cache_key, allow_expired=True)
+                if isinstance(stale_payload, dict):
                     _record_event(cache, SOURCE_YAHOO, "stale", f"{symbol} momentum 호출 실패로 만료 캐시를 사용했습니다.")
-                    payload = stale
+                    payload = stale_payload
+                    stale = True
                 else:
                     _record_event(cache, SOURCE_YAHOO, "error", f"{symbol} momentum 호출 또는 파싱에 실패했습니다.")
     if payload is None:
         return Momentum()
 
     try:
-        quote = payload["chart"]["result"][0]["indicators"]["quote"][0]
-        closes = [value for value in quote.get("close", []) if isinstance(value, (int, float)) and value > 0]
-    except (KeyError, IndexError, TypeError):
+        result = payload["chart"]["result"][0]
+        timestamps = result.get("timestamp") or []
+        quote = result["indicators"]["quote"][0]
+        closes_raw = quote.get("close") or []
+        adjcloses = (result.get("indicators", {}).get("adjclose") or [{}])[0].get("adjclose") or []
+    except (KeyError, IndexError, TypeError, AttributeError):
         if cache is not None:
             _record_event(cache, SOURCE_YAHOO, "warning", f"{symbol} momentum 응답 형식이 올바르지 않습니다.")
-        return Momentum()
+        return Momentum(source=SOURCE_YAHOO, stale=stale)
 
-    if len(closes) < 22:
-        return Momentum()
+    points: list[tuple[str, float]] = []
+    for index, timestamp in enumerate(timestamps):
+        close = _list_number(adjcloses, index)
+        if close is None:
+            close = _list_number(closes_raw, index)
+        if not isinstance(timestamp, (int, float)) or close is None or close <= 0:
+            continue
+        points.append((datetime.fromtimestamp(timestamp, tz=timezone.utc).date().isoformat(), close))
 
+    if not points:
+        if cache is not None:
+            _record_event(cache, SOURCE_YAHOO, "warning", f"{symbol} momentum 가격 앵커가 비어 있습니다.")
+        return Momentum(source=SOURCE_YAHOO, stale=stale)
+
+    closes = [close for _, close in points]
     latest = closes[-1]
     high = max(closes)
     low = min(closes)
     return Momentum(
-        one_month_pct=_pct_change(closes, 21),
-        three_month_pct=_pct_change(closes, 63),
-        six_month_pct=_pct_change(closes, min(126, len(closes) - 1)),
+        one_month_pct=_pct_change(closes, 21) if len(closes) >= 22 else None,
+        three_month_pct=_pct_change(closes, 63) if len(closes) >= 64 else None,
+        six_month_pct=_pct_change(closes, min(126, len(closes) - 1)) if len(closes) >= 2 else None,
         drawdown_from_high_pct=_pct_from_high(latest, high),
         range_position_pct=_range_position(latest, low, high),
+        latest_close=latest,
+        latest_close_date=points[-1][0],
+        six_month_high=high,
+        six_month_low=low,
+        source=SOURCE_YAHOO,
+        stale=stale,
     )
 
 
@@ -292,6 +324,29 @@ def _number_or_existing(value: object, existing: float | None) -> float | None:
     if isinstance(value, (int, float)) and math.isfinite(value):
         return float(value)
     return existing
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and math.isfinite(value)
+
+
+def _list_number(values: list, index: int) -> float | None:
+    if index >= len(values):
+        return None
+    value = values[index]
+    return float(value) if _is_number(value) else None
+
+
+def _field_source(source: str) -> dict:
+    return {
+        "source": source,
+        "periodEnd": None,
+        "fiscalYear": None,
+        "filed": None,
+        "form": None,
+        "reportCode": None,
+        "fallback": False,
+    }
 
 
 def _text_or_existing(value: object, existing: str) -> str:

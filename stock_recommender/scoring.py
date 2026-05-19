@@ -40,6 +40,7 @@ def build_report(
     macro_snapshot: MacroSnapshot | None = None,
     data_quality: DataQuality | None = None,
     created_at: datetime | None = None,
+    source_events: Iterable[dict] | None = None,
 ) -> RecommendationReport:
     industries_tuple = tuple(industries)
     stocks_tuple = tuple(stocks)
@@ -77,6 +78,8 @@ def build_report(
         long_term_scores=long_term_scores,
         macro_snapshot=macro_snapshot,
         data_quality=data_quality or DataQuality(),
+        momentums=dict(momentums),
+        source_events=tuple(source_events or ()),
     )
 
 

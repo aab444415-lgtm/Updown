@@ -12,12 +12,16 @@ from .time_utils import now_in_app_timezone
 from .universe import DEFAULT_MACRO_CONTEXT, INDUSTRIES, STOCKS
 
 
+SNAPSHOT_BENCHMARK_TICKERS = ("SPY", "QQQ", "^KS11")
+
+
 def create_recommendation_report(
     macro_context: str = DEFAULT_MACRO_CONTEXT,
     use_sec_fundamentals: bool = True,
 ) -> RecommendationReport:
     config = load_config()
     cache = CacheStore(config.cache_db_path)
+    run_started_at = now_in_app_timezone(config)
     warnings: list[str] = []
     stocks = STOCKS
     news_items = ()
@@ -49,15 +53,27 @@ def create_recommendation_report(
     warnings.extend(dart_result.warnings)
     live_fundamentals = live_fundamentals or live_korea_fundamentals
 
-    momentums = fetch_many_momentums((stock.ticker for stock in stocks), cache=cache)
+    momentum_tickers = tuple(dict.fromkeys((*(stock.ticker for stock in stocks), *SNAPSHOT_BENCHMARK_TICKERS)))
+    momentums = fetch_many_momentums(momentum_tickers, cache=cache)
     live_market_data = any(
-        any(value is not None for value in vars(momentum).values()) for momentum in momentums.values()
+        any(
+            value is not None
+            for value in (
+                momentum.one_month_pct,
+                momentum.three_month_pct,
+                momentum.six_month_pct,
+                momentum.latest_close,
+            )
+        )
+        for momentum in momentums.values()
     )
     if not live_market_data:
         warnings.append("시장 가격 모멘텀 수집에 실패해 중립 점수로 계산했습니다.")
 
     if "your-email@example.com" in config.sec_user_agent:
         warnings.append(".env의 SEC_USER_AGENT를 본인 이메일이 포함된 값으로 바꾸면 SEC 접근 정책에 더 잘 맞습니다.")
+
+    source_events = cache.list_source_events_since(run_started_at, limit=300)
 
     return build_report(
         macro_context=macro_context,
@@ -66,7 +82,8 @@ def create_recommendation_report(
         news_items=news_items,
         momentums=momentums,
         macro_snapshot=macro_snapshot,
-        created_at=now_in_app_timezone(config),
+        created_at=run_started_at,
+        source_events=source_events,
         data_quality=DataQuality(
             live_news=bool(news_items),
             live_market_data=live_market_data,
