@@ -15,6 +15,16 @@ from hashlib import sha1
 
 from .models import Fundamentals, Momentum, NewsItem, StockProfile
 from .storage import CacheStore
+from .technical import (
+    _last_finite,
+    average_recent_volume,
+    breakout_pct,
+    distance_from_average,
+    moving_average,
+    moving_average_slope,
+    rsi,
+    volume_ratio,
+)
 
 
 USER_AGENT = "stock-recommender-mvp/0.1"
@@ -155,9 +165,9 @@ def fetch_yahoo_quotes(
 
 def fetch_momentum(ticker: str, timeout: float = 8.0, cache: CacheStore | None = None) -> Momentum:
     symbol = ticker.upper()
-    params = urllib.parse.urlencode({"range": "6mo", "interval": "1d"})
+    params = urllib.parse.urlencode({"range": "1y", "interval": "1d"})
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(symbol, safe='')}?{params}"
-    cache_key = f"yahoo-momentum:{symbol}:6mo:1d"
+    cache_key = f"yahoo-momentum:{symbol}:1y:1d"
     payload: dict | None = None
     stale = False
     if cache is not None:
@@ -188,30 +198,44 @@ def fetch_momentum(ticker: str, timeout: float = 8.0, cache: CacheStore | None =
         timestamps = result.get("timestamp") or []
         quote = result["indicators"]["quote"][0]
         closes_raw = quote.get("close") or []
+        volumes_raw = quote.get("volume") or []
         adjcloses = (result.get("indicators", {}).get("adjclose") or [{}])[0].get("adjclose") or []
     except (KeyError, IndexError, TypeError, AttributeError):
         if cache is not None:
             _record_event(cache, SOURCE_YAHOO, "warning", f"{symbol} momentum 응답 형식이 올바르지 않습니다.")
         return Momentum(source=SOURCE_YAHOO, stale=stale)
 
-    points: list[tuple[str, float]] = []
+    points: list[tuple[str, float, float | None]] = []
     for index, timestamp in enumerate(timestamps):
         close = _list_number(adjcloses, index)
         if close is None:
             close = _list_number(closes_raw, index)
         if not isinstance(timestamp, (int, float)) or close is None or close <= 0:
             continue
-        points.append((datetime.fromtimestamp(timestamp, tz=timezone.utc).date().isoformat(), close))
+        points.append(
+            (
+                datetime.fromtimestamp(timestamp, tz=timezone.utc).date().isoformat(),
+                close,
+                _list_number(volumes_raw, index),
+            )
+        )
 
     if not points:
         if cache is not None:
             _record_event(cache, SOURCE_YAHOO, "warning", f"{symbol} momentum 가격 앵커가 비어 있습니다.")
         return Momentum(source=SOURCE_YAHOO, stale=stale)
 
-    closes = [close for _, close in points]
+    closes = [close for _, close, _ in points]
+    volumes = [volume for _, _, volume in points]
     latest = closes[-1]
-    high = max(closes)
-    low = min(closes)
+    recent = closes[-126:] if len(closes) > 126 else closes
+    high = max(recent)
+    low = min(recent)
+    ma20_values = moving_average(closes, 20)
+    ma60_values = moving_average(closes, 60)
+    ma120_values = moving_average(closes, 120)
+    latest_volume = volumes[-1] if volumes else None
+    avg_volume_20 = average_recent_volume(volumes, 20)
     return Momentum(
         one_month_pct=_pct_change(closes, 21) if len(closes) >= 22 else None,
         three_month_pct=_pct_change(closes, 63) if len(closes) >= 64 else None,
@@ -222,6 +246,20 @@ def fetch_momentum(ticker: str, timeout: float = 8.0, cache: CacheStore | None =
         latest_close_date=points[-1][0],
         six_month_high=high,
         six_month_low=low,
+        ma20=_last_finite(ma20_values),
+        ma60=_last_finite(ma60_values),
+        ma120=_last_finite(ma120_values),
+        rsi14=rsi(closes, 14),
+        ma20_distance_pct=distance_from_average(latest, _last_finite(ma20_values)),
+        ma60_distance_pct=distance_from_average(latest, _last_finite(ma60_values)),
+        ma120_distance_pct=distance_from_average(latest, _last_finite(ma120_values)),
+        ma20_slope_pct=moving_average_slope(ma20_values),
+        ma60_slope_pct=moving_average_slope(ma60_values),
+        latest_volume=latest_volume,
+        avg_volume_20=avg_volume_20,
+        volume_ratio=volume_ratio(latest_volume, avg_volume_20),
+        twenty_day_breakout_pct=breakout_pct(closes, 20),
+        sixty_day_breakout_pct=breakout_pct(closes, 60),
         source=SOURCE_YAHOO,
         stale=stale,
     )

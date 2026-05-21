@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -8,7 +9,9 @@ from .config import AppConfig
 from .storage import CacheStore
 
 
-STORE_VERSION = 1
+STORE_VERSION = 2
+LEGACY_STORE_VERSION = 1
+COMPACT_TOP_N = 10
 
 
 class SnapshotStoreError(RuntimeError):
@@ -36,6 +39,8 @@ class SnapshotFileStore:
             if existing_index is not None
             else _next_id(snapshots)
         )
+        payload_digest = _payload_digest(payload)
+        compact_payload = _compact_payload(payload, payload_digest)
         row = {
             "id": snapshot_id,
             "snapshotDate": snapshot_date,
@@ -44,7 +49,9 @@ class SnapshotFileStore:
             "topName": top_name,
             "topScore": top_score,
             "createdAt": str(payload.get("createdAt") or ""),
-            "payload": payload,
+            "payloadKind": "compact",
+            "payloadDigest": payload_digest,
+            "payload": compact_payload,
         }
         if existing_index is None:
             snapshots.append(row)
@@ -141,7 +148,7 @@ def _empty_document() -> dict:
 def _validate_document(payload: object, path: Path) -> None:
     if not isinstance(payload, dict):
         raise SnapshotStoreError(f"스냅샷 ledger 최상위 구조가 올바르지 않습니다: {path}")
-    if payload.get("version") != STORE_VERSION:
+    if payload.get("version") not in {LEGACY_STORE_VERSION, STORE_VERSION}:
         raise SnapshotStoreError(f"스냅샷 ledger version이 올바르지 않습니다: {path}")
     if not isinstance(payload.get("snapshots"), list):
         raise SnapshotStoreError(f"스냅샷 ledger snapshots 배열이 올바르지 않습니다: {path}")
@@ -150,6 +157,63 @@ def _validate_document(payload: object, path: Path) -> None:
             raise SnapshotStoreError(f"스냅샷 ledger row 구조가 올바르지 않습니다: {path}#{index}")
         if not isinstance(row.get("payload"), dict):
             raise SnapshotStoreError(f"스냅샷 ledger payload가 올바르지 않습니다: {path}#{index}")
+
+
+def _payload_digest(payload: dict) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "sha256:" + sha256(encoded).hexdigest()
+
+
+def _compact_payload(payload: dict, payload_digest: str) -> dict:
+    stocks = payload.get("stocks")
+    benchmarks = payload.get("benchmarks")
+    compact_stocks = [
+        _compact_stock(item)
+        for item in (stocks if isinstance(stocks, list) else [])[:COMPACT_TOP_N]
+        if isinstance(item, dict)
+    ]
+    compact_benchmarks = [
+        _compact_benchmark(item)
+        for item in (benchmarks if isinstance(benchmarks, list) else [])
+        if isinstance(item, dict)
+    ]
+    return {
+        "version": payload.get("version"),
+        "payloadKind": "compact",
+        "payloadDigest": payload_digest,
+        "mode": payload.get("mode"),
+        "snapshotDate": payload.get("snapshotDate"),
+        "createdAt": payload.get("createdAt"),
+        "createdAtDisplay": payload.get("createdAtDisplay"),
+        "createdAtTimezone": payload.get("createdAtTimezone"),
+        "audit": payload.get("audit") if isinstance(payload.get("audit"), dict) else {},
+        "sourceEventSummary": payload.get("sourceEventSummary")
+        if isinstance(payload.get("sourceEventSummary"), dict)
+        else {},
+        "snapshotQuality": payload.get("snapshotQuality")
+        if isinstance(payload.get("snapshotQuality"), dict)
+        else {},
+        "stocks": compact_stocks,
+        "benchmarks": compact_benchmarks,
+    }
+
+
+def _compact_stock(item: dict) -> dict:
+    return {
+        "ticker": item.get("ticker"),
+        "name": item.get("name"),
+        "score": item.get("score"),
+        "decisionGrade": item.get("decisionGrade"),
+        "riskLevel": item.get("riskLevel"),
+        "priceAnchor": item.get("priceAnchor") if isinstance(item.get("priceAnchor"), dict) else {},
+    }
+
+
+def _compact_benchmark(item: dict) -> dict:
+    return {
+        "ticker": item.get("ticker"),
+        "priceAnchor": item.get("priceAnchor") if isinstance(item.get("priceAnchor"), dict) else {},
+    }
 
 
 def _find_row_index(rows: list[dict], snapshot_date: str, mode: str) -> int | None:

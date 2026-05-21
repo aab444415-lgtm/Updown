@@ -17,6 +17,8 @@ class AppConfig:
     data_dir: Path
     cache_db_path: Path
     snapshot_store_path: Path
+    full_snapshot_dir: Path | None
+    persist_repo_ledger: bool
     sec_user_agent: str
     opendart_api_key: str | None = None
     fred_api_key: str | None = None
@@ -35,6 +37,8 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         data_dir=data_dir,
         cache_db_path=data_dir / "cache.sqlite",
         snapshot_store_path=_snapshot_store_path(merged),
+        full_snapshot_dir=_optional_project_path(_clean(merged.get("STOCK_RECOMMENDER_FULL_SNAPSHOT_DIR"))),
+        persist_repo_ledger=_truthy(_clean(merged.get("STOCK_RECOMMENDER_PERSIST_REPO_LEDGER"))),
         sec_user_agent=_clean(merged.get("SEC_USER_AGENT"))
         or "stock-recommender/0.1 your-email@example.com",
         opendart_api_key=_clean(merged.get("OPENDART_API_KEY")),
@@ -61,6 +65,17 @@ def _snapshot_store_path(values: dict[str, str]) -> Path:
         path = Path(configured).expanduser()
         return path if path.is_absolute() else PROJECT_ROOT / path
     return PROJECT_ROOT / "snapshot_store" / "recommendation_snapshots.json"
+
+
+def _optional_project_path(value: str | None) -> Path | None:
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+def _truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def configured_source_names(config: AppConfig) -> tuple[str, ...]:

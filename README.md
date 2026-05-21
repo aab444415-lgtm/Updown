@@ -19,6 +19,13 @@ python3 -m stock_recommender.web
 
 브라우저에서 `http://127.0.0.1:8765`를 열면 됩니다.
 
+React 대시보드 소스를 수정한 뒤 정적 산출물을 갱신하려면:
+
+```bash
+npm install --prefix frontend
+npm run build
+```
+
 Cloudflare Pages 자동 업데이트는 [docs/cloudflare-auto-update.md](docs/cloudflare-auto-update.md)를 참고하세요.
 
 기본 실행은 항상 Google News/Yahoo Finance 공개 데이터, SEC EDGAR, OpenDART, FRED, ECOS 갱신을 시도합니다. 외부 데이터가 일부 실패하면 기본 유니버스 지표와 중립 모멘텀을 보조값으로 사용하고 경고에 남깁니다.
@@ -65,7 +72,13 @@ python3 -m stock_recommender.backtest_cli --method legacy --months 12 --top 5 --
 python3 -m stock_recommender.snapshot_cli
 ```
 
-스냅샷은 로컬 SQLite 캐시와 함께 `snapshot_store/recommendation_snapshots.json`에도 저장됩니다. 이 JSON ledger는 GitHub Actions가 매일 갱신하고 커밋하므로 Cloudflare의 임시 빌드 환경에서도 과거 스냅샷을 읽을 수 있습니다.
+로컬 실행은 기본적으로 전체 스냅샷 payload를 SQLite 캐시에만 저장하고 Git ledger는 수정하지 않습니다. GitHub Actions는 `STOCK_RECOMMENDER_PERSIST_REPO_LEDGER=1`로 compact ledger만 `snapshot_store/recommendation_snapshots.json`에 커밋하므로 Cloudflare의 임시 빌드 환경에서도 과거 스냅샷 요약과 가격 앵커를 읽을 수 있습니다.
+
+전체 JSON payload를 파일로도 남기고 싶으면 Git에 포함되지 않는 경로를 지정합니다.
+
+```bash
+STOCK_RECOMMENDER_FULL_SNAPSHOT_DIR=artifacts/snapshots python3 -m stock_recommender.snapshot_cli
+```
 
 리포트 생성과 동시에 저장하려면:
 
@@ -87,6 +100,8 @@ cp .env.example .env
 SEC_USER_AGENT="stock-recommender/0.1 your-email@example.com"
 STOCK_RECOMMENDER_TIMEZONE="Asia/Seoul"
 STOCK_RECOMMENDER_SNAPSHOT_STORE_PATH=""
+STOCK_RECOMMENDER_FULL_SNAPSHOT_DIR=""
+STOCK_RECOMMENDER_PERSIST_REPO_LEDGER=""
 OPENDART_API_KEY=""
 FRED_API_KEY=""
 ECOS_API_KEY=""
@@ -107,7 +122,7 @@ ECOS_API_KEY=""
 - OpenDART/FRED/ECOS 키 응답 상태 진단
 - FRED 금리/물가/고용/달러 지표와 ECOS 원달러 환율을 산업 점수에 반영
 - 웹/리포트의 데이터 품질 표시
-- GitHub Actions가 갱신하는 repo 기반 스냅샷 ledger
+- GitHub Actions가 갱신하는 compact repo 기반 스냅샷 ledger
 
 비용 기준:
 

@@ -29,6 +29,7 @@ jobs:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           ECOS_API_KEY: ${{ secrets.ECOS_API_KEY }}
           STOCK_RECOMMENDER_TIMEZONE: Asia/Seoul
+          STOCK_RECOMMENDER_PERSIST_REPO_LEDGER: "1"
         run: |
           python3 -m stock_recommender.snapshot_cli
 

@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .backtest import BACKTEST_METHODS, BENCHMARKS, create_backtest, render_backtest_markdown
+from .backtest import BACKTEST_HORIZONS, BACKTEST_METHODS, BENCHMARKS, create_backtest, render_backtest_markdown
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -13,6 +13,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--top", type=int, default=5, help="월별로 보유할 상위 종목 수")
     parser.add_argument("--benchmark", choices=BENCHMARKS, default="SPY", help="비교 벤치마크")
     parser.add_argument("--method", choices=BACKTEST_METHODS, default="snapshot", help="검증 방식")
+    parser.add_argument("--horizon", choices=BACKTEST_HORIZONS, default="overall", help="검증할 추천 후보군")
     parser.add_argument("--output", type=Path, help="Markdown 백테스트 리포트 저장 경로")
     args = parser.parse_args(argv)
 
@@ -21,6 +22,7 @@ def main(argv: list[str] | None = None) -> int:
         top_n=args.top,
         benchmark_ticker=args.benchmark,
         method=args.method,
+        horizon=args.horizon,
     )
     output = render_backtest_markdown(result)
 

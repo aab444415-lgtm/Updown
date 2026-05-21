@@ -5,7 +5,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
-from stock_recommender.backtest import BACKTEST_METHODS, BENCHMARKS, backtest_to_dict, create_backtest
+from stock_recommender.backtest import BACKTEST_HORIZONS, BACKTEST_METHODS, BENCHMARKS, backtest_to_dict, create_backtest
 from stock_recommender.config import load_config
 from stock_recommender.storage import CacheStore
 
@@ -17,10 +17,13 @@ class handler(BaseHTTPRequestHandler):
         top_n = _int_query(query, "top", 5)
         benchmark = query.get("benchmark", ["SPY"])[0].upper()
         method = query.get("method", ["snapshot"])[0].lower()
+        horizon = query.get("horizon", ["overall"])[0].lower()
         if benchmark not in BENCHMARKS:
             benchmark = "SPY"
         if method not in BACKTEST_METHODS:
             method = "snapshot"
+        if horizon not in BACKTEST_HORIZONS:
+            horizon = "overall"
         try:
             payload = backtest_to_dict(
                 create_backtest(
@@ -28,6 +31,7 @@ class handler(BaseHTTPRequestHandler):
                     top_n=top_n,
                     benchmark_ticker=benchmark,
                     method=method,
+                    horizon=horizon,
                 )
             )
         except Exception as exc:  # pragma: no cover - serverless boundary
