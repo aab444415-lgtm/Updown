@@ -13,21 +13,39 @@ from datetime import date, datetime, timezone
 from .config import AppConfig, load_config
 from .data_sources import _open_url
 from .models import IndustryProfile, Momentum, StockProfile
-from .scoring import score_industries, score_stocks
+from .scoring import (
+    score_industries,
+    score_long_term_candidates,
+    score_medium_term_candidates,
+    score_short_term_candidates,
+    score_stocks,
+)
 from .snapshot_store import list_snapshot_rows
 from .storage import CacheStore
+from .technical import (
+    _last_finite,
+    average_recent_volume,
+    breakout_pct,
+    distance_from_average,
+    moving_average,
+    moving_average_slope,
+    rsi,
+    volume_ratio,
+)
 from .time_utils import now_in_app_timezone
 from .universe import DEFAULT_MACRO_CONTEXT, INDUSTRIES, STOCKS
 
 
 BENCHMARKS = ("SPY", "QQQ", "^KS11")
 BACKTEST_METHODS = ("snapshot", "legacy")
+BACKTEST_HORIZONS = ("overall", "short", "medium", "long")
 
 
 @dataclass(frozen=True)
 class PricePoint:
     date: date
     close: float
+    volume: float | None = None
 
 
 @dataclass(frozen=True)
@@ -41,6 +59,9 @@ class BacktestPeriod:
     alpha_pct: float
     snapshot_date: str | None = None
     price_source: str = "liveHistory"
+    anchor_coverage_pct: float = 0
+    period_status: str = "included"
+    excluded_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -80,6 +101,7 @@ class BacktestResult:
     required_snapshot_days: int = 0
     created_at_timezone: str = ""
     price_source: str = "liveHistory"
+    horizon: str = "overall"
 
     @property
     def period_count(self) -> int:
@@ -92,6 +114,7 @@ def create_backtest(
     benchmark_ticker: str = "SPY",
     timeout: float = 8.0,
     method: str = "snapshot",
+    horizon: str = "overall",
 ) -> BacktestResult:
     months = _clamp_int(months, 3, 36)
     top_n = _clamp_int(top_n, 3, 10)
@@ -99,6 +122,7 @@ def create_backtest(
     if benchmark_ticker not in BENCHMARKS:
         benchmark_ticker = "SPY"
     method = _normalize_method(method)
+    horizon = _normalize_horizon(horizon)
 
     config = load_config()
     cache = CacheStore(config.cache_db_path)
@@ -113,6 +137,7 @@ def create_backtest(
             timeout=timeout,
             created_at=created_at,
             timezone_name=config.timezone_name,
+            horizon=horizon,
         )
 
     tickers = tuple(dict.fromkeys(stock.ticker.upper() for stock in STOCKS))
@@ -134,6 +159,7 @@ def create_backtest(
         created_at=created_at,
         timezone_name=config.timezone_name,
         method="legacy",
+        horizon=horizon,
     )
 
 
@@ -146,6 +172,7 @@ def create_snapshot_backtest(
     timeout: float,
     created_at: datetime,
     timezone_name: str,
+    horizon: str = "overall",
 ) -> BacktestResult:
     rows = list_snapshot_rows(config, cache, limit=max(365, months * 40), mode="live")
     snapshots = _snapshot_records(rows)
@@ -158,6 +185,7 @@ def create_snapshot_backtest(
             benchmark_ticker=benchmark_ticker,
             created_at=created_at,
             timezone_name=timezone_name,
+            horizon=horizon,
         )
 
     snapshot_tickers = tuple(
@@ -165,7 +193,7 @@ def create_snapshot_backtest(
             {
                 ticker
                 for snapshot in snapshots
-                for ticker in _snapshot_tickers(snapshot.payload, top_n=top_n)
+                for ticker in _snapshot_tickers(snapshot.payload, top_n=top_n, horizon=horizon)
             }
         )
     )
@@ -185,6 +213,7 @@ def create_snapshot_backtest(
         benchmark_ticker=benchmark_ticker,
         created_at=created_at,
         timezone_name=timezone_name,
+        horizon=horizon,
     )
 
 
@@ -198,10 +227,12 @@ def run_backtest(
     created_at: datetime | None = None,
     timezone_name: str = "",
     method: str = "legacy",
+    horizon: str = "overall",
 ) -> BacktestResult:
     stocks_tuple = tuple(stocks)
     industries_tuple = tuple(industries)
     benchmark_ticker = benchmark_ticker.upper()
+    horizon = _normalize_horizon(horizon)
     warnings: list[str] = []
     benchmark_history = histories.get(benchmark_ticker, ())
     month_ends = _month_end_dates(benchmark_history)
@@ -214,6 +245,7 @@ def run_backtest(
             created_at=created_at,
             timezone_name=timezone_name,
             method=method,
+            horizon=horizon,
         )
 
     period_dates = month_ends[-(months + 1) :]
@@ -257,7 +289,13 @@ def run_backtest(
             continue
 
         scores = score_stocks(eligible_stocks, industry_scores, momentums)
-        selected = tuple(score.stock for score in scores[:top_n])
+        selected = _legacy_selected_stocks(
+            horizon=horizon,
+            scores=scores,
+            industry_scores=industry_scores,
+            momentums=momentums,
+            top_n=top_n,
+        )
         selected_returns = [returns[stock.ticker.upper()] for stock in selected if stock.ticker.upper() in returns]
         benchmark_return = _period_return(benchmark_history, start_date, end_date)
         if not selected_returns or benchmark_return is None:
@@ -286,6 +324,7 @@ def run_backtest(
             created_at=created_at,
             timezone_name=timezone_name,
             method=method,
+            horizon=horizon,
         )
 
     strategy_returns = [period.return_pct for period in periods]
@@ -307,13 +346,14 @@ def run_backtest(
         win_rate_pct=round(_ratio(value > 0 for value in strategy_returns), 1),
         hit_rate_pct=round(_ratio(period.return_pct > period.benchmark_return_pct for period in periods), 1),
         max_drawdown_pct=round(_max_drawdown(strategy_returns), 2),
-        volatility_pct=round(_annualized_volatility(strategy_returns), 2),
+        volatility_pct=_round_optional(_annualized_volatility(strategy_returns), 2),
         data_coverage_pct=round(data_coverage, 1),
         benchmark_results=benchmark_results,
         warnings=tuple(dict.fromkeys(warnings)),
         method=method,
         point_in_time=False,
         created_at_timezone=timezone_name,
+        horizon=horizon,
     )
 
 
@@ -325,8 +365,10 @@ def run_snapshot_backtest(
     benchmark_ticker: str = "SPY",
     created_at: datetime | None = None,
     timezone_name: str = "",
+    horizon: str = "overall",
 ) -> BacktestResult:
     benchmark_ticker = benchmark_ticker.upper()
+    horizon = _normalize_horizon(horizon)
     benchmark_history = histories.get(benchmark_ticker, ())
     required_snapshot_days = months + 1
     snapshot_days = len({snapshot.snapshot_date for snapshot in snapshots})
@@ -344,6 +386,7 @@ def run_snapshot_backtest(
             snapshot_coverage_pct=0,
             required_snapshot_days=required_snapshot_days,
             price_source="snapshotAnchors",
+            horizon=horizon,
         )
 
     period_dates = _snapshot_period_dates(benchmark_history, snapshots, months)
@@ -360,6 +403,7 @@ def run_snapshot_backtest(
             snapshot_days=snapshot_days,
             required_snapshot_days=required_snapshot_days,
             price_source="unknown",
+            horizon=horizon,
         )
 
     possible_periods = max(0, len(period_dates) - 1)
@@ -369,13 +413,18 @@ def run_snapshot_backtest(
     periods_with_snapshot = 0
     unique_selected_tickers: set[str] = set()
     price_ready_tickers: set[str] = set()
+    skipped_snapshot_warnings: set[str] = set()
     for start_date, end_date in zip(period_dates, period_dates[1:]):
-        snapshot = _latest_snapshot_on_or_before(snapshots, start_date)
+        snapshot = _latest_eligible_snapshot_on_or_before(
+            snapshots, start_date, warnings, skipped_snapshot_warnings
+        )
         if snapshot is None:
             continue
-        end_snapshot = _latest_snapshot_on_or_before(snapshots, end_date)
+        end_snapshot = _latest_eligible_snapshot_on_or_before(
+            snapshots, end_date, warnings, skipped_snapshot_warnings
+        )
         periods_with_snapshot += 1
-        selected = _snapshot_top_stocks(snapshot.payload, top_n)
+        selected = _snapshot_top_stocks(snapshot.payload, top_n, horizon)
         if len(selected) < top_n:
             warnings.append(f"{snapshot.snapshot_date.isoformat()} 스냅샷의 종목 수가 Top {top_n}보다 부족합니다.")
             continue
@@ -385,6 +434,8 @@ def run_snapshot_backtest(
         selected_names: list[str] = []
         missing_tickers: list[str] = []
         fallback_used = False
+        anchor_hits = 0
+        anchor_possible = top_n + 1
         for item in selected:
             ticker = str(item.get("ticker", "")).upper()
             name = str(item.get("name") or ticker)
@@ -407,6 +458,7 @@ def run_snapshot_backtest(
                 selected_returns.append(((end_price / start_price) - 1) * 100)
             else:
                 selected_returns.append(anchor_return)
+                anchor_hits += 1
             price_ready_tickers.add(ticker)
             selected_tickers.append(ticker)
             selected_names.append(name)
@@ -419,11 +471,14 @@ def run_snapshot_backtest(
         if benchmark_return is None:
             fallback_used = True
             benchmark_return = _period_return(benchmark_history, start_date, end_date)
+        else:
+            anchor_hits += 1
         if len(selected_returns) < top_n or benchmark_return is None:
             if missing_tickers:
                 warnings.append("가격 데이터 부족으로 스냅샷 구간 제외: " + ", ".join(missing_tickers[:8]))
             continue
         price_source = "liveHistoryFallback" if fallback_used else "snapshotAnchors"
+        anchor_coverage_pct = round(anchor_hits / anchor_possible * 100, 1) if anchor_possible else 0
         if fallback_used:
             warnings.append(
                 f"{start_date.isoformat()}~{end_date.isoformat()} 구간은 스냅샷 가격 앵커 부족으로 Yahoo history fallback을 사용했습니다."
@@ -441,6 +496,9 @@ def run_snapshot_backtest(
                 alpha_pct=round(period_return - benchmark_return, 2),
                 snapshot_date=snapshot.snapshot_date.isoformat(),
                 price_source=price_source,
+                anchor_coverage_pct=anchor_coverage_pct,
+                period_status="included",
+                excluded_reason=None,
             )
         )
 
@@ -465,6 +523,8 @@ def run_snapshot_backtest(
             snapshot_coverage_pct=snapshot_coverage,
             required_snapshot_days=required_snapshot_days,
             price_source="liveHistoryFallback",
+            extra_warnings=tuple(warnings),
+            horizon=horizon,
         )
 
     strategy_returns = [period.return_pct for period in periods]
@@ -491,7 +551,7 @@ def run_snapshot_backtest(
         win_rate_pct=round(_ratio(value > 0 for value in strategy_returns), 1),
         hit_rate_pct=round(_ratio(period.return_pct > period.benchmark_return_pct for period in periods), 1),
         max_drawdown_pct=round(_max_drawdown(strategy_returns), 2),
-        volatility_pct=round(_annualized_volatility(strategy_returns), 2),
+        volatility_pct=_round_optional(_annualized_volatility(strategy_returns), 2),
         data_coverage_pct=round(data_coverage, 1),
         benchmark_results=benchmark_results,
         warnings=tuple(dict.fromkeys(warnings)),
@@ -502,6 +562,7 @@ def run_snapshot_backtest(
         required_snapshot_days=required_snapshot_days,
         created_at_timezone=timezone_name,
         price_source=price_source,
+        horizon=horizon,
     )
 
 
@@ -584,6 +645,7 @@ def parse_yahoo_history(payload: dict) -> tuple[PricePoint, ...]:
         timestamps = result.get("timestamp") or []
         quote = result["indicators"]["quote"][0]
         closes = quote.get("close") or []
+        volumes = quote.get("volume") or []
         adjcloses = (result.get("indicators", {}).get("adjclose") or [{}])[0].get("adjclose") or []
     except (KeyError, IndexError, TypeError, AttributeError):
         return ()
@@ -601,6 +663,7 @@ def parse_yahoo_history(payload: dict) -> tuple[PricePoint, ...]:
             PricePoint(
                 date=datetime.fromtimestamp(timestamp, tz=timezone.utc).date(),
                 close=float(close),
+                volume=_list_value(volumes, index),
             )
         )
     return tuple(sorted(points, key=lambda item: item.date))
@@ -613,6 +676,7 @@ def backtest_to_dict(result: BacktestResult) -> dict:
         "createdAtTimezone": result.created_at_timezone,
         "snapshotDate": result.created_at.date().isoformat(),
         "method": result.method,
+        "horizon": result.horizon,
         "pointInTime": result.point_in_time,
         "priceSource": result.price_source,
         "snapshotDays": result.snapshot_days,
@@ -646,6 +710,9 @@ def backtest_to_dict(result: BacktestResult) -> dict:
                 "alphaPct": period.alpha_pct,
                 "snapshotDate": period.snapshot_date,
                 "priceSource": period.price_source,
+                "anchorCoveragePct": period.anchor_coverage_pct,
+                "periodStatus": period.period_status,
+                "excludedReason": period.excluded_reason,
             }
             for period in result.periods
         ],
@@ -660,6 +727,7 @@ def render_backtest_markdown(result: BacktestResult) -> str:
         f"- 생성 시각: {result.created_at.strftime('%Y-%m-%d %H:%M:%S')}",
         f"- 검증 기간: 최근 {result.period_count}개월",
         f"- 규칙: 월말 리밸런싱, Top {result.top_n} 동일비중",
+        f"- 검증 대상: {_horizon_label(result.horizon)}",
         f"- 검증 방식: {'포인트인타임 스냅샷' if result.point_in_time else '현재 유니버스 기반 legacy'}",
         f"- 벤치마크: {result.benchmark_ticker}",
         "",
@@ -727,8 +795,11 @@ def _snapshot_period_dates(
     month_ends = _month_end_dates(benchmark_history)
     if len(month_ends) >= 2:
         return month_ends[-(months + 1) :]
-    snapshot_dates = sorted({snapshot.snapshot_date for snapshot in snapshots})
-    return snapshot_dates[-(months + 1) :]
+    by_month: dict[tuple[int, int], date] = {}
+    for snapshot in snapshots:
+        key = (snapshot.snapshot_date.year, snapshot.snapshot_date.month)
+        by_month[key] = max(by_month.get(key, snapshot.snapshot_date), snapshot.snapshot_date)
+    return [by_month[key] for key in sorted(by_month)][-(months + 1) :]
 
 
 def _valid_history(points: tuple[PricePoint, ...]) -> bool:
@@ -745,17 +816,42 @@ def _price_on_or_before(points: tuple[PricePoint, ...], target: date) -> float |
 
 
 def _momentum_until(points: tuple[PricePoint, ...], target: date) -> Momentum:
-    closes = [point.close for point in points if point.date <= target]
+    selected_points = [point for point in points if point.date <= target]
+    closes = [point.close for point in selected_points]
+    volumes = [point.volume for point in selected_points]
     recent = closes[-126:] if len(closes) > 126 else closes
     latest = recent[-1] if recent else None
     high = max(recent) if recent else None
     low = min(recent) if recent else None
+    ma20_values = moving_average(closes, 20)
+    ma60_values = moving_average(closes, 60)
+    ma120_values = moving_average(closes, 120)
+    latest_volume = volumes[-1] if volumes else None
+    avg_volume_20 = average_recent_volume(volumes, 20)
     return Momentum(
         one_month_pct=_lookback_return(closes, 21),
         three_month_pct=_lookback_return(closes, 63),
         six_month_pct=_lookback_return(closes, 126),
         drawdown_from_high_pct=_pct_from_high(latest, high),
         range_position_pct=_range_position(latest, low, high),
+        latest_close=latest,
+        latest_close_date=selected_points[-1].date.isoformat() if selected_points else None,
+        six_month_high=high,
+        six_month_low=low,
+        ma20=_last_finite(ma20_values),
+        ma60=_last_finite(ma60_values),
+        ma120=_last_finite(ma120_values),
+        rsi14=rsi(closes, 14),
+        ma20_distance_pct=distance_from_average(latest, _last_finite(ma20_values)),
+        ma60_distance_pct=distance_from_average(latest, _last_finite(ma60_values)),
+        ma120_distance_pct=distance_from_average(latest, _last_finite(ma120_values)),
+        ma20_slope_pct=moving_average_slope(ma20_values),
+        ma60_slope_pct=moving_average_slope(ma60_values),
+        latest_volume=latest_volume,
+        avg_volume_20=avg_volume_20,
+        volume_ratio=volume_ratio(latest_volume, avg_volume_20),
+        twenty_day_breakout_pct=breakout_pct(closes, 20),
+        sixty_day_breakout_pct=breakout_pct(closes, 60),
     )
 
 
@@ -783,6 +879,109 @@ def _anchor_return(start_payload: dict, end_payload: dict, ticker: str) -> float
     if start_close is None or end_close is None or start_close <= 0:
         return None
     return ((end_close / start_close) - 1) * 100
+
+
+def _latest_eligible_snapshot_on_or_before(
+    snapshots: tuple[SnapshotRecord, ...],
+    target: date,
+    warnings: list[str],
+    skipped_warnings: set[str],
+) -> SnapshotRecord | None:
+    for snapshot in reversed(snapshots):
+        if snapshot.snapshot_date > target:
+            continue
+        eligible, reason, fallback_allowed = _snapshot_backtest_eligibility(snapshot.payload)
+        if eligible:
+            if fallback_allowed:
+                _append_once(
+                    warnings,
+                    skipped_warnings,
+                    f"{snapshot.snapshot_date.isoformat()} 구형 스냅샷은 가격 히스토리 fallback으로만 검증합니다.",
+                )
+            return snapshot
+        _append_once(
+            warnings,
+            skipped_warnings,
+            f"{snapshot.snapshot_date.isoformat()} 스냅샷은 품질 기준 미달로 백테스트에서 제외했습니다: {reason}",
+        )
+    return None
+
+
+def _snapshot_backtest_eligibility(payload: dict) -> tuple[bool, str | None, bool]:
+    version = _payload_version(payload)
+    if version is None or version < 10:
+        return True, None, True
+    quality = payload.get("snapshotQuality")
+    if not isinstance(quality, dict):
+        quality = _computed_snapshot_quality(payload)
+    if bool(quality.get("backtestEligible")):
+        return True, None, False
+    reasons = quality.get("exclusionReasons")
+    if isinstance(reasons, list) and reasons:
+        return False, ", ".join(str(item) for item in reasons), False
+    return False, "snapshotQuality.backtestEligible=false", False
+
+
+def _payload_version(payload: dict) -> int | None:
+    value = payload.get("version")
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _computed_snapshot_quality(payload: dict) -> dict:
+    price_coverage = _anchor_collection_coverage(payload.get("stocks"))
+    benchmark_coverage = _benchmark_anchor_coverage(payload)
+    reasons: list[str] = []
+    if price_coverage < 80:
+        reasons.append("priceAnchorCoverageBelow80")
+    if benchmark_coverage < 100:
+        reasons.append("benchmarkAnchorCoverageBelow100")
+    return {
+        "priceAnchorCoveragePct": price_coverage,
+        "benchmarkAnchorCoveragePct": benchmark_coverage,
+        "backtestEligible": not reasons,
+        "exclusionReasons": reasons,
+    }
+
+
+def _anchor_collection_coverage(collection: object) -> float:
+    if not isinstance(collection, list) or not collection:
+        return 0
+    covered = 0
+    for item in collection:
+        if not isinstance(item, dict):
+            continue
+        if _anchor_close({"stocks": [item]}, str(item.get("ticker") or "")) is not None:
+            covered += 1
+    return round(covered / len(collection) * 100, 1)
+
+
+def _benchmark_anchor_coverage(payload: dict) -> float:
+    benchmarks = payload.get("benchmarks")
+    if not isinstance(benchmarks, list):
+        return 0
+    by_ticker = {
+        str(item.get("ticker") or "").upper(): item
+        for item in benchmarks
+        if isinstance(item, dict)
+    }
+    covered = 0
+    for ticker in BENCHMARKS:
+        item = by_ticker.get(ticker)
+        if item is not None and _anchor_close({"benchmarks": [item]}, ticker) is not None:
+            covered += 1
+    return round(covered / len(BENCHMARKS) * 100, 1)
+
+
+def _append_once(warnings: list[str], seen: set[str], message: str) -> None:
+    if message in seen:
+        return
+    seen.add(message)
+    warnings.append(message)
 
 
 def _anchor_close(payload: dict, ticker: str) -> float | None:
@@ -846,6 +1045,12 @@ def _annualized_volatility(returns: list[float]) -> float | None:
     return statistics.stdev(returns) * math.sqrt(12)
 
 
+def _round_optional(value: float | None, digits: int = 2) -> float | None:
+    if value is None or not math.isfinite(value):
+        return None
+    return round(value, digits)
+
+
 def _ratio(items: Iterable[bool]) -> float:
     values = list(items)
     if not values:
@@ -889,6 +1094,8 @@ def _empty_result(
     snapshot_coverage_pct: float = 0,
     required_snapshot_days: int = 0,
     price_source: str = "liveHistory",
+    extra_warnings: tuple[str, ...] = (),
+    horizon: str = "overall",
 ) -> BacktestResult:
     return BacktestResult(
         created_at=created_at or now_in_app_timezone(),
@@ -906,7 +1113,7 @@ def _empty_result(
         volatility_pct=None,
         data_coverage_pct=round(data_coverage_pct, 1),
         benchmark_results=(),
-        warnings=(warning,),
+        warnings=tuple(dict.fromkeys((warning, *extra_warnings))),
         method=method,
         point_in_time=point_in_time,
         snapshot_days=snapshot_days,
@@ -914,6 +1121,7 @@ def _empty_result(
         required_snapshot_days=required_snapshot_days,
         created_at_timezone=timezone_name,
         price_source=price_source,
+        horizon=horizon,
     )
 
 
@@ -930,6 +1138,45 @@ def _normalize_method(method: str) -> str:
     return normalized if normalized in BACKTEST_METHODS else "snapshot"
 
 
+def _normalize_horizon(horizon: str) -> str:
+    normalized = str(horizon or "overall").lower()
+    return normalized if normalized in BACKTEST_HORIZONS else "overall"
+
+
+def _horizon_label(horizon: str) -> str:
+    return {
+        "overall": "종합 추천",
+        "short": "단기 후보",
+        "medium": "중기 후보",
+        "long": "장기 후보",
+    }.get(horizon, "종합 추천")
+
+
+def _legacy_selected_stocks(
+    horizon: str,
+    scores,
+    industry_scores,
+    momentums: dict[str, Momentum],
+    top_n: int,
+) -> tuple[StockProfile, ...]:
+    if horizon == "short":
+        return tuple(
+            item.stock_score.stock
+            for item in score_short_term_candidates(scores, industry_scores, (), momentums)[:top_n]
+        )
+    if horizon == "medium":
+        return tuple(
+            item.stock_score.stock
+            for item in score_medium_term_candidates(scores, industry_scores, (), momentums)[:top_n]
+        )
+    if horizon == "long":
+        return tuple(
+            item.stock_score.stock
+            for item in score_long_term_candidates(scores, industry_scores, (), momentums)[:top_n]
+        )
+    return tuple(score.stock for score in scores[:top_n])
+
+
 def _snapshot_records(rows: list[dict]) -> tuple[SnapshotRecord, ...]:
     records: list[SnapshotRecord] = []
     for row in rows:
@@ -943,20 +1190,28 @@ def _snapshot_records(rows: list[dict]) -> tuple[SnapshotRecord, ...]:
     return tuple(sorted(records, key=lambda item: item.snapshot_date))
 
 
-def _snapshot_tickers(payload: dict, top_n: int) -> tuple[str, ...]:
+def _snapshot_tickers(payload: dict, top_n: int, horizon: str = "overall") -> tuple[str, ...]:
     return tuple(
         ticker
-        for item in _snapshot_top_stocks(payload, top_n)
+        for item in _snapshot_top_stocks(payload, top_n, horizon)
         if (ticker := str(item.get("ticker", "")).upper())
     )
 
 
-def _snapshot_top_stocks(payload: dict, top_n: int) -> tuple[dict, ...]:
-    stocks = payload.get("stocks")
+def _snapshot_top_stocks(payload: dict, top_n: int, horizon: str = "overall") -> tuple[dict, ...]:
+    stocks = payload.get(_snapshot_collection_name(horizon))
     if not isinstance(stocks, list):
         return ()
     valid = [item for item in stocks if isinstance(item, dict) and item.get("ticker")]
     return tuple(valid[:top_n])
+
+
+def _snapshot_collection_name(horizon: str) -> str:
+    return {
+        "short": "shortTermCandidates",
+        "medium": "mediumTermCandidates",
+        "long": "longTermCandidates",
+    }.get(horizon, "stocks")
 
 
 def _latest_snapshot_on_or_before(

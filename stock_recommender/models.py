@@ -101,6 +101,20 @@ class Momentum:
     latest_close_date: str | None = None
     six_month_high: float | None = None
     six_month_low: float | None = None
+    ma20: float | None = None
+    ma60: float | None = None
+    ma120: float | None = None
+    rsi14: float | None = None
+    ma20_distance_pct: float | None = None
+    ma60_distance_pct: float | None = None
+    ma120_distance_pct: float | None = None
+    ma20_slope_pct: float | None = None
+    ma60_slope_pct: float | None = None
+    latest_volume: float | None = None
+    avg_volume_20: float | None = None
+    volume_ratio: float | None = None
+    twenty_day_breakout_pct: float | None = None
+    sixty_day_breakout_pct: float | None = None
     source: str | None = None
     stale: bool = False
 
@@ -238,8 +252,12 @@ class ShortTermScore:
     news_score: float
     market_score: float
     chart_score: float
+    volume_score: float
     company_score: float
+    confidence_score: float
+    confidence_label: str
     signal_label: str
+    setup_label: str
     time_horizon: str
     reasons: tuple[str, ...]
     cautions: tuple[str, ...]
@@ -253,6 +271,8 @@ class MediumTermScore:
     market_score: float
     chart_score: float
     news_score: float
+    confidence_score: float
+    confidence_label: str
     signal_label: str
     time_horizon: str
     reasons: tuple[str, ...]
@@ -267,10 +287,24 @@ class LongTermScore:
     market_score: float
     chart_score: float
     news_score: float
+    confidence_score: float
+    confidence_label: str
     signal_label: str
     time_horizon: str
     reasons: tuple[str, ...]
     cautions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class LegendStrategyScore:
+    stock_score: StockScore
+    lynch_score: float
+    oneil_score: float
+    greenblatt_score: float
+    fisher_score: float
+    composite_score: float
+    reasons: tuple[str, ...]
+    warnings: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -284,6 +318,7 @@ class RecommendationReport:
     short_term_scores: tuple[ShortTermScore, ...] = ()
     medium_term_scores: tuple[MediumTermScore, ...] = ()
     long_term_scores: tuple[LongTermScore, ...] = ()
+    legend_strategy_scores: tuple[LegendStrategyScore, ...] = ()
     macro_snapshot: MacroSnapshot | None = None
     data_quality: DataQuality = field(default_factory=DataQuality)
     momentums: dict[str, Momentum] = field(default_factory=dict)

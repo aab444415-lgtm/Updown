@@ -3,6 +3,7 @@ from __future__ import annotations
 from .models import (
     EarlyGrowthScore,
     Fundamentals,
+    LegendStrategyScore,
     LongTermScore,
     MediumTermScore,
     RecommendationReport,
@@ -79,9 +80,17 @@ def render_markdown(
         lines.extend(_render_stock(rank, item))
         lines.append("")
 
+    lines.append("## 투자 전설 전략 후보")
+    lines.append("")
+    lines.append("린치, 오닐, 그린블라트, 피셔의 정량 프록시를 결합해 후보를 따로 정렬합니다.")
+    lines.append("")
+    for rank, item in enumerate(report.legend_strategy_scores[:top_stocks], start=1):
+        lines.extend(_render_legend_strategy_stock(rank, item))
+        lines.append("")
+
     lines.append("## 단기 매매 후보")
     lines.append("")
-    lines.append("뉴스/이슈, 시장 모멘텀, 차트 위치, 기업 데이터로 당일~2주 관점의 후보를 따로 점수화합니다.")
+    lines.append("차트 구조, 거래량, 시장 모멘텀, 뉴스/이슈, 기업 데이터를 당일~2주 관점으로 따로 점수화합니다.")
     lines.append("")
     for rank, item in enumerate(report.short_term_scores[:top_stocks], start=1):
         lines.extend(_render_short_term_stock(rank, item))
@@ -125,10 +134,12 @@ def render_markdown(
     lines.append(
         "- 종목 점수: 산업 점수, 기본적 분석, 성장성까지 반영한 밸류에이션, 가격 모멘텀, 핵심/부가 기업 역할을 합산합니다."
     )
-    lines.append("- 단기 점수: 뉴스 30%, 시장 데이터 35%, 차트 25%, 기업 데이터 10%를 반영합니다.")
-    lines.append("- 중기 점수: 기업 데이터 30%, 시장 데이터 30%, 차트 25%, 뉴스 15%를 반영합니다.")
-    lines.append("- 장기 점수: 기업 데이터 45%, 시장/산업 25%, 차트 15%, 구조적 이슈 15%를 반영합니다.")
+    lines.append("- 단기 점수: 차트 45%, 거래량 20%, 시장/섹터 모멘텀 20%, 뉴스 10%, 기업 데이터 5%를 반영합니다.")
+    lines.append("- 중기 점수: 기업 데이터 30%, 차트 30%, 시장 데이터 25%, 뉴스 15%를 반영합니다.")
+    lines.append("- 장기 점수: 기업 데이터 50%, 시장/산업/거시 25%, 구조적 이슈 15%, 장기 차트 10%를 반영합니다.")
+    lines.append("- 신뢰도 점수는 가격, 거래량, 재무, 뉴스 데이터의 커버리지를 반영하며 데이터가 부족하면 상위 신호를 제한합니다.")
     lines.append("- 저점 성장주 점수: 작은 시가총액, 매출 성장, 재무 버팀목, 고점 대비 조정과 단기 반등 여부를 따로 봅니다.")
+    lines.append("- 투자 전설 전략 점수: 린치 25%, 오닐 35%, 그린블라트 25%, 피셔 15% 기본 가중치를 사용합니다.")
     lines.append("- 낮은 PER은 단독 매수 근거가 아니며, 이익 정점과 성장 둔화 가능성을 함께 봅니다.")
     lines.append("- 점수는 정답이 아니라 후보 압축용 랭킹입니다.")
     return "\n".join(lines)
@@ -185,14 +196,33 @@ def _render_early_growth_stock(rank: int, item: EarlyGrowthScore) -> list[str]:
     return lines
 
 
+def _render_legend_strategy_stock(rank: int, item: LegendStrategyScore) -> list[str]:
+    stock = item.stock_score.stock
+    lines = [f"### {rank}. {stock.name} ({stock.ticker}) - {item.composite_score:.1f}점", ""]
+    lines.append(
+        f"- 전략별 점수: 린치 {item.lynch_score:.1f}, 오닐 {item.oneil_score:.1f}, "
+        f"그린블라트 {item.greenblatt_score:.1f}, 피셔 {item.fisher_score:.1f}"
+    )
+    lines.append(f"- 종합 판단 참고: {item.stock_score.decision_grade}, 리스크 {item.stock_score.risk_level}")
+    lines.append("- 전략 근거:")
+    for reason in item.reasons:
+        lines.append(f"  - {reason}")
+    if item.warnings:
+        lines.append("- 데이터 한계:")
+        for warning in item.warnings[:4]:
+            lines.append(f"  - {warning}")
+    return lines
+
+
 def _render_short_term_stock(rank: int, item: ShortTermScore) -> list[str]:
     stock_score = item.stock_score
     stock = stock_score.stock
     lines = [f"### {rank}. {stock.name} ({stock.ticker}) - {item.score:.1f}점 / {item.signal_label}", ""]
     lines.append(f"- 기간: {item.time_horizon}")
+    lines.append(f"- 셋업/신뢰도: {item.setup_label}, {item.confidence_label} ({item.confidence_score:.1f}/100)")
     lines.append(
-        f"- 세부 점수: 뉴스 {item.news_score:.1f}, 시장 {item.market_score:.1f}, "
-        f"차트 {item.chart_score:.1f}, 기업 {item.company_score:.1f}"
+        f"- 세부 점수: 차트 {item.chart_score:.1f}, 거래량 {item.volume_score:.1f}, "
+        f"시장 {item.market_score:.1f}, 뉴스 {item.news_score:.1f}, 기업 {item.company_score:.1f}"
     )
     lines.append(f"- 종합 판단 참고: {stock_score.decision_grade}, 리스크 {stock_score.risk_level}")
     lines.append("- 단기 근거:")
@@ -210,9 +240,10 @@ def _render_medium_term_stock(rank: int, item: MediumTermScore) -> list[str]:
     stock = stock_score.stock
     lines = [f"### {rank}. {stock.name} ({stock.ticker}) - {item.score:.1f}점 / {item.signal_label}", ""]
     lines.append(f"- 기간: {item.time_horizon}")
+    lines.append(f"- 신뢰도: {item.confidence_label} ({item.confidence_score:.1f}/100)")
     lines.append(
-        f"- 세부 점수: 기업 {item.company_score:.1f}, 시장 {item.market_score:.1f}, "
-        f"차트 {item.chart_score:.1f}, 뉴스 {item.news_score:.1f}"
+        f"- 세부 점수: 기업 {item.company_score:.1f}, 차트 {item.chart_score:.1f}, "
+        f"시장 {item.market_score:.1f}, 뉴스 {item.news_score:.1f}"
     )
     lines.append(f"- 종합 판단 참고: {stock_score.decision_grade}, 리스크 {stock_score.risk_level}")
     lines.append("- 중기 근거:")
@@ -230,9 +261,10 @@ def _render_long_term_stock(rank: int, item: LongTermScore) -> list[str]:
     stock = stock_score.stock
     lines = [f"### {rank}. {stock.name} ({stock.ticker}) - {item.score:.1f}점 / {item.signal_label}", ""]
     lines.append(f"- 기간: {item.time_horizon}")
+    lines.append(f"- 신뢰도: {item.confidence_label} ({item.confidence_score:.1f}/100)")
     lines.append(
-        f"- 세부 점수: 기업 {item.company_score:.1f}, 시장/산업 {item.market_score:.1f}, "
-        f"차트 {item.chart_score:.1f}, 구조적 이슈 {item.news_score:.1f}"
+        f"- 세부 점수: 기업 {item.company_score:.1f}, 시장/산업/거시 {item.market_score:.1f}, "
+        f"구조적 이슈 {item.news_score:.1f}, 장기 차트 {item.chart_score:.1f}"
     )
     lines.append(f"- 종합 판단 참고: {stock_score.decision_grade}, 리스크 {stock_score.risk_level}")
     lines.append("- 장기 근거:")

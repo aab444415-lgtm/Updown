@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .backtest import BACKTEST_METHODS, BENCHMARKS, backtest_to_dict, create_backtest, fetch_price_history
+from .backtest import BACKTEST_HORIZONS, BACKTEST_METHODS, BENCHMARKS, backtest_to_dict, create_backtest, fetch_price_history
 from .config import load_config
 from .models import RecommendationReport
 from .pipeline import create_recommendation_report
@@ -39,6 +39,9 @@ def report_to_dict(report: RecommendationReport) -> dict:
     }
     long_term_by_ticker = {
         item.stock_score.stock.ticker.upper(): item for item in report.long_term_scores
+    }
+    legend_by_ticker = {
+        item.stock_score.stock.ticker.upper(): item for item in report.legend_strategy_scores
     }
     return {
         "createdAt": report.created_at.isoformat(),
@@ -131,8 +134,25 @@ def report_to_dict(report: RecommendationReport) -> dict:
                 "longTerm": _long_term_to_dict(
                     long_term_by_ticker.get(item.stock.ticker.upper())
                 ),
+                **_legend_strategy_stock_fields(
+                    legend_by_ticker.get(item.stock.ticker.upper())
+                ),
             }
             for item in report.stock_scores
+        ],
+        "legendCandidates": [
+            {
+                "ticker": item.stock_score.stock.ticker,
+                "name": item.stock_score.stock.name,
+                "industry": item.stock_score.stock.industry,
+                "country": item.stock_score.stock.country,
+                "currency": item.stock_score.stock.currency,
+                "baseScore": item.stock_score.score,
+                "decisionGrade": item.stock_score.decision_grade,
+                "riskLevel": item.stock_score.risk_level,
+                **_legend_strategy_to_dict(item),
+            }
+            for item in report.legend_strategy_scores
         ],
         "shortTermCandidates": [
             {
@@ -253,8 +273,12 @@ def _short_term_to_dict(item) -> dict | None:
         "newsScore": item.news_score,
         "marketScore": item.market_score,
         "chartScore": item.chart_score,
+        "volumeScore": item.volume_score,
         "companyScore": item.company_score,
+        "confidenceScore": item.confidence_score,
+        "confidenceLabel": item.confidence_label,
         "signalLabel": item.signal_label,
+        "setupLabel": item.setup_label,
         "timeHorizon": item.time_horizon,
         "reasons": list(item.reasons),
         "cautions": list(item.cautions),
@@ -270,6 +294,8 @@ def _medium_term_to_dict(item) -> dict | None:
         "marketScore": item.market_score,
         "chartScore": item.chart_score,
         "newsScore": item.news_score,
+        "confidenceScore": item.confidence_score,
+        "confidenceLabel": item.confidence_label,
         "signalLabel": item.signal_label,
         "timeHorizon": item.time_horizon,
         "reasons": list(item.reasons),
@@ -286,10 +312,43 @@ def _long_term_to_dict(item) -> dict | None:
         "marketScore": item.market_score,
         "chartScore": item.chart_score,
         "newsScore": item.news_score,
+        "confidenceScore": item.confidence_score,
+        "confidenceLabel": item.confidence_label,
         "signalLabel": item.signal_label,
         "timeHorizon": item.time_horizon,
         "reasons": list(item.reasons),
         "cautions": list(item.cautions),
+    }
+
+
+def _legend_strategy_stock_fields(item) -> dict:
+    if item is None:
+        return {
+            "legendScores": None,
+            "legendCompositeScore": None,
+            "legendReasons": [],
+            "legendWarnings": [],
+        }
+    payload = _legend_strategy_to_dict(item)
+    return {
+        "legendScores": payload["legendScores"],
+        "legendCompositeScore": payload["legendCompositeScore"],
+        "legendReasons": payload["legendReasons"],
+        "legendWarnings": payload["legendWarnings"],
+    }
+
+
+def _legend_strategy_to_dict(item) -> dict:
+    return {
+        "legendCompositeScore": item.composite_score,
+        "legendScores": {
+            "lynch": item.lynch_score,
+            "oneil": item.oneil_score,
+            "greenblatt": item.greenblatt_score,
+            "fisher": item.fisher_score,
+        },
+        "legendReasons": list(item.reasons),
+        "legendWarnings": list(item.warnings),
     }
 
 
@@ -333,10 +392,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if parsed.path == "/":
             self._serve_file(WEB_DIR / "index.html", "text/html; charset=utf-8", include_body=False)
             return
+        if parsed.path == "/favicon.svg":
+            self._serve_file(WEB_DIR / "favicon.svg", "image/svg+xml", include_body=False)
+            return
         if parsed.path.startswith("/assets/"):
-            requested = parsed.path.removeprefix("/assets/")
-            asset_path = (WEB_DIR / requested).resolve()
-            if not asset_path.is_relative_to(WEB_DIR.resolve()):
+            asset_path = _asset_path(parsed.path)
+            if asset_path is None:
                 self.send_error(HTTPStatus.FORBIDDEN)
                 return
             self._serve_file(asset_path, include_body=False)
@@ -358,6 +419,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._serve_file(WEB_DIR / "index.html", "text/html; charset=utf-8")
             return
 
+        if parsed.path == "/favicon.svg":
+            self._serve_file(WEB_DIR / "favicon.svg", "image/svg+xml")
+            return
+
         if parsed.path == "/api/report":
             query = parse_qs(parsed.query)
             macro_context = query.get("macro", [DEFAULT_MACRO_CONTEXT])[0] or DEFAULT_MACRO_CONTEXT
@@ -376,10 +441,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
             top_n = _int_query(query, "top", 5)
             benchmark = query.get("benchmark", ["SPY"])[0].upper()
             method = query.get("method", ["snapshot"])[0].lower()
+            horizon = query.get("horizon", ["overall"])[0].lower()
             if benchmark not in BENCHMARKS:
                 benchmark = "SPY"
             if method not in BACKTEST_METHODS:
                 method = "snapshot"
+            if horizon not in BACKTEST_HORIZONS:
+                horizon = "overall"
             try:
                 payload = backtest_to_dict(
                     create_backtest(
@@ -387,6 +455,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         top_n=top_n,
                         benchmark_ticker=benchmark,
                         method=method,
+                        horizon=horizon,
                     )
                 )
             except Exception as exc:  # pragma: no cover - defensive server boundary
@@ -409,9 +478,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path.startswith("/assets/"):
-            requested = parsed.path.removeprefix("/assets/")
-            asset_path = (WEB_DIR / requested).resolve()
-            if not asset_path.is_relative_to(WEB_DIR.resolve()):
+            asset_path = _asset_path(parsed.path)
+            if asset_path is None:
                 self.send_error(HTTPStatus.FORBIDDEN)
                 return
             self._serve_file(asset_path)
@@ -462,6 +530,15 @@ def _record_api_error(source: str, exc: Exception) -> None:
         CacheStore(config.cache_db_path).record_source_event(source, "error", str(exc))
     except Exception:
         return
+
+
+def _asset_path(request_path: str) -> Path | None:
+    requested = request_path.removeprefix("/assets/")
+    assets_dir = (WEB_DIR / "assets").resolve()
+    asset_path = (assets_dir / requested).resolve()
+    if asset_path.is_relative_to(assets_dir):
+        return asset_path
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:

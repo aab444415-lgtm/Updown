@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -7,6 +8,8 @@ import urllib.parse
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
+from hashlib import sha256
+from pathlib import Path
 
 from . import __version__
 from .config import load_config
@@ -15,7 +18,7 @@ from .snapshot_store import list_snapshot_rows, save_persistent_snapshot
 from .storage import CacheStore
 
 
-SNAPSHOT_PAYLOAD_VERSION = 10
+SNAPSHOT_PAYLOAD_VERSION = 11
 BENCHMARK_TICKERS = ("SPY", "QQQ", "^KS11")
 FUNDAMENTAL_SOURCE_FIELDS = (
     "revenue",
@@ -42,10 +45,23 @@ class SavedSnapshot:
     top_score: float | None
 
 
+def _save_full_snapshot_artifact(path: Path | None, payload: dict, mode: str) -> None:
+    if path is None:
+        return
+    path.mkdir(parents=True, exist_ok=True)
+    digest = _payload_digest(payload).split(":", 1)[-1][:12]
+    filename = f"{payload.get('snapshotDate', 'unknown')}-{mode}-{digest}.json"
+    (path / filename).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def save_recommendation_snapshot(report: RecommendationReport, mode: str = "live") -> SavedSnapshot:
     config = load_config()
     cache = CacheStore(config.cache_db_path)
     payload = report_to_snapshot_payload(report, mode=mode)
+    _save_full_snapshot_artifact(config.full_snapshot_dir, payload, mode=mode)
     top_stock = report.stock_scores[0] if report.stock_scores else None
     snapshot_id = cache.save_recommendation_snapshot(
         snapshot_date=payload["snapshotDate"],
@@ -55,15 +71,17 @@ def save_recommendation_snapshot(report: RecommendationReport, mode: str = "live
         top_score=top_stock.score if top_stock else None,
         payload=payload,
     )
-    persistent_id = save_persistent_snapshot(
-        config,
-        snapshot_date=payload["snapshotDate"],
-        mode=mode,
-        top_ticker=top_stock.stock.ticker if top_stock else None,
-        top_name=top_stock.stock.name if top_stock else None,
-        top_score=top_stock.score if top_stock else None,
-        payload=payload,
-    )
+    persistent_id = 0
+    if config.persist_repo_ledger:
+        persistent_id = save_persistent_snapshot(
+            config,
+            snapshot_date=payload["snapshotDate"],
+            mode=mode,
+            top_ticker=top_stock.stock.ticker if top_stock else None,
+            top_name=top_stock.stock.name if top_stock else None,
+            top_score=top_stock.score if top_stock else None,
+            payload=payload,
+        )
     return SavedSnapshot(
         id=persistent_id or snapshot_id,
         snapshot_date=payload["snapshotDate"],
@@ -94,7 +112,10 @@ def snapshot_history(limit: int = 30) -> dict:
 def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live") -> dict:
     created_at = report.created_at
     source_events = _source_events_payload(report.source_events)
-    return {
+    legend_by_ticker = {
+        item.stock_score.stock.ticker.upper(): item for item in report.legend_strategy_scores
+    }
+    payload = {
         "version": SNAPSHOT_PAYLOAD_VERSION,
         "mode": mode,
         "snapshotDate": created_at.date().isoformat(),
@@ -113,7 +134,7 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
             "liveKoreaFundamentals": report.data_quality.live_korea_fundamentals,
             "configuredSources": list(report.data_quality.configured_sources),
             "missingSources": list(report.data_quality.missing_sources),
-            "warnings": list(report.data_quality.warnings),
+            "warnings": [_redact_text(item) for item in report.data_quality.warnings],
         },
         "macroSnapshot": _macro_snapshot_payload(report),
         "industries": [
@@ -181,8 +202,25 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                     report.momentums.get(item.stock.ticker.upper()),
                     currency=item.stock.currency,
                 ),
+                **_legend_strategy_stock_fields(
+                    legend_by_ticker.get(item.stock.ticker.upper())
+                ),
             }
             for item in report.stock_scores
+        ],
+        "legendCandidates": [
+            {
+                "ticker": item.stock_score.stock.ticker,
+                "name": item.stock_score.stock.name,
+                "country": item.stock_score.stock.country,
+                "industry": item.stock_score.stock.industry,
+                "score": item.composite_score,
+                "baseScore": item.stock_score.score,
+                "decisionGrade": item.stock_score.decision_grade,
+                "riskLevel": item.stock_score.risk_level,
+                **_legend_strategy_to_dict(item),
+            }
+            for item in report.legend_strategy_scores
         ],
         "benchmarks": [
             {
@@ -226,7 +264,11 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                 "newsScore": item.news_score,
                 "marketScore": item.market_score,
                 "chartScore": item.chart_score,
+                "volumeScore": item.volume_score,
                 "companyScore": item.company_score,
+                "confidenceScore": item.confidence_score,
+                "confidenceLabel": item.confidence_label,
+                "setupLabel": item.setup_label,
                 "decisionGrade": item.stock_score.decision_grade,
                 "riskLevel": item.stock_score.risk_level,
                 "reasons": list(item.reasons),
@@ -248,6 +290,8 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                 "marketScore": item.market_score,
                 "chartScore": item.chart_score,
                 "newsScore": item.news_score,
+                "confidenceScore": item.confidence_score,
+                "confidenceLabel": item.confidence_label,
                 "decisionGrade": item.stock_score.decision_grade,
                 "riskLevel": item.stock_score.risk_level,
                 "reasons": list(item.reasons),
@@ -269,6 +313,8 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                 "marketScore": item.market_score,
                 "chartScore": item.chart_score,
                 "newsScore": item.news_score,
+                "confidenceScore": item.confidence_score,
+                "confidenceLabel": item.confidence_label,
                 "decisionGrade": item.stock_score.decision_grade,
                 "riskLevel": item.stock_score.risk_level,
                 "reasons": list(item.reasons),
@@ -286,6 +332,39 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
             for item in report.news_items[:20]
         ],
     }
+    payload["snapshotQuality"] = _snapshot_quality(payload)
+    return payload
+
+
+def _legend_strategy_stock_fields(item) -> dict:
+    if item is None:
+        return {
+            "legendScores": None,
+            "legendCompositeScore": None,
+            "legendReasons": [],
+            "legendWarnings": [],
+        }
+    payload = _legend_strategy_to_dict(item)
+    return {
+        "legendScores": payload["legendScores"],
+        "legendCompositeScore": payload["legendCompositeScore"],
+        "legendReasons": payload["legendReasons"],
+        "legendWarnings": payload["legendWarnings"],
+    }
+
+
+def _legend_strategy_to_dict(item) -> dict:
+    return {
+        "legendCompositeScore": item.composite_score,
+        "legendScores": {
+            "lynch": item.lynch_score,
+            "oneil": item.oneil_score,
+            "greenblatt": item.greenblatt_score,
+            "fisher": item.fisher_score,
+        },
+        "legendReasons": list(item.reasons),
+        "legendWarnings": [_redact_text(text) for text in item.warnings],
+    }
 
 
 def _macro_snapshot_payload(report: RecommendationReport) -> dict | None:
@@ -299,7 +378,7 @@ def _macro_snapshot_payload(report: RecommendationReport) -> dict | None:
         "defensiveScore": snapshot.defensive_score,
         "infrastructureScore": snapshot.infrastructure_score,
         "koreaFxScore": snapshot.korea_fx_score,
-        "warnings": list(snapshot.warnings),
+        "warnings": [_redact_text(item) for item in snapshot.warnings],
         "indicators": [
             {
                 "name": item.name,
@@ -377,6 +456,7 @@ def _source_events_payload(events: tuple[dict, ...]) -> list[dict]:
                 "eventType": _event_type(event.get("eventType")),
                 "message": _redact_text(str(event.get("message") or "")),
                 "createdAt": str(event.get("createdAt") or ""),
+                "metadata": _redact_metadata(event.get("metadata")),
             }
         )
     return payload
@@ -434,6 +514,29 @@ def _redact_scalar(value: str) -> str:
     return LONG_TOKEN_RE.sub("***", value)
 
 
+def _redact_metadata(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    redacted: dict[str, object] = {}
+    for key, item in value.items():
+        if isinstance(item, str):
+            redacted[str(key)] = _redact_text(item)
+        elif isinstance(item, dict):
+            redacted[str(key)] = _redact_metadata(item)
+        elif isinstance(item, list):
+            redacted[str(key)] = [
+                _redact_text(entry) if isinstance(entry, str) else entry for entry in item
+            ]
+        elif isinstance(item, (int, float, bool)) or item is None:
+            redacted[str(key)] = item
+    return redacted
+
+
+def _payload_digest(payload: dict) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "sha256:" + sha256(encoded).hexdigest()
+
+
 def _fundamental_sources(sources: dict[str, dict]) -> dict:
     return {
         field: _source_payload(sources.get(field), field)
@@ -489,6 +592,20 @@ def _momentum_payload(momentum: Momentum | None) -> dict:
         "latestCloseDate": momentum.latest_close_date,
         "sixMonthHigh": momentum.six_month_high,
         "sixMonthLow": momentum.six_month_low,
+        "ma20": momentum.ma20,
+        "ma60": momentum.ma60,
+        "ma120": momentum.ma120,
+        "rsi14": momentum.rsi14,
+        "ma20DistancePct": momentum.ma20_distance_pct,
+        "ma60DistancePct": momentum.ma60_distance_pct,
+        "ma120DistancePct": momentum.ma120_distance_pct,
+        "ma20SlopePct": momentum.ma20_slope_pct,
+        "ma60SlopePct": momentum.ma60_slope_pct,
+        "latestVolume": momentum.latest_volume,
+        "avgVolume20": momentum.avg_volume_20,
+        "volumeRatio": momentum.volume_ratio,
+        "twentyDayBreakoutPct": momentum.twenty_day_breakout_pct,
+        "sixtyDayBreakoutPct": momentum.sixty_day_breakout_pct,
         "source": momentum.source,
         "stale": momentum.stale,
     }
@@ -533,10 +650,42 @@ def _benchmark_currency(ticker: str) -> str:
     return "KRW" if ticker == "^KS11" else "USD"
 
 
+def _snapshot_quality(payload: dict) -> dict:
+    price_anchor_coverage = _price_anchor_coverage_pct(payload)
+    benchmark_anchor_coverage = _benchmark_anchor_coverage_pct(payload)
+    fundamental_source_coverage = _fundamental_source_coverage_pct(payload)
+    source_summary = payload.get("sourceEventSummary")
+    source_error_count = (
+        int(source_summary.get("errorCount") or 0) if isinstance(source_summary, dict) else 0
+    )
+    source_stale_count = (
+        int(source_summary.get("staleCount") or 0) if isinstance(source_summary, dict) else 0
+    )
+    exclusion_reasons: list[str] = []
+    if price_anchor_coverage < 80:
+        exclusion_reasons.append("priceAnchorCoverageBelow80")
+    if benchmark_anchor_coverage < 100:
+        exclusion_reasons.append("benchmarkAnchorCoverageBelow100")
+    return {
+        "priceAnchorCoveragePct": price_anchor_coverage,
+        "benchmarkAnchorCoveragePct": benchmark_anchor_coverage,
+        "fundamentalSourceCoveragePct": fundamental_source_coverage,
+        "sourceErrorCount": source_error_count,
+        "sourceStaleCount": source_stale_count,
+        "backtestEligible": not exclusion_reasons,
+        "exclusionReasons": exclusion_reasons,
+    }
+
+
 def _summary_row(row: dict | None) -> dict | None:
     if row is None:
         return None
     payload = row.get("payload", {})
+    payload_kind = str(row.get("payloadKind") or payload.get("payloadKind") or "full")
+    payload_digest = row.get("payloadDigest") or payload.get("payloadDigest") or _payload_digest(payload)
+    snapshot_quality = payload.get("snapshotQuality")
+    if not isinstance(snapshot_quality, dict):
+        snapshot_quality = _snapshot_quality(payload)
     stocks = payload.get("stocks", [])
     top_stocks = stocks[:5] if isinstance(stocks, list) else []
     created_at = payload.get("createdAtDisplay") or _display_created_at(payload.get("createdAt")) or _display_created_at(row.get("createdAt"))
@@ -548,6 +697,9 @@ def _summary_row(row: dict | None) -> dict | None:
         "topTicker": row.get("topTicker"),
         "topName": row.get("topName"),
         "topScore": row.get("topScore"),
+        "payloadKind": payload_kind,
+        "payloadDigest": payload_digest,
+        "snapshotQuality": snapshot_quality,
         "topStocks": [
             {
                 "ticker": item.get("ticker"),
@@ -563,8 +715,8 @@ def _summary_row(row: dict | None) -> dict | None:
         "configuredSources": payload.get("dataQuality", {}).get("configuredSources", []),
         "gitCommit": payload.get("audit", {}).get("gitCommit"),
         "sourceEventSummary": payload.get("sourceEventSummary") or _source_event_summary([]),
-        "priceAnchorCoveragePct": _price_anchor_coverage_pct(payload),
-        "fundamentalSourceCoveragePct": _fundamental_source_coverage_pct(payload),
+        "priceAnchorCoveragePct": snapshot_quality.get("priceAnchorCoveragePct", 0),
+        "fundamentalSourceCoveragePct": snapshot_quality.get("fundamentalSourceCoveragePct", 0),
         "liveCoverage": {
             "news": payload.get("dataQuality", {}).get("liveNews", False),
             "market": payload.get("dataQuality", {}).get("liveMarketData", False),
@@ -586,6 +738,24 @@ def _price_anchor_coverage_pct(payload: dict) -> float:
         if isinstance(anchor, dict) and anchor.get("latestClose") is not None and anchor.get("latestCloseDate"):
             covered += 1
     return round(covered / len(stocks) * 100, 1)
+
+
+def _benchmark_anchor_coverage_pct(payload: dict) -> float:
+    benchmarks = payload.get("benchmarks")
+    if not isinstance(benchmarks, list):
+        return 0
+    by_ticker = {
+        str(item.get("ticker") or "").upper(): item
+        for item in benchmarks
+        if isinstance(item, dict)
+    }
+    covered = 0
+    for ticker in BENCHMARK_TICKERS:
+        item = by_ticker.get(ticker)
+        anchor = item.get("priceAnchor") if isinstance(item, dict) else None
+        if isinstance(anchor, dict) and anchor.get("latestClose") is not None and anchor.get("latestCloseDate"):
+            covered += 1
+    return round(covered / len(BENCHMARK_TICKERS) * 100, 1)
 
 
 def _fundamental_source_coverage_pct(payload: dict) -> float:

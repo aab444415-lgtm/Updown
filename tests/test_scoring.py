@@ -17,9 +17,10 @@ from stock_recommender.report import render_markdown
 from stock_recommender.scoring import build_report, decision_grade_for_stock, quality_score, valuation_score
 from stock_recommender.sec_edgar import extract_fundamentals
 from stock_recommender.snapshot_store import SnapshotFileStore, SnapshotStoreError
-from stock_recommender.snapshots import report_to_snapshot_payload, snapshot_history
+from stock_recommender.snapshots import report_to_snapshot_payload, save_recommendation_snapshot, snapshot_history
 from stock_recommender.storage import CacheStore
 from stock_recommender.universe import DEFAULT_MACRO_CONTEXT, INDUSTRIES, STOCKS
+from stock_recommender.web import report_to_dict
 
 
 class ScoringTests(unittest.TestCase):
@@ -89,6 +90,7 @@ class ScoringTests(unittest.TestCase):
         self.assertIn("## 중기 매매 후보", markdown)
         self.assertIn("## 장기 투자 후보", markdown)
         self.assertIn("## 저점 성장주 후보", markdown)
+        self.assertIn("## 투자 전설 전략 후보", markdown)
 
     def test_report_contains_macro_snapshot(self):
         snapshot = MacroSnapshot(
@@ -210,6 +212,120 @@ class ScoringTests(unittest.TestCase):
         self.assertGreater(top.chart_score, 70)
         self.assertIn(top.signal_label, {"단기 강세 후보", "단기 관심"})
 
+    def test_short_term_prefers_chart_volume_setup_over_news_only(self):
+        industry = INDUSTRIES[0]
+        chart_leader = StockProfile(
+            ticker="CHART",
+            name="Chart Leader",
+            industry=industry.name,
+            role="adjacent",
+            thesis="스윙 차트와 거래량이 개선되는 후보입니다.",
+            risks=("단기 변동성",),
+            fundamentals=Fundamentals(28.0, 18.0, 16.0, 40.0, 26.0, 20.0, 2_000_000_000),
+            recent_issues=("AI data center order momentum",),
+        )
+        news_only = StockProfile(
+            ticker="NEWSY",
+            name="News Only",
+            industry=industry.name,
+            role="adjacent",
+            thesis="뉴스는 많지만 가격 데이터가 부족한 후보입니다.",
+            risks=("차트 확인 필요",),
+            fundamentals=Fundamentals(28.0, 18.0, 16.0, 40.0, 26.0, 20.0, 2_000_000_000),
+        )
+
+        report = build_report(
+            macro_context=DEFAULT_MACRO_CONTEXT,
+            industries=(industry,),
+            stocks=(chart_leader, news_only),
+            news_items=(
+                NewsItem(
+                    title="NEWSY wins AI infrastructure contract",
+                    source="Test News",
+                    summary="News Only gets a near-term catalyst.",
+                ),
+            ),
+            momentums={
+                "CHART": _strong_swing_momentum(),
+                "NEWSY": Momentum(),
+            },
+        )
+
+        top = report.short_term_scores[0]
+        news_candidate = next(item for item in report.short_term_scores if item.stock_score.stock.ticker == "NEWSY")
+
+        self.assertEqual(top.stock_score.stock.ticker, "CHART")
+        self.assertGreater(top.chart_score, 80)
+        self.assertGreater(top.volume_score, 75)
+        self.assertGreater(news_candidate.news_score, top.news_score)
+        self.assertLessEqual(news_candidate.score, 55)
+
+    def test_short_term_caps_missing_momentum_data(self):
+        industry = INDUSTRIES[0]
+        candidate = StockProfile(
+            ticker="NODATA",
+            name="No Data",
+            industry=industry.name,
+            role="adjacent",
+            thesis="뉴스와 기업 지표는 좋지만 가격 데이터가 비어 있습니다.",
+            risks=("가격 데이터 부족",),
+            fundamentals=Fundamentals(35.0, 22.0, 18.0, 30.0, 28.0, 21.0, 2_000_000_000),
+            recent_issues=("AI accelerator order",),
+        )
+
+        report = build_report(
+            macro_context=DEFAULT_MACRO_CONTEXT,
+            industries=(industry,),
+            stocks=(candidate,),
+            news_items=(
+                NewsItem(
+                    title="NODATA AI accelerator order expands",
+                    source="Test News",
+                    summary="Positive near-term catalyst.",
+                ),
+            ),
+            momentums={},
+        )
+
+        short = report.short_term_scores[0]
+
+        self.assertLessEqual(short.score, 55)
+        self.assertEqual(short.setup_label, "차트 데이터 부족")
+        self.assertIn(short.confidence_label, {"낮음", "확인 필요"})
+
+    def test_short_term_caps_missing_volume_data(self):
+        industry = INDUSTRIES[0]
+        candidate = StockProfile(
+            ticker="NOVOL",
+            name="No Volume",
+            industry=industry.name,
+            role="adjacent",
+            thesis="가격 돌파는 있으나 거래량 데이터가 없는 후보입니다.",
+            risks=("거래량 확인 필요",),
+            fundamentals=Fundamentals(35.0, 22.0, 18.0, 30.0, 28.0, 21.0, 2_000_000_000),
+            recent_issues=("AI accelerator order",),
+        )
+
+        report = build_report(
+            macro_context=DEFAULT_MACRO_CONTEXT,
+            industries=(industry,),
+            stocks=(candidate,),
+            news_items=(
+                NewsItem(
+                    title="NOVOL AI accelerator order expands",
+                    source="Test News",
+                    summary="Positive near-term catalyst.",
+                ),
+            ),
+            momentums={"NOVOL": _strong_swing_momentum(with_volume=False)},
+        )
+
+        short = report.short_term_scores[0]
+
+        self.assertLessEqual(short.score, 72)
+        self.assertEqual(short.volume_score, 50)
+        self.assertIn("거래량", " ".join(short.cautions))
+
     def test_medium_term_ranking_uses_company_market_chart_and_news(self):
         industry = INDUSTRIES[0]
         steady = StockProfile(
@@ -256,6 +372,43 @@ class ScoringTests(unittest.TestCase):
         self.assertGreater(top.market_score, 70)
         self.assertGreater(top.chart_score, 70)
         self.assertIn(top.signal_label, {"중기 강세 후보", "중기 관심"})
+
+    def test_medium_and_long_confidence_labels_limit_top_signals(self):
+        industry = INDUSTRIES[0]
+        thin_data = StockProfile(
+            ticker="THIN",
+            name="Thin Data",
+            industry=industry.name,
+            role="core",
+            thesis="성장성은 좋아 보이나 가격·재무 데이터 보강이 필요한 후보입니다.",
+            risks=("데이터 확인 필요",),
+            fundamentals=Fundamentals(38.0, 24.0, 20.0, 30.0, 24.0, 18.0, 2_000_000_000),
+            recent_issues=("AI infrastructure demand supports growth",),
+        )
+
+        report = build_report(
+            macro_context=DEFAULT_MACRO_CONTEXT,
+            industries=(industry,),
+            stocks=(thin_data,),
+            news_items=(
+                NewsItem(
+                    title="THIN AI infrastructure demand expands",
+                    source="Test News",
+                    summary="Durable growth narrative but data coverage is thin.",
+                ),
+            ),
+            momentums={},
+        )
+
+        medium = report.medium_term_scores[0]
+        long = report.long_term_scores[0]
+
+        self.assertLess(medium.confidence_score, 52)
+        self.assertLess(long.confidence_score, 55)
+        self.assertEqual(medium.confidence_label, "확인 필요")
+        self.assertEqual(long.confidence_label, "확인 필요")
+        self.assertNotEqual(medium.signal_label, "중기 강세 후보")
+        self.assertNotEqual(long.signal_label, "장기 핵심 후보")
 
     def test_long_term_ranking_uses_company_value_industry_chart_and_structural_news(self):
         industry = INDUSTRIES[0]
@@ -328,6 +481,152 @@ class ScoringTests(unittest.TestCase):
         self.assertGreater(top.chart_score, 70)
         self.assertIn(top.signal_label, {"장기 핵심 후보", "장기 관심"})
 
+    def test_legend_lynch_prefers_low_peg_growth_candidate(self):
+        industry = INDUSTRIES[0]
+        low_peg = StockProfile(
+            ticker="PEGGOOD",
+            name="PEG Good",
+            industry=industry.name,
+            role="adjacent",
+            thesis="성장 대비 가격이 낮은 후보입니다.",
+            risks=(),
+            fundamentals=Fundamentals(30.0, 18.0, 20.0, 30.0, 24.0, 18.0, 2_000_000_000),
+        )
+        high_peg = StockProfile(
+            ticker="PEGBAD",
+            name="PEG Bad",
+            industry=industry.name,
+            role="adjacent",
+            thesis="성장 대비 가격 부담이 큰 후보입니다.",
+            risks=(),
+            fundamentals=Fundamentals(8.0, 12.0, 10.0, 80.0, 80.0, 64.0, 2_000_000_000),
+        )
+
+        report = build_report(DEFAULT_MACRO_CONTEXT, (industry,), (low_peg, high_peg), ())
+        by_ticker = {item.stock_score.stock.ticker: item for item in report.legend_strategy_scores}
+
+        self.assertGreater(by_ticker["PEGGOOD"].lynch_score, by_ticker["PEGBAD"].lynch_score)
+
+    def test_legend_oneil_prefers_growth_momentum_and_catalyst(self):
+        industry = INDUSTRIES[0]
+        leader = StockProfile(
+            ticker="ONLEAD",
+            name="O Neil Leader",
+            industry=industry.name,
+            role="core",
+            thesis="성장과 모멘텀이 함께 강한 후보입니다.",
+            risks=(),
+            fundamentals=Fundamentals(32.0, 18.0, 20.0, 25.0, 35.0, 28.0, 4_000_000_000),
+            recent_issues=("신제품 수요와 대형 고객 확대",),
+        )
+        laggard = StockProfile(
+            ticker="ONLAG",
+            name="O Neil Laggard",
+            industry=industry.name,
+            role="adjacent",
+            thesis="성장과 가격 흐름이 약한 후보입니다.",
+            risks=(),
+            fundamentals=Fundamentals(2.0, 8.0, 6.0, 120.0, 24.0, 22.0, 4_000_000_000),
+        )
+
+        report = build_report(
+            DEFAULT_MACRO_CONTEXT,
+            (industry,),
+            (leader, laggard),
+            (),
+            momentums={
+                "ONLEAD": Momentum(14.0, 32.0, 52.0, -6.0, 78.0),
+                "ONLAG": Momentum(-14.0, -22.0, -30.0, -42.0, 12.0),
+            },
+        )
+        by_ticker = {item.stock_score.stock.ticker: item for item in report.legend_strategy_scores}
+
+        self.assertGreater(by_ticker["ONLEAD"].oneil_score, by_ticker["ONLAG"].oneil_score)
+
+    def test_legend_greenblatt_prefers_profitability_and_earnings_yield(self):
+        industry = INDUSTRIES[0]
+        quality_value = StockProfile(
+            ticker="MAGIC",
+            name="Magic Formula",
+            industry=industry.name,
+            role="adjacent",
+            thesis="수익성과 이익수익률이 모두 좋은 후보입니다.",
+            risks=(),
+            fundamentals=Fundamentals(
+                10.0, 28.0, 32.0, 20.0, 16.0, 14.0, 10_000_000_000,
+                operating_income=1_600_000_000,
+                net_income=1_200_000_000,
+            ),
+        )
+        expensive_low_return = StockProfile(
+            ticker="NOMAGIC",
+            name="No Magic",
+            industry=industry.name,
+            role="adjacent",
+            thesis="낮은 자본효율과 고멀티플 후보입니다.",
+            risks=(),
+            fundamentals=Fundamentals(
+                10.0, 5.0, 4.0, 20.0, 90.0, 75.0, 10_000_000_000,
+                operating_income=250_000_000,
+                net_income=150_000_000,
+            ),
+        )
+
+        report = build_report(DEFAULT_MACRO_CONTEXT, (industry,), (quality_value, expensive_low_return), ())
+        by_ticker = {item.stock_score.stock.ticker: item for item in report.legend_strategy_scores}
+
+        self.assertGreater(by_ticker["MAGIC"].greenblatt_score, by_ticker["NOMAGIC"].greenblatt_score)
+
+    def test_legend_fisher_prefers_durable_growth_margin_and_roe(self):
+        industry = INDUSTRIES[0]
+        compounder = StockProfile(
+            ticker="FISHER",
+            name="Fisher Compounder",
+            industry=industry.name,
+            role="core",
+            thesis="장기 성장성과 수익성이 좋은 후보입니다.",
+            risks=(),
+            fundamentals=Fundamentals(26.0, 30.0, 28.0, 20.0, 35.0, 28.0, 30_000_000_000),
+        )
+        weak = StockProfile(
+            ticker="NOFISH",
+            name="No Fisher",
+            industry=industry.name,
+            role="adjacent",
+            thesis="성장과 자본효율이 약한 후보입니다.",
+            risks=(),
+            fundamentals=Fundamentals(1.0, 4.0, 3.0, 160.0, 18.0, 16.0, 30_000_000_000),
+        )
+
+        report = build_report(DEFAULT_MACRO_CONTEXT, (industry,), (compounder, weak), ())
+        by_ticker = {item.stock_score.stock.ticker: item for item in report.legend_strategy_scores}
+
+        self.assertGreater(by_ticker["FISHER"].fisher_score, by_ticker["NOFISH"].fisher_score)
+
+    def test_report_api_serializes_legend_strategy_fields(self):
+        report = build_report(
+            macro_context=DEFAULT_MACRO_CONTEXT,
+            industries=INDUSTRIES[:1],
+            stocks=STOCKS[:2],
+            news_items=(),
+            momentums={STOCKS[0].ticker.upper(): _strong_swing_momentum()},
+        )
+
+        with patch("stock_recommender.web._technical_by_ticker", return_value={}):
+            payload = report_to_dict(report)
+
+        self.assertIn("legendCandidates", payload)
+        self.assertIn("legendScores", payload["stocks"][0])
+        self.assertIn("legendCompositeScore", payload["stocks"][0])
+        self.assertIn("legendReasons", payload["stocks"][0])
+        self.assertIn("legendWarnings", payload["stocks"][0])
+        self.assertIn("shortTermCandidates", payload)
+        self.assertIn("volumeScore", payload["shortTermCandidates"][0])
+        self.assertIn("confidenceScore", payload["shortTermCandidates"][0])
+        self.assertIn("setupLabel", payload["shortTermCandidates"][0])
+        self.assertIn("confidenceScore", payload["mediumTermCandidates"][0])
+        self.assertIn("confidenceLabel", payload["longTermCandidates"][0])
+
 
 class ConfigTests(unittest.TestCase):
     def test_load_config_reads_dotenv(self):
@@ -360,6 +659,8 @@ class ConfigTests(unittest.TestCase):
                 config = load_config(env_path)
 
         self.assertEqual(config.timezone_name, "Asia/Seoul")
+        self.assertFalse(config.persist_repo_ledger)
+        self.assertIsNone(config.full_snapshot_dir)
 
 
 class SecEdgarTests(unittest.TestCase):
@@ -622,6 +923,49 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(result.periods[1].tickers, ("BBB",))
         self.assertEqual(payload["periods"][0]["snapshotDate"], "2025-01-31")
 
+    def test_snapshot_backtest_uses_horizon_candidate_collections(self):
+        snapshots = (
+            _term_snapshot_with_anchors(
+                date(2025, 1, 31),
+                stocks=[("AAA", "Alpha", 100), ("BBB", "Beta", 100)],
+                short_candidates=[("BBB", "Beta")],
+                spy_close=100,
+            ),
+            _term_snapshot_with_anchors(
+                date(2025, 2, 28),
+                stocks=[("AAA", "Alpha", 110), ("BBB", "Beta", 130)],
+                short_candidates=[("BBB", "Beta")],
+                spy_close=102,
+            ),
+        )
+
+        short_result = run_snapshot_backtest(
+            snapshots=snapshots,
+            histories={},
+            months=1,
+            top_n=1,
+            benchmark_ticker="SPY",
+            created_at=datetime(2025, 3, 1, 9, 0, tzinfo=ZoneInfo("Asia/Seoul")),
+            timezone_name="Asia/Seoul",
+            horizon="short",
+        )
+        overall_result = run_snapshot_backtest(
+            snapshots=snapshots,
+            histories={},
+            months=1,
+            top_n=1,
+            benchmark_ticker="SPY",
+            created_at=datetime(2025, 3, 1, 9, 0, tzinfo=ZoneInfo("Asia/Seoul")),
+            timezone_name="Asia/Seoul",
+            horizon="unknown",
+        )
+
+        self.assertEqual(short_result.periods[0].tickers, ("BBB",))
+        self.assertEqual(short_result.horizon, "short")
+        self.assertEqual(backtest_to_dict(short_result)["horizon"], "short")
+        self.assertEqual(overall_result.periods[0].tickers, ("AAA",))
+        self.assertEqual(overall_result.horizon, "overall")
+
     def test_snapshot_backtest_prefers_snapshot_price_anchors(self):
         snapshots = (
             _snapshot_with_anchors(date(2025, 1, 31), [("AAA", "Alpha", 100)], spy_close=100),
@@ -646,6 +990,54 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(result.periods[0].return_pct, 20.0)
         self.assertEqual(payload["priceSource"], "snapshotAnchors")
         self.assertEqual(payload["periods"][0]["priceSource"], "snapshotAnchors")
+        self.assertEqual(payload["periods"][0]["anchorCoveragePct"], 100.0)
+        self.assertEqual(payload["periods"][0]["periodStatus"], "included")
+
+    def test_snapshot_backtest_excludes_low_quality_v10_snapshots(self):
+        snapshots = (
+            _snapshot_v10_with_anchors(date(2025, 1, 31), [("AAA", "Alpha", 100)], benchmarks={"SPY": 100}),
+            _snapshot_v10_with_anchors(date(2025, 2, 28), [("AAA", "Alpha", 110)], benchmarks={"SPY": 101}),
+        )
+
+        result = run_snapshot_backtest(
+            snapshots=snapshots,
+            histories={},
+            months=1,
+            top_n=1,
+            benchmark_ticker="SPY",
+            created_at=datetime(2025, 3, 1, 9, 0, tzinfo=ZoneInfo("Asia/Seoul")),
+            timezone_name="Asia/Seoul",
+        )
+
+        self.assertEqual(result.periods, ())
+        self.assertTrue(any("품질 기준 미달" in warning for warning in result.warnings))
+        self.assertTrue(any("benchmarkAnchorCoverageBelow100" in warning for warning in result.warnings))
+
+    def test_snapshot_backtest_anchor_only_uses_month_end_snapshots(self):
+        snapshots = (
+            _snapshot_v10_with_anchors(date(2025, 1, 15), [("AAA", "Alpha", 90)], benchmarks={"SPY": 90, "QQQ": 90, "^KS11": 90}),
+            _snapshot_v10_with_anchors(date(2025, 1, 31), [("AAA", "Alpha", 100)], benchmarks={"SPY": 100, "QQQ": 100, "^KS11": 100}),
+            _snapshot_v10_with_anchors(date(2025, 2, 15), [("AAA", "Alpha", 105)], benchmarks={"SPY": 105, "QQQ": 105, "^KS11": 105}),
+            _snapshot_v10_with_anchors(date(2025, 2, 28), [("AAA", "Alpha", 120)], benchmarks={"SPY": 110, "QQQ": 110, "^KS11": 110}),
+            _snapshot_v10_with_anchors(date(2025, 3, 15), [("AAA", "Alpha", 125)], benchmarks={"SPY": 115, "QQQ": 115, "^KS11": 115}),
+            _snapshot_v10_with_anchors(date(2025, 3, 31), [("AAA", "Alpha", 132)], benchmarks={"SPY": 121, "QQQ": 121, "^KS11": 121}),
+        )
+
+        result = run_snapshot_backtest(
+            snapshots=snapshots,
+            histories={},
+            months=2,
+            top_n=1,
+            benchmark_ticker="SPY",
+            created_at=datetime(2025, 4, 1, 9, 0, tzinfo=ZoneInfo("Asia/Seoul")),
+            timezone_name="Asia/Seoul",
+        )
+
+        self.assertEqual(result.period_count, 2)
+        self.assertEqual(result.periods[0].start_date, date(2025, 1, 31))
+        self.assertEqual(result.periods[0].end_date, date(2025, 2, 28))
+        self.assertEqual(result.periods[1].start_date, date(2025, 2, 28))
+        self.assertEqual(result.periods[1].end_date, date(2025, 3, 31))
 
     def test_snapshot_backtest_returns_clear_warning_when_snapshots_are_missing(self):
         result = run_snapshot_backtest(
@@ -731,26 +1123,41 @@ class SnapshotTests(unittest.TestCase):
                     "eventType": "error",
                     "message": "failed https://example.com/path?api_key=SECRET12345678901234567890",
                     "createdAt": "2026-05-17T21:30:00+00:00",
+                    "metadata": {"url": "https://example.com/SECRET12345678901234567890?token=SECRET12345678901234567890"},
                 },
+            ),
+            data_quality=DataQuality(
+                warnings=("failed token=SECRET12345678901234567890",),
             ),
             created_at=datetime(2026, 5, 18, 6, 30, tzinfo=ZoneInfo("Asia/Seoul")),
         )
 
         payload = report_to_snapshot_payload(report, mode="live")
 
-        self.assertEqual(payload["version"], 10)
+        self.assertEqual(payload["version"], 11)
         self.assertEqual(payload["snapshotDate"], "2026-05-18")
         self.assertEqual(payload["createdAtTimezone"], "Asia/Seoul")
         self.assertIn("gitCommit", payload["audit"])
         self.assertEqual(payload["sourceEventSummary"]["errorCount"], 1)
         self.assertNotIn("SECRET12345678901234567890", payload["sourceEvents"][0]["message"])
+        self.assertNotIn("SECRET12345678901234567890", payload["sourceEvents"][0]["metadata"]["url"])
+        self.assertNotIn("SECRET12345678901234567890", payload["dataQuality"]["warnings"][0])
         self.assertIn("marketCap", payload["stocks"][0]["fundamentals"])
         self.assertIn("marketCapUsd", payload["stocks"][0]["fundamentals"])
         self.assertIn("fundamentalSources", payload["stocks"][0])
+        self.assertIn("legendCandidates", payload)
+        self.assertIn("legendScores", payload["stocks"][0])
+        self.assertIn("legendCompositeScore", payload["stocks"][0])
         self.assertEqual(payload["stocks"][0]["momentumRaw"]["latestClose"], 123.4)
         self.assertEqual(payload["stocks"][0]["priceAnchor"]["latestClose"], 123.4)
         self.assertEqual(payload["benchmarks"][0]["priceAnchor"]["latestClose"], 500)
         self.assertEqual(payload["priceAnchors"][0]["priceAnchor"]["latestClose"], 123.4)
+        self.assertIn("snapshotQuality", payload)
+        self.assertIn("volumeScore", payload["shortTermCandidates"][0])
+        self.assertIn("confidenceScore", payload["shortTermCandidates"][0])
+        self.assertIn("setupLabel", payload["shortTermCandidates"][0])
+        self.assertIn("confidenceScore", payload["mediumTermCandidates"][0])
+        self.assertIn("confidenceLabel", payload["longTermCandidates"][0])
 
     def test_snapshot_payload_uses_korea_date_after_utc_market_close(self):
         created_at = datetime(2026, 5, 17, 21, 30, tzinfo=timezone.utc).astimezone(
@@ -777,6 +1184,20 @@ class SnapshotTests(unittest.TestCase):
 
         self.assertEqual(rows[0]["source"], "Yahoo Finance")
         self.assertEqual(rows[0]["eventType"], "error")
+
+    def test_cache_store_records_cache_hit_metadata(self):
+        with TemporaryDirectory() as tmpdir:
+            cache = CacheStore(Path(tmpdir) / "cache.sqlite")
+            cache.set_json("test:key", "Yahoo Finance", "https://example.com", {"ok": True}, ttl_seconds=60)
+            payload = cache.get_json("test:key")
+            rows = cache.list_source_events(limit=5)
+            metadata = cache.get_cache_metadata("test:key")
+
+        self.assertEqual(payload, {"ok": True})
+        self.assertTrue(rows[0]["metadata"]["cacheHit"])
+        self.assertEqual(rows[0]["metadata"]["cacheKey"], "test:key")
+        self.assertEqual(metadata["source"], "Yahoo Finance")
+        self.assertFalse(metadata["expired"])
 
     def test_cache_store_filters_source_events_since_report_start(self):
         with TemporaryDirectory() as tmpdir:
@@ -840,6 +1261,138 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn("sourceEventSummary", history["latest"])
         self.assertIn("priceAnchorCoveragePct", history["latest"])
         self.assertIn("fundamentalSourceCoveragePct", history["latest"])
+        self.assertEqual(history["latest"]["payloadKind"], "compact")
+        self.assertIn("payloadDigest", history["latest"])
+
+    def test_persistent_snapshot_store_writes_compact_v2_payload(self):
+        with TemporaryDirectory() as tmpdir:
+            ledger_path = Path(tmpdir) / "recommendation_snapshots.json"
+            report = build_report(
+                macro_context=DEFAULT_MACRO_CONTEXT,
+                industries=INDUSTRIES,
+                stocks=STOCKS,
+                news_items=(),
+                created_at=datetime(2026, 5, 19, 6, 30, tzinfo=ZoneInfo("Asia/Seoul")),
+            )
+            payload = report_to_snapshot_payload(report, mode="live")
+            top_stock = report.stock_scores[0]
+
+            SnapshotFileStore(ledger_path).save_snapshot(
+                snapshot_date=payload["snapshotDate"],
+                mode="live",
+                top_ticker=top_stock.stock.ticker,
+                top_name=top_stock.stock.name,
+                top_score=top_stock.score,
+                payload=payload,
+            )
+            ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+
+        row = ledger["snapshots"][0]
+        compact_payload = row["payload"]
+        self.assertEqual(ledger["version"], 2)
+        self.assertEqual(row["payloadKind"], "compact")
+        self.assertEqual(compact_payload["payloadKind"], "compact")
+        self.assertLessEqual(len(compact_payload["stocks"]), 10)
+        self.assertIn("payloadDigest", row)
+        self.assertNotIn("earlyGrowthCandidates", compact_payload)
+        self.assertNotIn("fundamentals", compact_payload["stocks"][0])
+
+    def test_snapshot_history_reads_legacy_v1_full_ledger(self):
+        with TemporaryDirectory() as tmpdir:
+            ledger_path = Path(tmpdir) / "recommendation_snapshots.json"
+            payload = {
+                "version": 9,
+                "createdAt": "2026-05-18T06:30:00+09:00",
+                "createdAtDisplay": "2026-05-18 06:30:00",
+                "stocks": [{"ticker": "AAA", "name": "Alpha", "score": 90}],
+                "dataQuality": {"configuredSources": [], "liveNews": False, "liveMarketData": False},
+            }
+            ledger_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "snapshots": [
+                            {
+                                "id": 1,
+                                "snapshotDate": "2026-05-18",
+                                "mode": "live",
+                                "topTicker": "AAA",
+                                "topName": "Alpha",
+                                "topScore": 90,
+                                "createdAt": "2026-05-18T06:30:00+09:00",
+                                "payload": payload,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                "os.environ",
+                {
+                    "STOCK_RECOMMENDER_DATA_DIR": str(Path(tmpdir) / "data"),
+                    "STOCK_RECOMMENDER_SNAPSHOT_STORE_PATH": str(ledger_path),
+                },
+            ):
+                history = snapshot_history(limit=10)
+
+        self.assertEqual(history["latest"]["payloadKind"], "full")
+        self.assertEqual(history["latest"]["topTicker"], "AAA")
+
+    def test_save_recommendation_snapshot_keeps_repo_ledger_local_by_default(self):
+        with TemporaryDirectory() as tmpdir:
+            ledger_path = Path(tmpdir) / "snapshot_store" / "recommendation_snapshots.json"
+            report = build_report(
+                macro_context=DEFAULT_MACRO_CONTEXT,
+                industries=INDUSTRIES,
+                stocks=STOCKS[:1],
+                news_items=(),
+                created_at=datetime(2026, 5, 19, 6, 30, tzinfo=ZoneInfo("Asia/Seoul")),
+            )
+            with patch.dict(
+                "os.environ",
+                {
+                    "STOCK_RECOMMENDER_DATA_DIR": str(Path(tmpdir) / "data"),
+                    "STOCK_RECOMMENDER_SNAPSHOT_STORE_PATH": str(ledger_path),
+                    "STOCK_RECOMMENDER_TIMEZONE": "Asia/Seoul",
+                    "STOCK_RECOMMENDER_PERSIST_REPO_LEDGER": "",
+                },
+            ):
+                saved = save_recommendation_snapshot(report)
+                history = snapshot_history(limit=10)
+
+        self.assertEqual(saved.snapshot_date, "2026-05-19")
+        self.assertFalse(ledger_path.exists())
+        self.assertEqual(history["snapshotCount"], 1)
+
+    def test_full_snapshot_artifact_is_optional_local_output(self):
+        with TemporaryDirectory() as tmpdir:
+            artifact_dir = Path(tmpdir) / "artifacts" / "snapshots"
+            ledger_path = Path(tmpdir) / "snapshot_store" / "recommendation_snapshots.json"
+            report = build_report(
+                macro_context=DEFAULT_MACRO_CONTEXT,
+                industries=INDUSTRIES,
+                stocks=STOCKS[:1],
+                news_items=(),
+                created_at=datetime(2026, 5, 19, 6, 30, tzinfo=ZoneInfo("Asia/Seoul")),
+            )
+            with patch.dict(
+                "os.environ",
+                {
+                    "STOCK_RECOMMENDER_DATA_DIR": str(Path(tmpdir) / "data"),
+                    "STOCK_RECOMMENDER_SNAPSHOT_STORE_PATH": str(ledger_path),
+                    "STOCK_RECOMMENDER_FULL_SNAPSHOT_DIR": str(artifact_dir),
+                    "STOCK_RECOMMENDER_TIMEZONE": "Asia/Seoul",
+                },
+            ):
+                save_recommendation_snapshot(report)
+
+            files = list(artifact_dir.glob("*.json"))
+            self.assertEqual(len(files), 1)
+            artifact_payload = json.loads(files[0].read_text(encoding="utf-8"))
+
+        self.assertIn("earlyGrowthCandidates", artifact_payload)
+        self.assertFalse(ledger_path.exists())
 
     def test_malformed_persistent_snapshot_store_fails_closed(self):
         with TemporaryDirectory() as tmpdir:
@@ -892,6 +1445,42 @@ class ApiBoundaryTests(unittest.TestCase):
         self.assertEqual(captured["payload"], {"error": "백테스트를 생성하지 못했습니다."})
         self.assertNotIn("secret stack detail", json.dumps(captured["payload"], ensure_ascii=False))
         self.assertEqual(events, [("api/backtest", "secret stack detail")])
+
+    def test_backtest_api_accepts_horizon_and_falls_back_to_overall(self):
+        import api.backtest as backtest_api
+
+        original_create = backtest_api.create_backtest
+        original_to_dict = backtest_api.backtest_to_dict
+        captured_horizons: list[str] = []
+        responses: list[dict] = []
+
+        def fake_create(**kwargs):
+            captured_horizons.append(kwargs["horizon"])
+            return object()
+
+        def fake_to_dict(result):
+            return {"horizon": captured_horizons[-1]}
+
+        def send_json(payload, status=HTTPStatus.OK):
+            responses.append({"payload": payload, "status": status})
+
+        try:
+            backtest_api.create_backtest = fake_create
+            backtest_api.backtest_to_dict = fake_to_dict
+            fake_handler = object.__new__(backtest_api.handler)
+            fake_handler._send_json = send_json
+
+            fake_handler.path = "/api/backtest?method=snapshot&horizon=short"
+            backtest_api.handler.do_GET(fake_handler)
+            fake_handler.path = "/api/backtest?method=snapshot&horizon=invalid"
+            backtest_api.handler.do_GET(fake_handler)
+        finally:
+            backtest_api.create_backtest = original_create
+            backtest_api.backtest_to_dict = original_to_dict
+
+        self.assertEqual(captured_horizons, ["short", "overall"])
+        self.assertEqual(responses[0]["payload"]["horizon"], "short")
+        self.assertEqual(responses[1]["payload"]["horizon"], "overall")
 
 
 class StaticExportTests(unittest.TestCase):
@@ -947,6 +1536,7 @@ class StaticExportTests(unittest.TestCase):
         self.assertLess(save_index, commit_index)
         self.assertLess(commit_index, deploy_index)
         self.assertIn("python3 -m stock_recommender.snapshot_cli", workflow)
+        self.assertIn("STOCK_RECOMMENDER_PERSIST_REPO_LEDGER: \"1\"", workflow)
         self.assertIn("git add snapshot_store/recommendation_snapshots.json", workflow)
 
 
@@ -980,6 +1570,44 @@ def _history(start_price: float, daily_return: float) -> tuple[PricePoint, ...]:
             points.append(PricePoint(current, price))
         current += timedelta(days=1)
     return tuple(points)
+
+
+def _strong_swing_momentum(with_volume: bool = True) -> Momentum:
+    volume_fields = {
+        "latest_volume": 2_000_000,
+        "avg_volume_20": 1_200_000,
+        "volume_ratio": 1.67,
+    }
+    if not with_volume:
+        volume_fields = {
+            "latest_volume": None,
+            "avg_volume_20": None,
+            "volume_ratio": None,
+        }
+    return Momentum(
+        one_month_pct=8.0,
+        three_month_pct=18.0,
+        six_month_pct=34.0,
+        drawdown_from_high_pct=-6.0,
+        range_position_pct=72.0,
+        latest_close=105.0,
+        latest_close_date="2025-12-31",
+        six_month_high=112.0,
+        six_month_low=78.0,
+        ma20=100.0,
+        ma60=92.0,
+        ma120=84.0,
+        rsi14=58.0,
+        ma20_distance_pct=5.0,
+        ma60_distance_pct=14.1,
+        ma120_distance_pct=25.0,
+        ma20_slope_pct=2.2,
+        ma60_slope_pct=1.1,
+        twenty_day_breakout_pct=4.0,
+        sixty_day_breakout_pct=9.0,
+        source="Yahoo Finance",
+        **volume_fields,
+    )
 
 
 def _monthly_history(values: dict[date, float]) -> tuple[PricePoint, ...]:
@@ -1034,6 +1662,108 @@ def _snapshot_with_anchors(snapshot_date: date, stocks: list[tuple[str, str, flo
             ],
         },
     )
+
+
+def _term_snapshot_with_anchors(
+    snapshot_date: date,
+    stocks: list[tuple[str, str, float]],
+    short_candidates: list[tuple[str, str]],
+    spy_close: float,
+) -> SnapshotRecord:
+    stock_rows = [
+        {
+            "ticker": ticker,
+            "name": name,
+            "score": 90,
+            "priceAnchor": _anchor(snapshot_date, close, "USD"),
+        }
+        for ticker, name, close in stocks
+    ]
+    return SnapshotRecord(
+        snapshot_date=snapshot_date,
+        payload={
+            "version": 11,
+            "stocks": stock_rows,
+            "shortTermCandidates": [
+                {"ticker": ticker, "name": name, "score": 90}
+                for ticker, name in short_candidates
+            ],
+            "benchmarks": [
+                {"ticker": "SPY", "priceAnchor": _anchor(snapshot_date, spy_close, "USD")},
+                {"ticker": "QQQ", "priceAnchor": _anchor(snapshot_date, spy_close, "USD")},
+                {"ticker": "^KS11", "priceAnchor": _anchor(snapshot_date, spy_close, "KRW")},
+            ],
+            "snapshotQuality": {
+                "priceAnchorCoveragePct": 100,
+                "benchmarkAnchorCoveragePct": 100,
+                "fundamentalSourceCoveragePct": 0,
+                "sourceErrorCount": 0,
+                "sourceStaleCount": 0,
+                "backtestEligible": True,
+                "exclusionReasons": [],
+            },
+        },
+    )
+
+
+def _snapshot_v10_with_anchors(
+    snapshot_date: date,
+    stocks: list[tuple[str, str, float]],
+    benchmarks: dict[str, float],
+) -> SnapshotRecord:
+    stock_rows = [
+        {
+            "ticker": ticker,
+            "name": name,
+            "score": 90,
+            "priceAnchor": _anchor(snapshot_date, close, "USD"),
+        }
+        for ticker, name, close in stocks
+    ]
+    benchmark_rows = [
+        {
+            "ticker": ticker,
+            "priceAnchor": _anchor(snapshot_date, close, "KRW" if ticker == "^KS11" else "USD"),
+        }
+        for ticker, close in benchmarks.items()
+    ]
+    price_coverage = round(
+        sum(1 for item in stock_rows if item["priceAnchor"]["latestClose"] is not None) / len(stock_rows) * 100,
+        1,
+    )
+    benchmark_coverage = round(len(benchmark_rows) / 3 * 100, 1)
+    reasons = []
+    if price_coverage < 80:
+        reasons.append("priceAnchorCoverageBelow80")
+    if benchmark_coverage < 100:
+        reasons.append("benchmarkAnchorCoverageBelow100")
+    return SnapshotRecord(
+        snapshot_date=snapshot_date,
+        payload={
+            "version": 10,
+            "stocks": stock_rows,
+            "benchmarks": benchmark_rows,
+            "snapshotQuality": {
+                "priceAnchorCoveragePct": price_coverage,
+                "benchmarkAnchorCoveragePct": benchmark_coverage,
+                "fundamentalSourceCoveragePct": 0,
+                "sourceErrorCount": 0,
+                "sourceStaleCount": 0,
+                "backtestEligible": not reasons,
+                "exclusionReasons": reasons,
+            },
+        },
+    )
+
+
+def _anchor(snapshot_date: date, close: float | None, currency: str) -> dict:
+    return {
+        "latestClose": close,
+        "latestCloseDate": snapshot_date.isoformat() if close is not None else None,
+        "currency": currency,
+        "source": "Yahoo Finance" if close is not None else None,
+        "stale": False,
+    }
 
 
 if __name__ == "__main__":

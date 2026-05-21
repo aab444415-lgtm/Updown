@@ -24,6 +24,16 @@ class TechnicalSnapshot:
     fifty_two_week_high: float | None
     fifty_two_week_low: float | None
     range_position_pct: float | None
+    ma20_distance_pct: float | None
+    ma60_distance_pct: float | None
+    ma120_distance_pct: float | None
+    ma20_slope_pct: float | None
+    ma60_slope_pct: float | None
+    latest_volume: float | None
+    avg_volume_20: float | None
+    volume_ratio: float | None
+    twenty_day_breakout_pct: float | None
+    sixty_day_breakout_pct: float | None
     trend_label: str
 
 
@@ -34,6 +44,7 @@ def build_technical_snapshot(points: Iterable[object], max_points: int = 252) ->
     )[-max_points:]
     dates = [getattr(point, "date").isoformat() for point in ordered]
     closes = [float(getattr(point, "close")) for point in ordered]
+    volumes = [_valid_volume(getattr(point, "volume", None)) for point in ordered]
     prices = tuple(TechnicalPoint(date, close) for date, close in zip(dates, closes))
 
     high = max(closes) if closes else None
@@ -43,6 +54,8 @@ def build_technical_snapshot(points: Iterable[object], max_points: int = 252) ->
     ma20_values = moving_average(closes, 20)
     ma60_values = moving_average(closes, 60)
     ma120_values = moving_average(closes, 120)
+    latest_volume = volumes[-1] if volumes else None
+    avg_volume_20 = average_recent_volume(volumes, 20)
 
     return TechnicalSnapshot(
         prices=prices,
@@ -56,6 +69,16 @@ def build_technical_snapshot(points: Iterable[object], max_points: int = 252) ->
         fifty_two_week_high=high,
         fifty_two_week_low=low,
         range_position_pct=range_position,
+        ma20_distance_pct=distance_from_average(latest, _last_finite(ma20_values)),
+        ma60_distance_pct=distance_from_average(latest, _last_finite(ma60_values)),
+        ma120_distance_pct=distance_from_average(latest, _last_finite(ma120_values)),
+        ma20_slope_pct=moving_average_slope(ma20_values),
+        ma60_slope_pct=moving_average_slope(ma60_values),
+        latest_volume=latest_volume,
+        avg_volume_20=avg_volume_20,
+        volume_ratio=volume_ratio(latest_volume, avg_volume_20),
+        twenty_day_breakout_pct=breakout_pct(closes, 20),
+        sixty_day_breakout_pct=breakout_pct(closes, 60),
         trend_label=trend_label(closes, ma20_values, ma60_values, ma120_values),
     )
 
@@ -73,6 +96,16 @@ def technical_snapshot_to_dict(snapshot: TechnicalSnapshot) -> dict:
         "fiftyTwoWeekHigh": _round_or_none(snapshot.fifty_two_week_high),
         "fiftyTwoWeekLow": _round_or_none(snapshot.fifty_two_week_low),
         "rangePositionPct": _round_or_none(snapshot.range_position_pct),
+        "ma20DistancePct": _round_or_none(snapshot.ma20_distance_pct),
+        "ma60DistancePct": _round_or_none(snapshot.ma60_distance_pct),
+        "ma120DistancePct": _round_or_none(snapshot.ma120_distance_pct),
+        "ma20SlopePct": _round_or_none(snapshot.ma20_slope_pct),
+        "ma60SlopePct": _round_or_none(snapshot.ma60_slope_pct),
+        "latestVolume": _round_or_none(snapshot.latest_volume),
+        "avgVolume20": _round_or_none(snapshot.avg_volume_20),
+        "volumeRatio": _round_or_none(snapshot.volume_ratio),
+        "twentyDayBreakoutPct": _round_or_none(snapshot.twenty_day_breakout_pct),
+        "sixtyDayBreakoutPct": _round_or_none(snapshot.sixty_day_breakout_pct),
         "trendLabel": snapshot.trend_label,
     }
 
@@ -120,6 +153,49 @@ def lookback_return(values: list[float] | tuple[float, ...], lookback: int) -> f
     return ((end / start) - 1) * 100
 
 
+def average_recent_volume(values: list[float | None] | tuple[float | None, ...], window: int = 20) -> float | None:
+    recent = [value for value in values[-window:] if _valid_volume(value)]
+    if not recent:
+        return None
+    return sum(float(value) for value in recent) / len(recent)
+
+
+def volume_ratio(latest: float | None, average: float | None) -> float | None:
+    if not _valid_volume(latest) or not _valid_volume(average):
+        return None
+    return latest / average
+
+
+def breakout_pct(values: list[float] | tuple[float, ...], window: int) -> float | None:
+    if len(values) <= window:
+        return None
+    latest = values[-1]
+    prior_high = max(values[-window - 1 : -1])
+    if not _valid_close(latest) or not _valid_close(prior_high):
+        return None
+    return ((latest / prior_high) - 1) * 100
+
+
+def distance_from_average(latest: float | None, average: float | None) -> float | None:
+    if not _valid_close(latest) or not _valid_close(average):
+        return None
+    return ((latest / average) - 1) * 100
+
+
+def moving_average_slope(values: tuple[float | None, ...], lookback: int = 5) -> float | None:
+    latest_index = _last_finite_index(values)
+    if latest_index is None:
+        return None
+    prior_index = latest_index - lookback
+    if prior_index < 0:
+        return None
+    latest = values[latest_index]
+    prior = values[prior_index]
+    if not _valid_close(latest) or not _valid_close(prior):
+        return None
+    return ((latest / prior) - 1) * 100
+
+
 def trend_label(
     closes: list[float] | tuple[float, ...],
     ma20: tuple[float | None, ...],
@@ -165,3 +241,22 @@ def _round_or_none(value: float | None) -> float | None:
 
 def _valid_close(value: object) -> bool:
     return isinstance(value, (int, float)) and math.isfinite(value) and value > 0
+
+
+def _valid_volume(value: object) -> float | None:
+    if isinstance(value, (int, float)) and math.isfinite(value) and value > 0:
+        return float(value)
+    return None
+
+
+def _last_finite(values: tuple[float | None, ...]) -> float | None:
+    index = _last_finite_index(values)
+    return values[index] if index is not None else None
+
+
+def _last_finite_index(values: tuple[float | None, ...]) -> int | None:
+    for index in range(len(values) - 1, -1, -1):
+        value = values[index]
+        if isinstance(value, (int, float)) and math.isfinite(value):
+            return index
+    return None

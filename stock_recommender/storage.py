@@ -17,15 +17,36 @@ class CacheStore:
     def get_json(self, key: str, allow_expired: bool = False) -> dict | list | None:
         with self._connect() as connection:
             row = connection.execute(
-                "select payload, expires_at from api_cache where cache_key = ?",
+                """
+                select cache_key, source, url, payload, fetched_at, expires_at
+                from api_cache
+                where cache_key = ?
+                """,
                 (key,),
             ).fetchone()
         if row is None:
             return None
 
         expires_at = _parse_utc_datetime(row["expires_at"])
-        if expires_at < _utc_now() and not allow_expired:
+        now = _utc_now()
+        if expires_at < now and not allow_expired:
             return None
+        stale_age_seconds = max(0, int((now - expires_at).total_seconds())) if expires_at < now else 0
+        try:
+            self.record_source_event(
+                row["source"],
+                "stale" if stale_age_seconds else "success",
+                f"cache hit: {key}",
+                metadata={
+                    "cacheHit": True,
+                    "cacheKey": key,
+                    "fetchedAt": row["fetched_at"],
+                    "expiresAt": row["expires_at"],
+                    "staleAgeSeconds": stale_age_seconds,
+                },
+            )
+        except Exception:
+            pass
         return json.loads(row["payload"])
 
     def set_json(self, key: str, source: str, url: str, payload: dict | list, ttl_seconds: int) -> None:
@@ -53,14 +74,50 @@ class CacheStore:
                 ),
             )
 
-    def record_source_event(self, source: str, event_type: str, message: str) -> None:
+    def get_cache_metadata(self, key: str) -> dict | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                select cache_key, source, url, fetched_at, expires_at
+                from api_cache
+                where cache_key = ?
+                """,
+                (key,),
+            ).fetchone()
+        if row is None:
+            return None
+        expires_at = _parse_utc_datetime(row["expires_at"])
+        now = _utc_now()
+        return {
+            "cacheKey": row["cache_key"],
+            "source": row["source"],
+            "url": row["url"],
+            "fetchedAt": row["fetched_at"],
+            "expiresAt": row["expires_at"],
+            "expired": expires_at < now,
+            "staleAgeSeconds": max(0, int((now - expires_at).total_seconds())) if expires_at < now else 0,
+        }
+
+    def record_source_event(
+        self,
+        source: str,
+        event_type: str,
+        message: str,
+        metadata: dict | None = None,
+    ) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
-                insert into source_events(source, event_type, message, created_at)
-                values(?, ?, ?, ?)
+                insert into source_events(source, event_type, message, created_at, metadata)
+                values(?, ?, ?, ?, ?)
                 """,
-                (source, event_type, message, _utc_now().isoformat()),
+                (
+                    source,
+                    event_type,
+                    message,
+                    _utc_now().isoformat(),
+                    json.dumps(metadata or {}, ensure_ascii=False),
+                ),
             )
 
     def list_source_events(self, limit: int = 50, source: str | None = None) -> list[dict]:
@@ -69,7 +126,7 @@ class CacheStore:
         with self._connect() as connection:
             rows = connection.execute(
                 f"""
-                select id, source, event_type, message, created_at
+                select id, source, event_type, message, created_at, metadata
                 from source_events
                 {where_clause}
                 order by id desc
@@ -84,6 +141,7 @@ class CacheStore:
                 "eventType": row["event_type"],
                 "message": row["message"],
                 "createdAt": row["created_at"],
+                "metadata": _metadata_from_row(row["metadata"]),
             }
             for row in rows
         ]
@@ -104,7 +162,7 @@ class CacheStore:
         with self._connect() as connection:
             rows = connection.execute(
                 f"""
-                select id, source, event_type, message, created_at
+                select id, source, event_type, message, created_at, metadata
                 from source_events
                 {where_clause}
                 order by id asc
@@ -119,6 +177,7 @@ class CacheStore:
                 "eventType": row["event_type"],
                 "message": row["message"],
                 "createdAt": row["created_at"],
+                "metadata": _metadata_from_row(row["metadata"]),
             }
             for row in rows
         ]
@@ -231,10 +290,12 @@ class CacheStore:
                     source text not null,
                     event_type text not null,
                     message text not null,
-                    created_at text not null
+                    created_at text not null,
+                    metadata text not null default '{}'
                 )
                 """
             )
+            _ensure_column(connection, "source_events", "metadata", "text not null default '{}'")
             connection.execute(
                 """
                 create table if not exists recommendation_snapshots (
@@ -288,3 +349,19 @@ def _parse_utc_datetime(value: str) -> datetime:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _metadata_from_row(value: object) -> dict:
+    if not isinstance(value, str) or not value:
+        return {}
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _ensure_column(connection: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    columns = {row["name"] for row in connection.execute(f"pragma table_info({table})").fetchall()}
+    if column not in columns:
+        connection.execute(f"alter table {table} add column {column} {definition}")
