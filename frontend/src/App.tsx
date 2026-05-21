@@ -15,6 +15,7 @@ import {
 
 type LegendKey = "lynch" | "oneil" | "greenblatt" | "fisher";
 type HorizonKey = "overall" | "short" | "medium" | "long";
+type ViewKey = "stocks" | "industries";
 
 declare global {
   interface Window {
@@ -205,6 +206,7 @@ export default function App() {
   const [backtestHorizon, setBacktestHorizon] = useState<HorizonKey>("short");
   const [backtest, setBacktest] = useState<BacktestResult | null>(null);
   const [isBacktestLoading, setIsBacktestLoading] = useState(false);
+  const [activeView, setActiveView] = useState<ViewKey>("stocks");
 
   const loadReport = async () => {
     setIsLoading(true);
@@ -311,58 +313,65 @@ export default function App() {
 
       {report && (
         <>
-          <section className="summary-grid" aria-label="전략별 상위 후보">
-            <CombinedLeader stock={rankedStocks[0]} createdAt={report.createdAtDisplay} />
-            {STRATEGIES.map((strategy) => (
-              <StrategyLeader
-                key={strategy.key}
-                strategy={strategy}
-                stock={topByStrategy(report.stocks, strategy.key)}
+          <ViewSwitcher activeView={activeView} onChange={setActiveView} />
+
+          {activeView === "stocks" ? (
+            <>
+              <section className="summary-grid" aria-label="전략별 상위 후보">
+                <CombinedLeader stock={rankedStocks[0]} createdAt={report.createdAtDisplay} />
+                {STRATEGIES.map((strategy) => (
+                  <StrategyLeader
+                    key={strategy.key}
+                    strategy={strategy}
+                    stock={topByStrategy(report.stocks, strategy.key)}
+                  />
+                ))}
+              </section>
+
+              <TermDashboard report={report} onSelect={setSelectedTicker} />
+
+              <BacktestPanel
+                horizon={backtestHorizon}
+                result={backtest}
+                isLoading={isBacktestLoading}
+                onHorizonChange={setBacktestHorizon}
+                onRun={runBacktest}
               />
-            ))}
-          </section>
 
-          <IndustryFlowPanel
-            industries={report.industries || []}
-            beneficiaries={report.beneficiaryIndustries || []}
-          />
+              <section className="workspace-grid">
+                <aside className="control-column">
+                  <WeightPanel weights={weights} onChange={setWeights} />
+                  <RankingPanel
+                    stocks={rankedStocks}
+                    selectedTicker={selectedStock?.ticker || ""}
+                    query={query}
+                    onQueryChange={setQuery}
+                    onSelect={setSelectedTicker}
+                  />
+                </aside>
 
-          <TermDashboard report={report} onSelect={setSelectedTicker} />
-
-          <BacktestPanel
-            horizon={backtestHorizon}
-            result={backtest}
-            isLoading={isBacktestLoading}
-            onHorizonChange={setBacktestHorizon}
-            onRun={runBacktest}
-          />
-
-          <section className="workspace-grid">
-            <aside className="control-column">
-              <WeightPanel weights={weights} onChange={setWeights} />
-              <RankingPanel
-                stocks={rankedStocks}
-                selectedTicker={selectedStock?.ticker || ""}
-                query={query}
-                onQueryChange={setQuery}
-                onSelect={setSelectedTicker}
-              />
-            </aside>
-
-            <section className="detail-column">
-              {selectedStock ? (
-                <>
-                  <StockDetail stock={selectedStock} />
-                  <StrategyMatrix stocks={rankedStocks.slice(0, 8)} />
-                </>
-              ) : (
-                <section className="empty-panel">
-                  <Search aria-hidden="true" />
-                  <h2>검색 결과 없음</h2>
+                <section className="detail-column">
+                  {selectedStock ? (
+                    <>
+                      <StockDetail stock={selectedStock} />
+                      <StrategyMatrix stocks={rankedStocks.slice(0, 8)} />
+                    </>
+                  ) : (
+                    <section className="empty-panel">
+                      <Search aria-hidden="true" />
+                      <h2>검색 결과 없음</h2>
+                    </section>
+                  )}
                 </section>
-              )}
-            </section>
-          </section>
+              </section>
+            </>
+          ) : (
+            <IndustryFlowListView
+              industries={report.industries || []}
+              beneficiaries={report.beneficiaryIndustries || []}
+              createdAt={report.createdAtDisplay}
+            />
+          )}
         </>
       )}
     </main>
@@ -401,28 +410,129 @@ function StatusPill({ label, active }: { label: string; active?: boolean }) {
   );
 }
 
-function IndustryFlowPanel({
+function ViewSwitcher({
+  activeView,
+  onChange,
+}: {
+  activeView: ViewKey;
+  onChange: (view: ViewKey) => void;
+}) {
+  return (
+    <nav className="view-switcher" aria-label="화면 선택">
+      <button
+        className={activeView === "stocks" ? "selected" : ""}
+        type="button"
+        onClick={() => onChange("stocks")}
+      >
+        <Trophy size={16} aria-hidden="true" />
+        종목 스크리너
+      </button>
+      <button
+        className={activeView === "industries" ? "selected" : ""}
+        type="button"
+        onClick={() => onChange("industries")}
+      >
+        <Network size={16} aria-hidden="true" />
+        산업 흐름
+      </button>
+    </nav>
+  );
+}
+
+function IndustryFlowListView({
   industries,
   beneficiaries,
+  createdAt,
 }: {
   industries: Industry[];
   beneficiaries: BeneficiaryIndustry[];
+  createdAt: string;
 }) {
+  const [flowQuery, setFlowQuery] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const sourceIndustries = useMemo(
+    () => Array.from(new Set(beneficiaries.map((item) => item.sourceIndustry))).sort(),
+    [beneficiaries],
+  );
+  const normalizedQuery = flowQuery.trim().toLowerCase();
+  const visibleIndustries = useMemo(() => {
+    if (!normalizedQuery) return industries;
+    return industries.filter((industry) =>
+      [industry.name, industry.description, ...industry.evidence, ...industry.tailwinds, ...industry.risks]
+        .join(" ")
+        .toLowerCase()
+        .includes(normalizedQuery),
+    );
+  }, [industries, normalizedQuery]);
+  const visibleBeneficiaries = useMemo(() => {
+    return beneficiaries.filter((industry) => {
+      const sourceMatches = sourceFilter === "all" || industry.sourceIndustry === sourceFilter;
+      const queryMatches =
+        !normalizedQuery ||
+        [
+          industry.name,
+          industry.description,
+          industry.sourceIndustry,
+          industry.mechanism,
+          industry.timeHorizon,
+          ...industry.keywords,
+          ...industry.evidence,
+          ...industry.risks,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedQuery);
+      return sourceMatches && queryMatches;
+    });
+  }, [beneficiaries, normalizedQuery, sourceFilter]);
+  const topBeneficiary = beneficiaries[0];
+
   return (
-    <section className="panel industry-flow-panel" aria-label="산업 흐름">
-      <div className="panel-title">
-        <Network size={18} aria-hidden="true" />
-        <h2>산업 흐름</h2>
-        <span>Now → Next</span>
-      </div>
-      <div className="industry-flow-grid">
-        <section className="industry-flow-column">
-          <div className="flow-heading">
-            <span>현재 활발한 산업</span>
-            <strong>Top 5</strong>
+    <section className="industry-list-page" aria-label="산업 흐름 목록">
+      <section className="panel industry-list-toolbar">
+        <div className="panel-title">
+          <Network size={18} aria-hidden="true" />
+          <h2>산업 흐름 목록</h2>
+          <span>{createdAt}</span>
+        </div>
+        <div className="industry-list-controls">
+          <label className="search-box">
+            <Search size={16} aria-hidden="true" />
+            <input
+              value={flowQuery}
+              onChange={(event) => setFlowQuery(event.target.value)}
+              placeholder="산업, 키워드, 리스크"
+            />
+          </label>
+          <label>
+            <span>원인 산업</span>
+            <select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}>
+              <option value="all">전체</option>
+              {sourceIndustries.map((industry) => (
+                <option value={industry} key={industry}>
+                  {industry}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="flow-stat-grid">
+          <FlowStat label="현재 산업" value={`${industries.length}개`} />
+          <FlowStat label="수혜 산업" value={`${beneficiaries.length}개`} />
+          <FlowStat label="최상위 수혜" value={topBeneficiary?.name || "-"} />
+          <FlowStat label="최상위 점수" value={formatScore(topBeneficiary?.score)} />
+        </div>
+      </section>
+
+      <section className="industry-page-grid">
+        <section className="panel">
+          <div className="panel-title">
+            <TrendingUp size={18} aria-hidden="true" />
+            <h2>현재 활발한 산업</h2>
+            <span>{visibleIndustries.length}개</span>
           </div>
-          <div className="active-industry-list">
-            {industries.slice(0, 5).map((industry, index) => (
+          <div className="active-industry-list expanded">
+            {visibleIndustries.map((industry, index) => (
               <article className="active-industry-row" key={industry.name}>
                 <span className="rank-number">{index + 1}</span>
                 <div>
@@ -440,43 +550,71 @@ function IndustryFlowPanel({
           </div>
         </section>
 
-        <section className="industry-flow-column">
-          <div className="flow-heading">
-            <span>미래 수혜 산업</span>
-            <strong>Top 5</strong>
+        <section className="panel beneficiary-management-panel">
+          <div className="panel-title">
+            <ArrowUpDown size={18} aria-hidden="true" />
+            <h2>미래 수혜 산업</h2>
+            <span>{visibleBeneficiaries.length}개</span>
           </div>
-          <div className="beneficiary-list">
-            {beneficiaries.slice(0, 5).map((industry, index) => (
-              <article className="beneficiary-card" key={`${industry.sourceIndustry}-${industry.name}`}>
-                <div className="beneficiary-head">
-                  <span className="rank-number">{index + 1}</span>
-                  <div>
-                    <strong>{industry.name}</strong>
-                    <small>{industry.sourceIndustry}</small>
+          {visibleBeneficiaries.length ? (
+            <div className="beneficiary-table-list">
+              {visibleBeneficiaries.map((industry, index) => (
+                <article className="beneficiary-list-row" key={`${industry.sourceIndustry}-${industry.name}`}>
+                  <div className="beneficiary-head">
+                    <span className="rank-number">{index + 1}</span>
+                    <div>
+                      <strong>{industry.name}</strong>
+                      <small>{industry.sourceIndustry}</small>
+                    </div>
+                    <strong className="rank-score">{formatScore(industry.score)}</strong>
                   </div>
-                  <strong className="rank-score">{formatScore(industry.score)}</strong>
-                </div>
-                <p>{industry.displaySummary || industry.description}</p>
-                <div className="beneficiary-meta">
-                  <span>{industry.timeHorizon}</span>
-                  <span>연결도 {formatScore(industry.connectionScore)}</span>
-                </div>
-                <ul>
-                  {(industry.evidence || []).slice(0, 2).map((evidence) => (
-                    <li key={evidence}>{evidence}</li>
-                  ))}
-                </ul>
-                <div className="risk-strip">
-                  {(industry.risks || []).slice(0, 2).map((risk) => (
-                    <span key={risk}>{risk}</span>
-                  ))}
-                </div>
-              </article>
-            ))}
-          </div>
+                  <p>{industry.mechanism}</p>
+                  <div className="beneficiary-meta">
+                    <span>{industry.timeHorizon}</span>
+                    <span>연결도 {formatScore(industry.connectionScore)}</span>
+                    <span>거시 {formatScore(industry.macroScore)}</span>
+                    <span>뉴스 {formatScore(industry.newsScore)}</span>
+                    <span>시장 {formatScore(industry.marketScore)}</span>
+                  </div>
+                  <div className="beneficiary-detail-grid">
+                    <section>
+                      <h3>근거</h3>
+                      <ul>
+                        {(industry.evidence || []).slice(0, 3).map((evidence) => (
+                          <li key={evidence}>{evidence}</li>
+                        ))}
+                      </ul>
+                    </section>
+                    <section>
+                      <h3>리스크</h3>
+                      <div className="risk-strip">
+                        {(industry.risks || []).slice(0, 3).map((risk) => (
+                          <span key={risk}>{risk}</span>
+                        ))}
+                      </div>
+                    </section>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <section className="empty-panel compact">
+              <Search aria-hidden="true" />
+              <h2>검색 결과 없음</h2>
+            </section>
+          )}
         </section>
-      </div>
+      </section>
     </section>
+  );
+}
+
+function FlowStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flow-stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 
