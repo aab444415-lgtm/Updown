@@ -460,10 +460,16 @@ def oneil_strategy_score(item: StockScore, momentum: Momentum) -> float:
 
 def greenblatt_strategy_score(item: StockScore) -> float:
     fundamentals = item.stock.fundamentals
-    capital_return = _scale(fundamentals.roe_pct, low=0, high=35)
-    if fundamentals.operating_margin_pct is not None and math.isfinite(fundamentals.operating_margin_pct):
-        capital_return = capital_return * 0.72 + _scale(fundamentals.operating_margin_pct, low=0, high=35) * 0.28
-    earnings_yield = _earnings_yield_proxy_score(fundamentals)
+    if _finite(fundamentals.roic_pct):
+        capital_return = _scale(fundamentals.roic_pct, low=0, high=30)
+    else:
+        capital_return = _scale(fundamentals.roe_pct, low=0, high=35)
+        if fundamentals.operating_margin_pct is not None and math.isfinite(fundamentals.operating_margin_pct):
+            capital_return = capital_return * 0.72 + _scale(fundamentals.operating_margin_pct, low=0, high=35) * 0.28
+    if _finite(fundamentals.earnings_yield_pct):
+        earnings_yield = _scale(fundamentals.earnings_yield_pct, low=1, high=12)
+    else:
+        earnings_yield = _earnings_yield_proxy_score(fundamentals)
     score = capital_return * 0.55 + earnings_yield * 0.45
     if fundamentals.operating_income is not None and fundamentals.operating_income < 0:
         score -= 12
@@ -476,12 +482,12 @@ def fisher_strategy_score(item: StockScore) -> float:
     fundamentals = item.stock.fundamentals
     durable_growth = _scale(fundamentals.revenue_growth_pct, low=-5, high=30)
     margin = _scale(fundamentals.operating_margin_pct, low=0, high=35)
-    rd_proxy = 50
+    rd_score = _scale(fundamentals.rd_to_revenue_pct, low=0, high=18) if _finite(fundamentals.rd_to_revenue_pct) else 50
     management = (
         _scale(fundamentals.roe_pct, low=0, high=35) * 0.70
         + _inverse_scale(fundamentals.debt_to_equity_pct, low=40, high=200) * 0.30
     )
-    score = durable_growth * 0.35 + margin * 0.25 + rd_proxy * 0.15 + management * 0.25
+    score = durable_growth * 0.35 + margin * 0.25 + rd_score * 0.15 + management * 0.25
     if fundamentals.free_cash_flow is not None and fundamentals.free_cash_flow < 0:
         score -= 5
     if fundamentals.operating_margin_pct is not None and fundamentals.operating_margin_pct < 0:
@@ -498,11 +504,13 @@ def legend_strategy_reasons(
     fisher: float,
 ) -> tuple[str, ...]:
     fundamentals = item.stock.fundamentals
+    greenblatt_basis = _greenblatt_basis_text(fundamentals)
+    fisher_basis = _fisher_basis_text(fundamentals)
     return (
         f"린치 {lynch:.1f}/100: PEG 프록시 {_peg_proxy_text(fundamentals)}, {_growth_check(fundamentals)}",
         f"오닐 {oneil:.1f}/100: 상대강도 {(_momentum_label(momentum))}, 최근 이슈 {'있음' if item.stock.recent_issues else '미확인'}",
-        f"그린블라트 {greenblatt:.1f}/100: ROE/마진과 이익수익률 프록시를 결합",
-        f"피셔 {fisher:.1f}/100: 장기 성장성, 영업이익률, ROE 기반 자본배분 프록시를 반영",
+        f"그린블라트 {greenblatt:.1f}/100: {greenblatt_basis}",
+        f"피셔 {fisher:.1f}/100: {fisher_basis}",
     )
 
 
@@ -516,10 +524,46 @@ def legend_strategy_warnings(item: StockScore, momentum: Momentum) -> tuple[str,
     if not _has_momentum_data(momentum):
         warnings.append("가격 상대강도 데이터가 부족해 오닐 모멘텀 항목은 중립 처리")
     warnings.append("기관 신규 매수와 거래량 급증 데이터는 아직 연결되지 않아 정량 프록시로 대체")
-    warnings.append("R&D 투자 데이터와 경영진 정성 평가는 아직 없어 피셔 점수 일부를 중립 처리")
-    if fundamentals.operating_income is None or fundamentals.market_cap is None:
-        warnings.append("EV/EBIT 원천 데이터가 부족해 PER 또는 중립값으로 이익수익률을 대체")
+    if fundamentals.rd_to_revenue_pct is None:
+        warnings.append("R&D 투자 데이터가 없어 피셔 연구개발 항목은 중립 처리")
+    warnings.append("경영진 정성 평가는 아직 없어 ROE/부채비율 기반 자본효율 프록시로 대체")
+    if fundamentals.roic_pct is None:
+        warnings.append("ROIC 원천 데이터가 부족해 ROE/마진 프록시로 그린블라트 자본수익률을 대체")
+    if fundamentals.earnings_yield_pct is None or fundamentals.ev_to_ebit is None:
+        warnings.append("EV/EBIT 원천 데이터가 부족해 PER 또는 시가총액 기반 이익수익률 프록시로 대체")
+    roic_source = fundamentals.sources.get("roic") if isinstance(fundamentals.sources, dict) else None
+    if isinstance(roic_source, dict) and roic_source.get("taxRateDefault"):
+        default_rate = roic_source.get("defaultTaxRate")
+        default_pct = f"{float(default_rate) * 100:.0f}%" if isinstance(default_rate, (int, float)) else "기본"
+        warnings.append(f"법인세 데이터가 부족해 {default_pct} 법인세율로 ROIC를 계산")
     return tuple(dict.fromkeys(warnings))
+
+
+def _greenblatt_basis_text(fundamentals: Fundamentals) -> str:
+    parts: list[str] = []
+    if _finite(fundamentals.roic_pct):
+        parts.append(f"실제 ROIC {fundamentals.roic_pct:.1f}%")
+    else:
+        parts.append("ROE/마진 프록시")
+    if _finite(fundamentals.earnings_yield_pct):
+        if _finite(fundamentals.ev_to_ebit):
+            parts.append(
+                f"EBIT/EV {fundamentals.earnings_yield_pct:.1f}%"
+                f"(EV/EBIT {fundamentals.ev_to_ebit:.1f}배)"
+            )
+        else:
+            parts.append(f"이익수익률 {fundamentals.earnings_yield_pct:.1f}%")
+    else:
+        parts.append("이익수익률 프록시")
+    return "와 ".join(parts) + "를 결합"
+
+
+def _fisher_basis_text(fundamentals: Fundamentals) -> str:
+    if _finite(fundamentals.rd_to_revenue_pct):
+        rd_text = f"R&D/매출 {fundamentals.rd_to_revenue_pct:.1f}%"
+    else:
+        rd_text = "R&D 중립값"
+    return f"장기 성장성, 영업이익률, {rd_text}, ROE 기반 자본배분 프록시를 반영"
 
 
 def early_revenue_growth_score(growth_pct: float | None) -> float:

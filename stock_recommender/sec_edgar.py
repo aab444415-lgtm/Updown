@@ -52,6 +52,37 @@ INTEREST_EXPENSE_TAGS = (
     "InterestExpense",
     "InterestAndDebtExpense",
 )
+CASH_TAGS = (
+    "CashAndCashEquivalentsAtCarryingValue",
+    "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+    "CashAndDueFromBanks",
+)
+TOTAL_DEBT_TAGS = (
+    "DebtAndFinanceLeaseObligations",
+    "ShortTermBorrowingsAndCurrentPortionOfLongTermDebt",
+)
+DEBT_COMPONENT_TAGS = (
+    "ShortTermBorrowings",
+    "ShortTermDebt",
+    "CurrentDebt",
+    "LongTermDebtCurrent",
+    "LongTermDebtNoncurrent",
+    "LongTermDebt",
+    "LongTermDebtAndFinanceLeaseObligationsCurrent",
+    "LongTermDebtAndFinanceLeaseObligationsNoncurrent",
+)
+PRETAX_INCOME_TAGS = (
+    "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+    "IncomeLossFromContinuingOperationsBeforeIncomeTaxes",
+    "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+    "IncomeLossBeforeIncomeTaxes",
+)
+INCOME_TAX_EXPENSE_TAGS = ("IncomeTaxExpenseBenefit",)
+RESEARCH_AND_DEVELOPMENT_TAGS = (
+    "ResearchAndDevelopmentExpense",
+    "ResearchAndDevelopmentExpenseExcludingAcquiredInProcessCost",
+)
+US_DEFAULT_TAX_RATE = 0.21
 
 
 class SecEdgarClient:
@@ -198,6 +229,12 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
     operating_cash_flow = _latest_and_previous_facts(us_gaap, OPERATING_CASH_FLOW_TAGS)
     capital_expenditure = _latest_and_previous_facts(us_gaap, CAPEX_TAGS)
     interest_expense = _latest_and_previous_facts(us_gaap, INTEREST_EXPENSE_TAGS)
+    cash = _latest_and_previous_facts(us_gaap, CASH_TAGS)
+    direct_debt = _latest_and_previous_facts(us_gaap, TOTAL_DEBT_TAGS)
+    debt_components = _latest_and_previous_summed_facts(us_gaap, DEBT_COMPONENT_TAGS)
+    pretax_income = _latest_and_previous_facts(us_gaap, PRETAX_INCOME_TAGS)
+    income_tax_expense = _latest_and_previous_facts(us_gaap, INCOME_TAX_EXPENSE_TAGS)
+    research_and_development = _latest_and_previous_facts(us_gaap, RESEARCH_AND_DEVELOPMENT_TAGS)
 
     latest_revenue, previous_revenue = _fact_values(revenue)
     latest_operating_income, _ = _fact_values(operating_income)
@@ -210,18 +247,46 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
     latest_operating_cash_flow, _ = _fact_values(operating_cash_flow)
     latest_capex, _ = _fact_values(capital_expenditure)
     latest_interest_expense, _ = _fact_values(interest_expense)
+    latest_cash, _ = _fact_values(cash)
+    latest_direct_debt, _ = _fact_values(direct_debt)
+    latest_component_debt, _ = _fact_values(debt_components)
+    latest_total_debt = _coalesce(latest_direct_debt, latest_component_debt)
+    latest_pretax_income, _ = _fact_values(pretax_income)
+    latest_income_tax_expense, _ = _fact_values(income_tax_expense)
+    latest_research_and_development, _ = _fact_values(research_and_development)
 
     revenue_growth_pct = _growth_pct(latest_revenue, previous_revenue)
     operating_margin_pct = _ratio_pct(latest_operating_income, latest_revenue)
     average_equity = _average(latest_equity, previous_equity)
     roe_pct = _ratio_pct(latest_net_income, average_equity)
-    debt_to_equity_pct = _ratio_pct(latest_liabilities, latest_equity)
+    debt_to_equity_pct = _ratio_pct(_coalesce(latest_total_debt, latest_liabilities), latest_equity)
     current_ratio_pct = _ratio_pct(latest_current_assets, latest_current_liabilities)
     ebitda = _add(latest_operating_income, latest_depreciation_amortization)
     capex_outflow = _outflow(latest_capex)
     free_cash_flow = _subtract(latest_operating_cash_flow, capex_outflow)
     interest_expense_outflow = _outflow(latest_interest_expense)
     interest_coverage = _ratio(latest_operating_income, interest_expense_outflow)
+    market_cap = fallback.market_cap
+    cash_value = _coalesce(latest_cash, fallback.cash_and_equivalents)
+    total_debt_value = _coalesce(latest_total_debt, fallback.total_debt)
+    equity_value = _coalesce(latest_equity, None)
+    operating_income_value = _coalesce(latest_operating_income, fallback.operating_income)
+    pretax_income_value = _coalesce(latest_pretax_income, fallback.pretax_income)
+    income_tax_expense_value = _coalesce(latest_income_tax_expense, fallback.income_tax_expense)
+    revenue_value = _coalesce(latest_revenue, fallback.revenue)
+    research_and_development_value = _coalesce(
+        latest_research_and_development, fallback.research_and_development
+    )
+    tax_rate, default_tax_rate_used = _effective_tax_rate(
+        income_tax_expense_value,
+        pretax_income_value,
+        US_DEFAULT_TAX_RATE,
+    )
+    enterprise_value = _enterprise_value(market_cap, total_debt_value, cash_value)
+    roic_pct = _roic_pct(operating_income_value, tax_rate, total_debt_value, equity_value, cash_value)
+    ev_to_ebit = _ratio(enterprise_value, operating_income_value)
+    earnings_yield_pct = _ratio_pct(operating_income_value, enterprise_value)
+    rd_to_revenue_pct = _ratio_pct(research_and_development_value, revenue_value)
     sources = dict(fallback.sources)
     _set_source(sources, "revenue", revenue[0])
     _set_source(sources, "operatingIncome", operating_income[0])
@@ -231,6 +296,11 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
     _set_source(sources, "currentAssets", current_assets[0])
     _set_source(sources, "currentLiabilities", current_liabilities[0])
     _set_source(sources, "interestExpense", interest_expense[0])
+    _set_source(sources, "cashAndEquivalents", cash[0])
+    _set_source(sources, "totalDebt", direct_debt[0] or debt_components[0])
+    _set_source(sources, "pretaxIncome", pretax_income[0])
+    _set_source(sources, "incomeTaxExpense", income_tax_expense[0])
+    _set_source(sources, "researchAndDevelopment", research_and_development[0])
     if ebitda is not None:
         _set_source(sources, "ebitda", operating_income[0] or depreciation_amortization[0])
     if free_cash_flow is not None:
@@ -239,6 +309,46 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
             "freeCashFlow",
             operating_cash_flow[0] or capital_expenditure[0],
             derived_from=("operatingCashFlow", "capitalExpenditure"),
+        )
+    if enterprise_value is not None:
+        _set_source(
+            sources,
+            "enterpriseValue",
+            direct_debt[0] or debt_components[0] or cash[0],
+            derived_from=("marketCap", "totalDebt", "cashAndEquivalents"),
+        )
+    if roic_pct is not None:
+        _set_source(
+            sources,
+            "roic",
+            operating_income[0] or direct_debt[0] or debt_components[0] or cash[0] or equity[0],
+            derived_from=("operatingIncome", "taxRate", "totalDebt", "equity", "cashAndEquivalents"),
+            extra={
+                "taxRate": tax_rate,
+                "taxRateDefault": default_tax_rate_used,
+                "defaultTaxRate": US_DEFAULT_TAX_RATE if default_tax_rate_used else None,
+            },
+        )
+    if ev_to_ebit is not None:
+        _set_source(
+            sources,
+            "evToEbit",
+            operating_income[0] or direct_debt[0] or debt_components[0] or cash[0],
+            derived_from=("enterpriseValue", "operatingIncome"),
+        )
+    if earnings_yield_pct is not None:
+        _set_source(
+            sources,
+            "earningsYield",
+            operating_income[0] or direct_debt[0] or debt_components[0] or cash[0],
+            derived_from=("operatingIncome", "enterpriseValue"),
+        )
+    if rd_to_revenue_pct is not None:
+        _set_source(
+            sources,
+            "rdToRevenue",
+            research_and_development[0] or revenue[0],
+            derived_from=("researchAndDevelopment", "revenue"),
         )
 
     return Fundamentals(
@@ -262,6 +372,19 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
         current_ratio_pct=_coalesce(current_ratio_pct, fallback.current_ratio_pct),
         interest_expense=_coalesce(interest_expense_outflow, fallback.interest_expense),
         interest_coverage=_coalesce(interest_coverage, fallback.interest_coverage),
+        cash_and_equivalents=_coalesce(latest_cash, fallback.cash_and_equivalents),
+        total_debt=_coalesce(latest_total_debt, fallback.total_debt),
+        pretax_income=_coalesce(latest_pretax_income, fallback.pretax_income),
+        income_tax_expense=_coalesce(latest_income_tax_expense, fallback.income_tax_expense),
+        research_and_development=_coalesce(
+            latest_research_and_development,
+            fallback.research_and_development,
+        ),
+        enterprise_value=_coalesce(enterprise_value, fallback.enterprise_value),
+        roic_pct=_coalesce(roic_pct, fallback.roic_pct),
+        ev_to_ebit=_coalesce(ev_to_ebit, fallback.ev_to_ebit),
+        earnings_yield_pct=_coalesce(earnings_yield_pct, fallback.earnings_yield_pct),
+        rd_to_revenue_pct=_coalesce(rd_to_revenue_pct, fallback.rd_to_revenue_pct),
         sources=sources,
     )
 
@@ -305,6 +428,47 @@ def _latest_and_previous_facts(
     return latest, previous
 
 
+def _latest_and_previous_summed_facts(
+    us_gaap: dict, tags: tuple[str, ...]
+) -> tuple[SelectedFact | None, SelectedFact | None]:
+    candidates: dict[str, dict[str, tuple[str, SelectedFact]]] = {}
+    for tag in tags:
+        concept = us_gaap.get(tag)
+        if not isinstance(concept, dict):
+            continue
+        units = concept.get("units", {})
+        facts = units.get(USD)
+        if not isinstance(facts, list):
+            continue
+        for fact in facts:
+            if not _is_annual_fact(fact):
+                continue
+            value = fact.get("val")
+            period = _annual_period_key(fact)
+            filed = str(fact.get("filed") or "")
+            if not isinstance(value, (int, float)) or not math.isfinite(value) or not period:
+                continue
+            by_tag = candidates.setdefault(period, {})
+            existing = by_tag.get(tag)
+            if existing is None or filed >= existing[0]:
+                by_tag[tag] = (filed, SelectedFact(float(value), _fact_source(fact, tag)))
+
+    summed: list[tuple[str, SelectedFact]] = []
+    for period, by_tag in candidates.items():
+        facts = [item[1] for item in by_tag.values()]
+        if not facts:
+            continue
+        source_fact = max(facts, key=lambda item: str(item.source.get("filed") or ""))
+        source = dict(source_fact.source)
+        source["tag"] = "+".join(sorted(by_tag))
+        source["derivedFrom"] = sorted(by_tag)
+        summed.append((period, SelectedFact(sum(item.value for item in facts), source)))
+    summed.sort(key=lambda item: item[0], reverse=True)
+    latest = summed[0][1] if summed else None
+    previous = summed[1][1] if len(summed) > 1 else None
+    return latest, previous
+
+
 def _fact_values(facts: tuple[SelectedFact | None, SelectedFact | None]) -> tuple[float | None, float | None]:
     return _fact_value(facts[0]), _fact_value(facts[1])
 
@@ -331,12 +495,15 @@ def _set_source(
     field: str,
     fact: SelectedFact | None,
     derived_from: tuple[str, ...] = (),
+    extra: dict[str, object] | None = None,
 ) -> None:
     if fact is None:
         return
     source = dict(fact.source)
     if derived_from:
         source["derivedFrom"] = list(derived_from)
+    if extra:
+        source.update({key: value for key, value in extra.items() if value is not None})
     sources[field] = source
 
 
@@ -404,6 +571,69 @@ def _average(first: float | None, second: float | None) -> float | None:
     if first is None or second is None:
         return first
     return (first + second) / 2
+
+
+def _effective_tax_rate(
+    income_tax_expense: float | None,
+    pretax_income: float | None,
+    default_rate: float,
+) -> tuple[float, bool]:
+    if (
+        income_tax_expense is not None
+        and pretax_income is not None
+        and math.isfinite(income_tax_expense)
+        and math.isfinite(pretax_income)
+        and pretax_income > 0
+        and income_tax_expense >= 0
+    ):
+        return _clamp_ratio(income_tax_expense / pretax_income, 0, 0.45), False
+    return default_rate, True
+
+
+def _enterprise_value(
+    market_cap: float | None,
+    total_debt: float | None,
+    cash_and_equivalents: float | None,
+) -> float | None:
+    if (
+        market_cap is None
+        or total_debt is None
+        or cash_and_equivalents is None
+        or not math.isfinite(market_cap)
+        or not math.isfinite(total_debt)
+        or not math.isfinite(cash_and_equivalents)
+    ):
+        return None
+    value = market_cap + total_debt - cash_and_equivalents
+    return value if value > 0 else None
+
+
+def _roic_pct(
+    operating_income: float | None,
+    tax_rate: float,
+    total_debt: float | None,
+    equity: float | None,
+    cash_and_equivalents: float | None,
+) -> float | None:
+    if (
+        operating_income is None
+        or total_debt is None
+        or equity is None
+        or cash_and_equivalents is None
+        or not math.isfinite(operating_income)
+        or not math.isfinite(total_debt)
+        or not math.isfinite(equity)
+        or not math.isfinite(cash_and_equivalents)
+    ):
+        return None
+    invested_capital = total_debt + equity - cash_and_equivalents
+    if invested_capital <= 0:
+        return None
+    return (operating_income * (1 - tax_rate) / invested_capital) * 100
+
+
+def _clamp_ratio(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
 
 
 def _coalesce(value: float | None, fallback: float | None) -> float | None:

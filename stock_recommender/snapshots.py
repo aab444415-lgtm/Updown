@@ -18,7 +18,7 @@ from .snapshot_store import list_snapshot_rows, save_persistent_snapshot
 from .storage import CacheStore
 
 
-SNAPSHOT_PAYLOAD_VERSION = 11
+SNAPSHOT_PAYLOAD_VERSION = 12
 BENCHMARK_TICKERS = ("SPY", "QQQ", "^KS11")
 FUNDAMENTAL_SOURCE_FIELDS = (
     "revenue",
@@ -29,6 +29,16 @@ FUNDAMENTAL_SOURCE_FIELDS = (
     "freeCashFlow",
     "netIncome",
     "operatingCashFlow",
+    "cashAndEquivalents",
+    "totalDebt",
+    "pretaxIncome",
+    "incomeTaxExpense",
+    "researchAndDevelopment",
+    "enterpriseValue",
+    "roic",
+    "evToEbit",
+    "earningsYield",
+    "rdToRevenue",
 )
 SECRET_QUERY_KEYS = {"api_key", "apikey", "crtfc_key", "key", "token", "secret", "access_token"}
 LONG_TOKEN_RE = re.compile(r"\b[A-Za-z0-9_-]{24,}\b")
@@ -112,6 +122,7 @@ def snapshot_history(limit: int = 30) -> dict:
 def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live") -> dict:
     created_at = report.created_at
     source_events = _source_events_payload(report.source_events)
+    legend_coverage = _legend_metric_coverage(report)
     legend_by_ticker = {
         item.stock_score.stock.ticker.upper(): item for item in report.legend_strategy_scores
     }
@@ -135,6 +146,7 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
             "configuredSources": list(report.data_quality.configured_sources),
             "missingSources": list(report.data_quality.missing_sources),
             "warnings": [_redact_text(item) for item in report.data_quality.warnings],
+            **legend_coverage,
         },
         "macroSnapshot": _macro_snapshot_payload(report),
         "industries": [
@@ -195,6 +207,16 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                     "currentRatioPct": item.stock.fundamentals.current_ratio_pct,
                     "interestExpense": item.stock.fundamentals.interest_expense,
                     "interestCoverage": item.stock.fundamentals.interest_coverage,
+                    "cashAndEquivalents": item.stock.fundamentals.cash_and_equivalents,
+                    "totalDebt": item.stock.fundamentals.total_debt,
+                    "pretaxIncome": item.stock.fundamentals.pretax_income,
+                    "incomeTaxExpense": item.stock.fundamentals.income_tax_expense,
+                    "researchAndDevelopment": item.stock.fundamentals.research_and_development,
+                    "enterpriseValue": item.stock.fundamentals.enterprise_value,
+                    "roicPct": item.stock.fundamentals.roic_pct,
+                    "evToEbit": item.stock.fundamentals.ev_to_ebit,
+                    "earningsYieldPct": item.stock.fundamentals.earnings_yield_pct,
+                    "rdToRevenuePct": item.stock.fundamentals.rd_to_revenue_pct,
                 },
                 "fundamentalSources": _fundamental_sources(item.stock.fundamentals.sources),
                 "momentumRaw": _momentum_payload(report.momentums.get(item.stock.ticker.upper())),
@@ -334,6 +356,26 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
     }
     payload["snapshotQuality"] = _snapshot_quality(payload)
     return payload
+
+
+def _legend_metric_coverage(report: RecommendationReport) -> dict[str, float]:
+    candidates = report.legend_strategy_scores or report.stock_scores
+    fundamentals = [
+        item.stock_score.stock.fundamentals if hasattr(item, "stock_score") else item.stock.fundamentals
+        for item in candidates[:20]
+    ]
+    return {
+        "roicCoveragePct": _coverage_pct(fundamentals, "roic_pct"),
+        "evEbitCoveragePct": _coverage_pct(fundamentals, "ev_to_ebit"),
+        "rdCoveragePct": _coverage_pct(fundamentals, "rd_to_revenue_pct"),
+    }
+
+
+def _coverage_pct(fundamentals: list, field: str) -> float:
+    if not fundamentals:
+        return 0.0
+    covered = sum(1 for item in fundamentals if getattr(item, field, None) is not None)
+    return round((covered / len(fundamentals)) * 100, 1)
 
 
 def _legend_strategy_stock_fields(item) -> dict:

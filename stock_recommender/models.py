@@ -30,6 +30,16 @@ class Fundamentals:
     current_ratio_pct: float | None = None
     interest_expense: float | None = None
     interest_coverage: float | None = None
+    cash_and_equivalents: float | None = None
+    total_debt: float | None = None
+    pretax_income: float | None = None
+    income_tax_expense: float | None = None
+    research_and_development: float | None = None
+    enterprise_value: float | None = None
+    roic_pct: float | None = None
+    ev_to_ebit: float | None = None
+    earnings_yield_pct: float | None = None
+    rd_to_revenue_pct: float | None = None
     sources: dict[str, dict] = field(default_factory=dict)
 
     def __init__(
@@ -54,6 +64,16 @@ class Fundamentals:
         current_ratio_pct: float | None = None,
         interest_expense: float | None = None,
         interest_coverage: float | None = None,
+        cash_and_equivalents: float | None = None,
+        total_debt: float | None = None,
+        pretax_income: float | None = None,
+        income_tax_expense: float | None = None,
+        research_and_development: float | None = None,
+        enterprise_value: float | None = None,
+        roic_pct: float | None = None,
+        ev_to_ebit: float | None = None,
+        earnings_yield_pct: float | None = None,
+        rd_to_revenue_pct: float | None = None,
         market_cap_usd: float | None = None,
         sources: dict[str, dict] | None = None,
     ) -> None:
@@ -80,6 +100,16 @@ class Fundamentals:
             "current_ratio_pct": current_ratio_pct,
             "interest_expense": interest_expense,
             "interest_coverage": interest_coverage,
+            "cash_and_equivalents": cash_and_equivalents,
+            "total_debt": total_debt,
+            "pretax_income": pretax_income,
+            "income_tax_expense": income_tax_expense,
+            "research_and_development": research_and_development,
+            "enterprise_value": enterprise_value,
+            "roic_pct": roic_pct,
+            "ev_to_ebit": ev_to_ebit,
+            "earnings_yield_pct": earnings_yield_pct,
+            "rd_to_revenue_pct": rd_to_revenue_pct,
             "sources": dict(sources or {}),
         }
         for key, value in values.items():

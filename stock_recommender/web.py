@@ -28,6 +28,7 @@ def create_report(macro_context: str = DEFAULT_MACRO_CONTEXT) -> RecommendationR
 
 def report_to_dict(report: RecommendationReport) -> dict:
     technical_by_ticker = _technical_by_ticker(report)
+    legend_coverage = _legend_metric_coverage(report)
     early_growth_by_ticker = {
         item.stock_score.stock.ticker.upper(): item for item in report.early_growth_scores
     }
@@ -58,6 +59,7 @@ def report_to_dict(report: RecommendationReport) -> dict:
             "configuredSources": list(report.data_quality.configured_sources),
             "missingSources": list(report.data_quality.missing_sources),
             "warnings": list(report.data_quality.warnings),
+            **legend_coverage,
         },
         "macroSnapshot": _macro_snapshot_to_dict(report),
         "industries": [
@@ -118,6 +120,16 @@ def report_to_dict(report: RecommendationReport) -> dict:
                     "currentRatioPct": item.stock.fundamentals.current_ratio_pct,
                     "interestExpense": item.stock.fundamentals.interest_expense,
                     "interestCoverage": item.stock.fundamentals.interest_coverage,
+                    "cashAndEquivalents": item.stock.fundamentals.cash_and_equivalents,
+                    "totalDebt": item.stock.fundamentals.total_debt,
+                    "pretaxIncome": item.stock.fundamentals.pretax_income,
+                    "incomeTaxExpense": item.stock.fundamentals.income_tax_expense,
+                    "researchAndDevelopment": item.stock.fundamentals.research_and_development,
+                    "enterpriseValue": item.stock.fundamentals.enterprise_value,
+                    "roicPct": item.stock.fundamentals.roic_pct,
+                    "evToEbit": item.stock.fundamentals.ev_to_ebit,
+                    "earningsYieldPct": item.stock.fundamentals.earnings_yield_pct,
+                    "rdToRevenuePct": item.stock.fundamentals.rd_to_revenue_pct,
                 },
                 "technical": technical_by_ticker.get(item.stock.ticker.upper()),
                 "country": item.stock.country,
@@ -232,6 +244,26 @@ def _technical_by_ticker(report: RecommendationReport) -> dict[str, dict]:
         snapshot = build_technical_snapshot(points)
         results[ticker] = technical_snapshot_to_dict(snapshot)
     return results
+
+
+def _legend_metric_coverage(report: RecommendationReport) -> dict[str, float]:
+    candidates = report.legend_strategy_scores or report.stock_scores
+    fundamentals = [
+        item.stock_score.stock.fundamentals if hasattr(item, "stock_score") else item.stock.fundamentals
+        for item in candidates[:20]
+    ]
+    return {
+        "roicCoveragePct": _coverage_pct(fundamentals, "roic_pct"),
+        "evEbitCoveragePct": _coverage_pct(fundamentals, "ev_to_ebit"),
+        "rdCoveragePct": _coverage_pct(fundamentals, "rd_to_revenue_pct"),
+    }
+
+
+def _coverage_pct(fundamentals: list, field: str) -> float:
+    if not fundamentals:
+        return 0.0
+    covered = sum(1 for item in fundamentals if getattr(item, field, None) is not None)
+    return round((covered / len(fundamentals)) * 100, 1)
 
 
 def _valuation_range_to_dict(item) -> dict:

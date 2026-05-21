@@ -577,6 +577,47 @@ class ScoringTests(unittest.TestCase):
 
         self.assertGreater(by_ticker["MAGIC"].greenblatt_score, by_ticker["NOMAGIC"].greenblatt_score)
 
+    def test_legend_greenblatt_uses_actual_roic_and_ebit_ev_first(self):
+        industry = INDUSTRIES[0]
+        actual_magic = StockProfile(
+            ticker="REALMAGIC",
+            name="Real Magic Formula",
+            industry=industry.name,
+            role="adjacent",
+            thesis="실제 ROIC와 EBIT/EV가 좋은 후보입니다.",
+            risks=(),
+            fundamentals=Fundamentals(
+                8.0, 4.0, 3.0, 80.0, 90.0, 80.0, 10_000_000_000,
+                operating_income=900_000_000,
+                net_income=500_000_000,
+                roic_pct=28.0,
+                ev_to_ebit=9.0,
+                earnings_yield_pct=11.1,
+            ),
+        )
+        proxy_only = StockProfile(
+            ticker="PROXYMAGIC",
+            name="Proxy Magic Formula",
+            industry=industry.name,
+            role="adjacent",
+            thesis="프록시는 좋아 보이지만 실제 자본수익률이 낮은 후보입니다.",
+            risks=(),
+            fundamentals=Fundamentals(
+                8.0, 34.0, 35.0, 30.0, 9.0, 8.0, 10_000_000_000,
+                operating_income=900_000_000,
+                net_income=700_000_000,
+                roic_pct=2.0,
+                ev_to_ebit=60.0,
+                earnings_yield_pct=1.7,
+            ),
+        )
+
+        report = build_report(DEFAULT_MACRO_CONTEXT, (industry,), (actual_magic, proxy_only), ())
+        by_ticker = {item.stock_score.stock.ticker: item for item in report.legend_strategy_scores}
+
+        self.assertGreater(by_ticker["REALMAGIC"].greenblatt_score, by_ticker["PROXYMAGIC"].greenblatt_score)
+        self.assertTrue(any("실제 ROIC" in reason for reason in by_ticker["REALMAGIC"].reasons))
+
     def test_legend_fisher_prefers_durable_growth_margin_and_roe(self):
         industry = INDUSTRIES[0]
         compounder = StockProfile(
@@ -603,6 +644,39 @@ class ScoringTests(unittest.TestCase):
 
         self.assertGreater(by_ticker["FISHER"].fisher_score, by_ticker["NOFISH"].fisher_score)
 
+    def test_legend_fisher_rewards_actual_rd_to_revenue(self):
+        industry = INDUSTRIES[0]
+        rd_leader = StockProfile(
+            ticker="RDLEAD",
+            name="R&D Leader",
+            industry=industry.name,
+            role="core",
+            thesis="연구개발 투자 비중이 높은 성장 후보입니다.",
+            risks=(),
+            fundamentals=Fundamentals(
+                18.0, 20.0, 18.0, 30.0, 30.0, 24.0, 20_000_000_000,
+                rd_to_revenue_pct=16.0,
+            ),
+        )
+        rd_laggard = StockProfile(
+            ticker="RDLAG",
+            name="R&D Laggard",
+            industry=industry.name,
+            role="core",
+            thesis="기본 성장성은 비슷하지만 연구개발 투자 비중이 낮습니다.",
+            risks=(),
+            fundamentals=Fundamentals(
+                18.0, 20.0, 18.0, 30.0, 30.0, 24.0, 20_000_000_000,
+                rd_to_revenue_pct=0.5,
+            ),
+        )
+
+        report = build_report(DEFAULT_MACRO_CONTEXT, (industry,), (rd_leader, rd_laggard), ())
+        by_ticker = {item.stock_score.stock.ticker: item for item in report.legend_strategy_scores}
+
+        self.assertGreater(by_ticker["RDLEAD"].fisher_score, by_ticker["RDLAG"].fisher_score)
+        self.assertTrue(any("R&D/매출" in reason for reason in by_ticker["RDLEAD"].reasons))
+
     def test_report_api_serializes_legend_strategy_fields(self):
         report = build_report(
             macro_context=DEFAULT_MACRO_CONTEXT,
@@ -620,6 +694,13 @@ class ScoringTests(unittest.TestCase):
         self.assertIn("legendCompositeScore", payload["stocks"][0])
         self.assertIn("legendReasons", payload["stocks"][0])
         self.assertIn("legendWarnings", payload["stocks"][0])
+        self.assertIn("roicCoveragePct", payload["dataQuality"])
+        self.assertIn("evEbitCoveragePct", payload["dataQuality"])
+        self.assertIn("rdCoveragePct", payload["dataQuality"])
+        self.assertIn("roicPct", payload["stocks"][0]["fundamentals"])
+        self.assertIn("evToEbit", payload["stocks"][0]["fundamentals"])
+        self.assertIn("earningsYieldPct", payload["stocks"][0]["fundamentals"])
+        self.assertIn("rdToRevenuePct", payload["stocks"][0]["fundamentals"])
         self.assertIn("shortTermCandidates", payload)
         self.assertIn("volumeScore", payload["shortTermCandidates"][0])
         self.assertIn("confidenceScore", payload["shortTermCandidates"][0])
@@ -703,6 +784,24 @@ class SecEdgarTests(unittest.TestCase):
                     "InterestExpenseNonOperating": {
                         "units": {"USD": [_annual_fact("2024-01-01", "2024-12-31", "2025-02-01", 5)]}
                     },
+                    "CashAndCashEquivalentsAtCarryingValue": {
+                        "units": {"USD": [_annual_fact("2024-12-31", "2024-12-31", "2025-02-01", 20)]}
+                    },
+                    "LongTermDebtCurrent": {
+                        "units": {"USD": [_annual_fact("2024-12-31", "2024-12-31", "2025-02-01", 10)]}
+                    },
+                    "LongTermDebtNoncurrent": {
+                        "units": {"USD": [_annual_fact("2024-12-31", "2024-12-31", "2025-02-01", 30)]}
+                    },
+                    "IncomeLossFromContinuingOperationsBeforeIncomeTaxes": {
+                        "units": {"USD": [_annual_fact("2024-01-01", "2024-12-31", "2025-02-01", 23)]}
+                    },
+                    "IncomeTaxExpenseBenefit": {
+                        "units": {"USD": [_annual_fact("2024-01-01", "2024-12-31", "2025-02-01", 5)]}
+                    },
+                    "ResearchAndDevelopmentExpense": {
+                        "units": {"USD": [_annual_fact("2024-01-01", "2024-12-31", "2025-02-01", 9)]}
+                    },
                     "StockholdersEquity": {
                         "units": {
                             "USD": [
@@ -715,12 +814,12 @@ class SecEdgarTests(unittest.TestCase):
             }
         }
 
-        fundamentals = extract_fundamentals(facts)
+        fundamentals = extract_fundamentals(facts, fallback=Fundamentals(market_cap=200))
 
         self.assertAlmostEqual(fundamentals.revenue_growth_pct, 25.0)
         self.assertAlmostEqual(fundamentals.operating_margin_pct, 20.0)
         self.assertAlmostEqual(fundamentals.roe_pct, 18 / 85 * 100)
-        self.assertAlmostEqual(fundamentals.debt_to_equity_pct, 60 / 90 * 100)
+        self.assertAlmostEqual(fundamentals.debt_to_equity_pct, 40 / 90 * 100)
         self.assertEqual(fundamentals.revenue, 125)
         self.assertEqual(fundamentals.operating_income, 25)
         self.assertEqual(fundamentals.ebitda, 32)
@@ -730,10 +829,22 @@ class SecEdgarTests(unittest.TestCase):
         self.assertEqual(fundamentals.free_cash_flow, 22)
         self.assertAlmostEqual(fundamentals.current_ratio_pct, 200.0)
         self.assertAlmostEqual(fundamentals.interest_coverage, 5.0)
+        self.assertEqual(fundamentals.cash_and_equivalents, 20)
+        self.assertEqual(fundamentals.total_debt, 40)
+        self.assertEqual(fundamentals.pretax_income, 23)
+        self.assertEqual(fundamentals.income_tax_expense, 5)
+        self.assertEqual(fundamentals.research_and_development, 9)
+        self.assertEqual(fundamentals.enterprise_value, 220)
+        self.assertAlmostEqual(fundamentals.roic_pct, 25 * (1 - 5 / 23) / (40 + 90 - 20) * 100)
+        self.assertAlmostEqual(fundamentals.ev_to_ebit, 220 / 25)
+        self.assertAlmostEqual(fundamentals.earnings_yield_pct, 25 / 220 * 100)
+        self.assertAlmostEqual(fundamentals.rd_to_revenue_pct, 9 / 125 * 100)
         self.assertEqual(fundamentals.sources["revenue"]["source"], "SEC EDGAR")
         self.assertEqual(fundamentals.sources["revenue"]["periodEnd"], "2024-12-31")
         self.assertEqual(fundamentals.sources["revenue"]["filed"], "2025-02-01")
         self.assertEqual(fundamentals.sources["freeCashFlow"]["derivedFrom"], ["operatingCashFlow", "capitalExpenditure"])
+        self.assertEqual(fundamentals.sources["roic"]["derivedFrom"][0], "operatingIncome")
+        self.assertFalse(fundamentals.sources["roic"]["taxRateDefault"])
 
     def test_extract_fundamentals_uses_period_not_filed_date(self):
         facts = {
@@ -757,6 +868,38 @@ class SecEdgarTests(unittest.TestCase):
         self.assertEqual(fundamentals.revenue, 150)
         self.assertAlmostEqual(fundamentals.revenue_growth_pct, 50.0)
 
+    def test_extract_fundamentals_uses_default_tax_rate_when_tax_data_missing(self):
+        facts = {
+            "facts": {
+                "us-gaap": {
+                    "RevenueFromContractWithCustomerExcludingAssessedTax": {
+                        "units": {"USD": [_annual_fact("2024-01-01", "2024-12-31", "2025-02-01", 500)]}
+                    },
+                    "OperatingIncomeLoss": {
+                        "units": {"USD": [_annual_fact("2024-01-01", "2024-12-31", "2025-02-01", 100)]}
+                    },
+                    "CashAndCashEquivalentsAtCarryingValue": {
+                        "units": {"USD": [_annual_fact("2024-12-31", "2024-12-31", "2025-02-01", 20)]}
+                    },
+                    "LongTermDebtCurrent": {
+                        "units": {"USD": [_annual_fact("2024-12-31", "2024-12-31", "2025-02-01", 10)]}
+                    },
+                    "LongTermDebtNoncurrent": {
+                        "units": {"USD": [_annual_fact("2024-12-31", "2024-12-31", "2025-02-01", 20)]}
+                    },
+                    "StockholdersEquity": {
+                        "units": {"USD": [_annual_fact("2024-12-31", "2024-12-31", "2025-02-01", 120)]}
+                    },
+                }
+            }
+        }
+
+        fundamentals = extract_fundamentals(facts, fallback=Fundamentals(market_cap=600))
+
+        self.assertAlmostEqual(fundamentals.roic_pct, 100 * (1 - 0.21) / (30 + 120 - 20) * 100)
+        self.assertTrue(fundamentals.sources["roic"]["taxRateDefault"])
+        self.assertEqual(fundamentals.sources["roic"]["defaultTaxRate"], 0.21)
+
 
 class OpenDartTests(unittest.TestCase):
     def test_extract_opendart_fundamentals(self):
@@ -774,15 +917,24 @@ class OpenDartTests(unittest.TestCase):
                 _dart_row("CFS", "유동자산", "50,000", "45,000"),
                 _dart_row("CFS", "유동부채", "25,000", "24,000"),
                 _dart_row("CFS", "이자비용", "5,000", "4,500"),
+                _dart_row("CFS", "현금및현금성자산", "20,000", "18,000"),
+                _dart_row("CFS", "단기차입금", "10,000", "8,000"),
+                _dart_row("CFS", "장기차입금", "30,000", "28,000"),
+                _dart_row("CFS", "법인세비용차감전순이익", "22,000", "19,000"),
+                _dart_row("CFS", "법인세비용", "5,000", "4,000"),
+                _dart_row("CFS", "연구개발비", "9,000", "7,000"),
             ],
         }
 
-        fundamentals = extract_opendart_fundamentals(payload)
+        fundamentals = extract_opendart_fundamentals(
+            payload,
+            fallback=Fundamentals(market_cap=200_000, market_cap_currency="KRW"),
+        )
 
         self.assertAlmostEqual(fundamentals.revenue_growth_pct, 25.0)
         self.assertAlmostEqual(fundamentals.operating_margin_pct, 20.0)
         self.assertAlmostEqual(fundamentals.roe_pct, 17_000 / 85_000 * 100)
-        self.assertAlmostEqual(fundamentals.debt_to_equity_pct, 60_000 / 90_000 * 100)
+        self.assertAlmostEqual(fundamentals.debt_to_equity_pct, 40_000 / 90_000 * 100)
         self.assertEqual(fundamentals.market_cap_currency, "KRW")
         self.assertEqual(fundamentals.revenue, 125_000)
         self.assertEqual(fundamentals.operating_income, 25_000)
@@ -793,8 +945,22 @@ class OpenDartTests(unittest.TestCase):
         self.assertEqual(fundamentals.free_cash_flow, 22_000)
         self.assertAlmostEqual(fundamentals.current_ratio_pct, 200.0)
         self.assertAlmostEqual(fundamentals.interest_coverage, 5.0)
+        self.assertEqual(fundamentals.cash_and_equivalents, 20_000)
+        self.assertEqual(fundamentals.total_debt, 40_000)
+        self.assertEqual(fundamentals.pretax_income, 22_000)
+        self.assertEqual(fundamentals.income_tax_expense, 5_000)
+        self.assertEqual(fundamentals.research_and_development, 9_000)
+        self.assertEqual(fundamentals.enterprise_value, 220_000)
+        self.assertAlmostEqual(
+            fundamentals.roic_pct,
+            25_000 * (1 - 5_000 / 22_000) / (40_000 + 90_000 - 20_000) * 100,
+        )
+        self.assertAlmostEqual(fundamentals.ev_to_ebit, 220_000 / 25_000)
+        self.assertAlmostEqual(fundamentals.earnings_yield_pct, 25_000 / 220_000 * 100)
+        self.assertAlmostEqual(fundamentals.rd_to_revenue_pct, 9_000 / 125_000 * 100)
         self.assertEqual(fundamentals.sources["revenue"]["source"], "OpenDART")
         self.assertEqual(fundamentals.sources["revenue"]["reportCode"], "11011")
+        self.assertFalse(fundamentals.sources["roic"]["taxRateDefault"])
 
 
 class MarketDataSourceTests(unittest.TestCase):
@@ -1095,7 +1261,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn("mediumTermCandidates", rows[0]["payload"])
         self.assertIn("longTermCandidates", rows[0]["payload"])
 
-    def test_snapshot_payload_uses_v10_timezone_and_audit_fields(self):
+    def test_snapshot_payload_uses_current_timezone_and_audit_fields(self):
         ticker = STOCKS[0].ticker.upper()
         report = build_report(
             macro_context=DEFAULT_MACRO_CONTEXT,
@@ -1134,7 +1300,7 @@ class SnapshotTests(unittest.TestCase):
 
         payload = report_to_snapshot_payload(report, mode="live")
 
-        self.assertEqual(payload["version"], 11)
+        self.assertEqual(payload["version"], 12)
         self.assertEqual(payload["snapshotDate"], "2026-05-18")
         self.assertEqual(payload["createdAtTimezone"], "Asia/Seoul")
         self.assertIn("gitCommit", payload["audit"])
@@ -1144,6 +1310,13 @@ class SnapshotTests(unittest.TestCase):
         self.assertNotIn("SECRET12345678901234567890", payload["dataQuality"]["warnings"][0])
         self.assertIn("marketCap", payload["stocks"][0]["fundamentals"])
         self.assertIn("marketCapUsd", payload["stocks"][0]["fundamentals"])
+        self.assertIn("roicCoveragePct", payload["dataQuality"])
+        self.assertIn("evEbitCoveragePct", payload["dataQuality"])
+        self.assertIn("rdCoveragePct", payload["dataQuality"])
+        self.assertIn("roicPct", payload["stocks"][0]["fundamentals"])
+        self.assertIn("evToEbit", payload["stocks"][0]["fundamentals"])
+        self.assertIn("earningsYieldPct", payload["stocks"][0]["fundamentals"])
+        self.assertIn("rdToRevenuePct", payload["stocks"][0]["fundamentals"])
         self.assertIn("fundamentalSources", payload["stocks"][0])
         self.assertIn("legendCandidates", payload)
         self.assertIn("legendScores", payload["stocks"][0])

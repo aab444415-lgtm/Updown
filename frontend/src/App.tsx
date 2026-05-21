@@ -34,6 +34,16 @@ type Fundamentals = {
   marketCapCurrency: string;
   freeCashFlow: number | null;
   operatingIncome: number | null;
+  cashAndEquivalents?: number | null;
+  totalDebt?: number | null;
+  pretaxIncome?: number | null;
+  incomeTaxExpense?: number | null;
+  researchAndDevelopment?: number | null;
+  enterpriseValue?: number | null;
+  roicPct?: number | null;
+  evToEbit?: number | null;
+  earningsYieldPct?: number | null;
+  rdToRevenuePct?: number | null;
 };
 
 type Stock = {
@@ -98,6 +108,9 @@ type DataQuality = {
   liveFundamentals: boolean;
   liveMacro: boolean;
   liveKoreaFundamentals: boolean;
+  roicCoveragePct?: number;
+  evEbitCoveragePct?: number;
+  rdCoveragePct?: number;
   warnings: string[];
 };
 
@@ -666,6 +679,10 @@ function StockDetail({ stock }: { stock: WeightedStock }) {
         <Metric label="매출 성장" value={formatPct(stock.fundamentals.revenueGrowthPct)} icon="trend" />
         <Metric label="영업이익률" value={formatPct(stock.fundamentals.operatingMarginPct)} icon="bar" />
         <Metric label="ROE" value={formatPct(stock.fundamentals.roePct)} icon="shield" />
+        <Metric label="ROIC" value={formatPct(stock.fundamentals.roicPct ?? null)} icon="shield" />
+        <Metric label="EV/EBIT" value={formatMultiple(stock.fundamentals.evToEbit ?? null)} icon="gauge" />
+        <Metric label="이익수익률" value={formatPct(stock.fundamentals.earningsYieldPct ?? null)} icon="bar" />
+        <Metric label="R&D/매출" value={formatPct(stock.fundamentals.rdToRevenuePct ?? null)} icon="trend" />
         <Metric label="부채비율" value={formatPct(stock.fundamentals.debtToEquityPct)} icon="alert" />
         <Metric label="Forward PER" value={formatMultiple(stock.fundamentals.forwardPe)} icon="gauge" />
         <Metric label="시가총액" value={formatMarketCap(stock.fundamentals.marketCap, stock.fundamentals.marketCapCurrency)} icon="bar" />
