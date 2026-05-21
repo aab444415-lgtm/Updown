@@ -216,9 +216,12 @@ stock_recommender/
   universe.py     # 기본 산업/종목 유니버스
   web.py          # 웹 대시보드 서버
 web/
-  index.html      # 대시보드 화면
-  styles.css      # 대시보드 스타일
-  app.js          # API 호출과 화면 렌더링
+  index.html      # React 대시보드 빌드 진입점
+  assets/         # Vite가 생성한 JS/CSS 번들
+  favicon.svg     # 대시보드 아이콘
+frontend/
+  src/            # React/TypeScript 대시보드 소스
+  vite.config.ts  # 빌드 산출물을 web/으로 출력
 ```
 
 ## 다음에 붙이면 좋은 것

@@ -8,7 +8,12 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 
-from stock_recommender.backtest import BENCHMARKS, backtest_to_dict, create_backtest
+from stock_recommender.backtest import (
+    BACKTEST_HORIZONS,
+    BENCHMARKS,
+    backtest_to_dict,
+    create_backtest,
+)
 from stock_recommender.pipeline import create_recommendation_report
 from stock_recommender.snapshot_store import SnapshotStoreError
 from stock_recommender.snapshots import snapshot_history
@@ -31,19 +36,18 @@ def main() -> int:
 def build_shell() -> None:
     if DIST_DIR.exists():
         shutil.rmtree(DIST_DIR)
-    (DIST_DIR / "assets").mkdir(parents=True)
-    (DIST_DIR / "data").mkdir()
-    index_html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
-    index_html = index_html.replace(
-        '<script src="/assets/app.js?v=long-term-v1"></script>',
-        '<script>window.STATIC_DATA_ONLY = true;</script>\n'
-        '    <script src="/assets/app.js?v=long-term-v1"></script>',
-    )
-    (DIST_DIR / "index.html").write_text(index_html, encoding="utf-8")
-    shutil.copy2(WEB_DIR / "styles.css", DIST_DIR / "assets" / "styles.css")
-    shutil.copy2(WEB_DIR / "app.js", DIST_DIR / "assets" / "app.js")
+    shutil.copytree(WEB_DIR, DIST_DIR)
+    (DIST_DIR / "data").mkdir(exist_ok=True)
+    index_path = DIST_DIR / "index.html"
+    index_html = index_path.read_text(encoding="utf-8")
+    static_flag = '<script>window.STATIC_DATA_ONLY = true;</script>'
+    if static_flag not in index_html:
+        index_html = index_html.replace("</head>", f"    {static_flag}\n  </head>")
+    index_path.write_text(index_html, encoding="utf-8")
     (DIST_DIR / "_headers").write_text(
         "/assets/*\n"
+        "  Cache-Control: public, max-age=3600\n"
+        "/favicon.svg\n"
         "  Cache-Control: public, max-age=3600\n"
         "/data/*\n"
         "  Cache-Control: no-store\n",
@@ -78,6 +82,7 @@ def empty_report_payload(warning: str) -> dict:
         "mediumTermCandidates": [],
         "longTermCandidates": [],
         "earlyGrowthCandidates": [],
+        "legendCandidates": [],
         "news": [],
     }
 
@@ -86,14 +91,26 @@ def export_backtests() -> None:
     for months in (6, 12, 24):
         for top_n in (3, 5, 10):
             for benchmark in BENCHMARKS:
-                path = DIST_DIR / "data" / f"backtest-{months}-{top_n}-{benchmark}.json"
-                try:
-                    payload = backtest_to_dict(
-                        create_backtest(months=months, top_n=top_n, benchmark_ticker=benchmark)
-                    )
-                except Exception as exc:
-                    payload = empty_backtest_payload(months, top_n, benchmark, str(exc))
-                write_json(path, payload)
+                for horizon in BACKTEST_HORIZONS:
+                    path = _backtest_path(months, top_n, benchmark, horizon)
+                    try:
+                        payload = backtest_to_dict(
+                            create_backtest(
+                                months=months,
+                                top_n=top_n,
+                                benchmark_ticker=benchmark,
+                                horizon=horizon,
+                            )
+                        )
+                    except Exception as exc:
+                        payload = empty_backtest_payload(months, top_n, benchmark, str(exc), horizon)
+                    write_json(path, payload)
+                    if horizon == "overall":
+                        write_json(DIST_DIR / "data" / f"backtest-{months}-{top_n}-{benchmark}.json", payload)
+
+
+def _backtest_path(months: int, top_n: int, benchmark: str, horizon: str) -> Path:
+    return DIST_DIR / "data" / f"backtest-{months}-{top_n}-{benchmark}-{horizon}.json"
 
 
 def snapshots_payload() -> dict:
@@ -113,13 +130,16 @@ def snapshots_payload() -> dict:
         }
 
 
-def empty_backtest_payload(months: int, top_n: int, benchmark: str, warning: str) -> dict:
+def empty_backtest_payload(
+    months: int, top_n: int, benchmark: str, warning: str, horizon: str = "overall"
+) -> dict:
     return {
         "createdAt": "",
         "createdAtDisplay": "",
         "createdAtTimezone": "",
         "snapshotDate": "",
         "method": "snapshot",
+        "horizon": horizon,
         "pointInTime": True,
         "priceSource": "unknown",
         "snapshotDays": 0,

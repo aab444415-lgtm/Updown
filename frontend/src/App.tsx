@@ -15,6 +15,12 @@ import {
 type LegendKey = "lynch" | "oneil" | "greenblatt" | "fisher";
 type HorizonKey = "overall" | "short" | "medium" | "long";
 
+declare global {
+  interface Window {
+    STATIC_DATA_ONLY?: boolean;
+  }
+}
+
 type LegendScores = Record<LegendKey, number>;
 
 type Fundamentals = {
@@ -124,6 +130,7 @@ type BacktestResult = {
   dataCoveragePct: number | null;
   snapshotCoveragePct: number | null;
   warnings: string[];
+  assumptions?: string[];
 };
 
 type WeightedStock = Stock & { weightedLegendScore: number };
@@ -748,7 +755,9 @@ function ScoreBar({ value }: { value: number }) {
 }
 
 async function fetchReport(): Promise<Report> {
-  const endpoints = ["/api/report", "/data/report-live.json"];
+  const endpoints = window.STATIC_DATA_ONLY
+    ? ["/data/report-live.json"]
+    : ["/api/report", "/data/report-live.json"];
   let lastError: Error | null = null;
   for (const endpoint of endpoints) {
     try {
@@ -770,11 +779,24 @@ async function fetchBacktest(horizon: HorizonKey): Promise<BacktestResult> {
     method: "snapshot",
     horizon,
   });
-  const response = await fetch(`/api/backtest?${params.toString()}`, { cache: "no-store" });
-  if (!response.ok) throw new Error(`백테스트 API ${response.status}`);
-  const payload = await response.json();
+  const endpoints = window.STATIC_DATA_ONLY
+    ? [`/data/backtest-12-5-SPY-${horizon}.json`, "/data/backtest-12-5-SPY.json"]
+    : [`/api/backtest?${params.toString()}`, `/data/backtest-12-5-SPY-${horizon}.json`];
+  let payload: BacktestResult | null = null;
+  let lastError: Error | null = null;
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, { cache: "no-store" });
+      if (!response.ok) throw new Error(`${endpoint} ${response.status}`);
+      payload = (await response.json()) as BacktestResult;
+      break;
+    } catch (caught) {
+      lastError = caught instanceof Error ? caught : new Error(String(caught));
+    }
+  }
+  if (!payload) throw lastError || new Error("백테스트를 불러오지 못했습니다.");
   return {
-    horizon,
+    horizon: payload.horizon ?? horizon,
     months: payload.months ?? 12,
     topN: payload.topN ?? 5,
     benchmarkTicker: payload.benchmarkTicker ?? "SPY",

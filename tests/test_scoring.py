@@ -1502,14 +1502,51 @@ class StaticExportTests(unittest.TestCase):
     def test_empty_backtest_payload_keeps_public_fields_and_warning(self):
         import scripts.export_cloudflare_static as export_static
 
-        payload = export_static.empty_backtest_payload(12, 5, "SPY", "partial failure")
+        payload = export_static.empty_backtest_payload(12, 5, "SPY", "partial failure", "short")
 
         self.assertEqual(payload["method"], "snapshot")
+        self.assertEqual(payload["horizon"], "short")
         self.assertTrue(payload["pointInTime"])
         self.assertEqual(payload["priceSource"], "unknown")
         self.assertEqual(payload["requiredSnapshotDays"], 13)
         self.assertEqual(payload["warnings"], ["partial failure"])
         self.assertIn("createdAtTimezone", payload)
+
+    def test_static_shell_copies_react_assets_and_injects_static_mode(self):
+        import scripts.export_cloudflare_static as export_static
+
+        original_web_dir = export_static.WEB_DIR
+        original_dist_dir = export_static.DIST_DIR
+
+        with TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            web_dir = tmp_path / "web"
+            dist_dir = tmp_path / "dist"
+            (web_dir / "assets").mkdir(parents=True)
+            (web_dir / "assets" / "index-test.js").write_text("console.log('ok')", encoding="utf-8")
+            (web_dir / "assets" / "index-test.css").write_text("body{}", encoding="utf-8")
+            (web_dir / "favicon.svg").write_text("<svg />", encoding="utf-8")
+            (web_dir / "index.html").write_text(
+                "<!doctype html><html><head></head><body><div id='root'></div></body></html>",
+                encoding="utf-8",
+            )
+
+            try:
+                export_static.WEB_DIR = web_dir
+                export_static.DIST_DIR = dist_dir
+                export_static.build_shell()
+            finally:
+                export_static.WEB_DIR = original_web_dir
+                export_static.DIST_DIR = original_dist_dir
+
+            index_html = (dist_dir / "index.html").read_text(encoding="utf-8")
+            headers = (dist_dir / "_headers").read_text(encoding="utf-8")
+
+            self.assertIn("window.STATIC_DATA_ONLY = true", index_html)
+            self.assertTrue((dist_dir / "assets" / "index-test.js").exists())
+            self.assertTrue((dist_dir / "assets" / "index-test.css").exists())
+            self.assertTrue((dist_dir / "favicon.svg").exists())
+            self.assertIn("/favicon.svg", headers)
 
     def test_static_export_does_not_hide_malformed_snapshot_ledger(self):
         import scripts.export_cloudflare_static as export_static
