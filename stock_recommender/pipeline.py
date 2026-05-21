@@ -9,7 +9,7 @@ from .scoring import build_report
 from .sec_edgar import SecEdgarClient
 from .storage import CacheStore
 from .time_utils import now_in_app_timezone
-from .universe import DEFAULT_MACRO_CONTEXT, INDUSTRIES, STOCKS
+from .universe import BENEFICIARY_INDUSTRIES, DEFAULT_MACRO_CONTEXT, INDUSTRIES, STOCKS
 
 
 SNAPSHOT_BENCHMARK_TICKERS = ("SPY", "QQQ", "^KS11")
@@ -84,6 +84,7 @@ def create_recommendation_report(
         macro_snapshot=macro_snapshot,
         created_at=run_started_at,
         source_events=source_events,
+        beneficiary_industries=BENEFICIARY_INDUSTRIES,
         data_quality=DataQuality(
             live_news=bool(news_items),
             live_market_data=live_market_data,

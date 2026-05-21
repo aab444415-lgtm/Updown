@@ -11,7 +11,17 @@ from stock_recommender.backtest import PricePoint, SnapshotRecord, backtest_to_d
 from stock_recommender.config import configured_source_names, load_config, missing_optional_source_names
 import stock_recommender.data_sources as data_sources
 from stock_recommender.macro_data import industry_macro_data_score
-from stock_recommender.models import DataQuality, Fundamentals, MacroIndicator, MacroSnapshot, Momentum, NewsItem, StockProfile
+from stock_recommender.models import (
+    BeneficiaryIndustryProfile,
+    DataQuality,
+    Fundamentals,
+    IndustryProfile,
+    MacroIndicator,
+    MacroSnapshot,
+    Momentum,
+    NewsItem,
+    StockProfile,
+)
 from stock_recommender.opendart_financials import extract_opendart_fundamentals
 from stock_recommender.report import render_markdown
 from stock_recommender.scoring import build_report, decision_grade_for_stock, quality_score, valuation_score
@@ -19,7 +29,7 @@ from stock_recommender.sec_edgar import extract_fundamentals
 from stock_recommender.snapshot_store import SnapshotFileStore, SnapshotStoreError
 from stock_recommender.snapshots import report_to_snapshot_payload, save_recommendation_snapshot, snapshot_history
 from stock_recommender.storage import CacheStore
-from stock_recommender.universe import DEFAULT_MACRO_CONTEXT, INDUSTRIES, STOCKS
+from stock_recommender.universe import BENEFICIARY_INDUSTRIES, DEFAULT_MACRO_CONTEXT, INDUSTRIES, STOCKS
 from stock_recommender.web import report_to_dict
 
 
@@ -128,6 +138,144 @@ class ScoringTests(unittest.TestCase):
         ai_score = industry_macro_data_score("AI 반도체 및 데이터센터", snapshot)
 
         self.assertGreater(power_score, ai_score)
+
+    def test_beneficiary_industry_score_follows_source_industry_strength(self):
+        hot = IndustryProfile(
+            name="Hot Source",
+            description="강한 원인 산업",
+            news_terms=("hotsource",),
+            macro_terms=("hotmacro",),
+            tailwinds=("수요 확대",),
+            risks=("과열",),
+        )
+        cold = IndustryProfile(
+            name="Cold Source",
+            description="약한 원인 산업",
+            news_terms=("coldsource",),
+            macro_terms=("coldmacro",),
+            tailwinds=("회복 가능성",),
+            risks=("둔화",),
+        )
+        hot_stock = StockProfile(
+            ticker="HOT",
+            name="Hot Co",
+            industry=hot.name,
+            role="core",
+            thesis="원인 산업 대표 기업입니다.",
+            risks=("변동성",),
+            fundamentals=Fundamentals(20.0, 20.0, 18.0, 30.0, 25.0, 20.0, 10_000_000_000),
+        )
+        cold_stock = StockProfile(
+            ticker="COLD",
+            name="Cold Co",
+            industry=cold.name,
+            role="core",
+            thesis="약한 산업 대표 기업입니다.",
+            risks=("둔화",),
+            fundamentals=Fundamentals(2.0, 8.0, 7.0, 40.0, 18.0, 16.0, 10_000_000_000),
+        )
+        hot_beneficiary = BeneficiaryIndustryProfile(
+            name="Hot Beneficiary",
+            description="강한 원인 산업의 수혜 산업",
+            source_industry=hot.name,
+            mechanism="원인 산업 투자 확대가 후행 수요로 이어집니다.",
+            time_horizon="6~18개월",
+            keywords=("sharedbenefit",),
+            risks=("수요 지연",),
+            connection_strength=75,
+        )
+        cold_beneficiary = BeneficiaryIndustryProfile(
+            name="Cold Beneficiary",
+            description="약한 원인 산업의 수혜 산업",
+            source_industry=cold.name,
+            mechanism="원인 산업 투자 확대가 후행 수요로 이어집니다.",
+            time_horizon="6~18개월",
+            keywords=("sharedbenefit",),
+            risks=("수요 지연",),
+            connection_strength=75,
+        )
+
+        report = build_report(
+            macro_context="hotmacro investment cycle",
+            industries=(hot, cold),
+            stocks=(hot_stock, cold_stock),
+            news_items=(NewsItem("hotsource sharedbenefit demand", "test"),),
+            beneficiary_industries=(hot_beneficiary, cold_beneficiary),
+        )
+        scores = {item.profile.name: item for item in report.beneficiary_industry_scores}
+
+        self.assertGreater(scores["Hot Beneficiary"].score, scores["Cold Beneficiary"].score)
+        self.assertGreater(
+            scores["Hot Beneficiary"].source_industry_score,
+            scores["Cold Beneficiary"].source_industry_score,
+        )
+
+    def test_beneficiary_industry_news_keywords_raise_score(self):
+        source = IndustryProfile(
+            name="Source",
+            description="원인 산업",
+            news_terms=("source",),
+            macro_terms=("sourcecapex",),
+            tailwinds=("투자 확대",),
+            risks=("과열",),
+        )
+        source_stock = StockProfile(
+            ticker="SRC",
+            name="Source Co",
+            industry=source.name,
+            role="core",
+            thesis="원인 산업 대표 기업입니다.",
+            risks=("변동성",),
+            fundamentals=Fundamentals(20.0, 20.0, 18.0, 30.0, 25.0, 20.0, 10_000_000_000),
+        )
+        matched = BeneficiaryIndustryProfile(
+            name="Matched Benefit",
+            description="뉴스 키워드가 잡힌 수혜 산업",
+            source_industry=source.name,
+            mechanism="수요 병목이 후행 투자로 이어집니다.",
+            time_horizon="3~12개월",
+            keywords=("cooling", "thermal management"),
+            risks=("발주 지연",),
+            connection_strength=80,
+        )
+        unmatched = BeneficiaryIndustryProfile(
+            name="Unmatched Benefit",
+            description="뉴스 키워드가 없는 수혜 산업",
+            source_industry=source.name,
+            mechanism="수요 병목이 후행 투자로 이어집니다.",
+            time_horizon="3~12개월",
+            keywords=("unseenbenefit",),
+            risks=("발주 지연",),
+            connection_strength=80,
+        )
+
+        report = build_report(
+            macro_context="sourcecapex",
+            industries=(source,),
+            stocks=(source_stock,),
+            news_items=(NewsItem("data center cooling thermal management demand", "test"),),
+            beneficiary_industries=(matched, unmatched),
+        )
+        scores = {item.profile.name: item for item in report.beneficiary_industry_scores}
+
+        self.assertGreater(scores["Matched Benefit"].news_score, scores["Unmatched Benefit"].news_score)
+        self.assertGreater(scores["Matched Benefit"].score, scores["Unmatched Benefit"].score)
+
+    def test_report_renders_beneficiary_industries(self):
+        report = build_report(
+            macro_context=DEFAULT_MACRO_CONTEXT,
+            industries=INDUSTRIES[:1],
+            stocks=STOCKS[:2],
+            news_items=(),
+            beneficiary_industries=BENEFICIARY_INDUSTRIES[:1],
+        )
+
+        markdown = render_markdown(report, top_industries=1, top_stocks=1)
+
+        self.assertIn("## 현재 활발한 산업", markdown)
+        self.assertIn("## 미래 수혜 산업", markdown)
+        self.assertIn("원인 산업: AI 반도체 및 데이터센터", markdown)
+        self.assertIn("예상 시차", markdown)
 
     def test_early_growth_ranking_prefers_small_growth_pullback(self):
         industry = INDUSTRIES[0]
@@ -684,12 +832,17 @@ class ScoringTests(unittest.TestCase):
             stocks=STOCKS[:2],
             news_items=(),
             momentums={STOCKS[0].ticker.upper(): _strong_swing_momentum()},
+            beneficiary_industries=BENEFICIARY_INDUSTRIES[:1],
         )
 
         with patch("stock_recommender.web._technical_by_ticker", return_value={}):
             payload = report_to_dict(report)
 
         self.assertIn("legendCandidates", payload)
+        self.assertIn("beneficiaryIndustries", payload)
+        self.assertEqual(payload["beneficiaryIndustries"][0]["sourceIndustry"], "AI 반도체 및 데이터센터")
+        self.assertIn("timeHorizon", payload["beneficiaryIndustries"][0])
+        self.assertIn("evidence", payload["beneficiaryIndustries"][0])
         self.assertIn("legendScores", payload["stocks"][0])
         self.assertIn("legendCompositeScore", payload["stocks"][0])
         self.assertIn("legendReasons", payload["stocks"][0])
@@ -1296,11 +1449,12 @@ class SnapshotTests(unittest.TestCase):
                 warnings=("failed token=SECRET12345678901234567890",),
             ),
             created_at=datetime(2026, 5, 18, 6, 30, tzinfo=ZoneInfo("Asia/Seoul")),
+            beneficiary_industries=BENEFICIARY_INDUSTRIES[:1],
         )
 
         payload = report_to_snapshot_payload(report, mode="live")
 
-        self.assertEqual(payload["version"], 12)
+        self.assertEqual(payload["version"], 13)
         self.assertEqual(payload["snapshotDate"], "2026-05-18")
         self.assertEqual(payload["createdAtTimezone"], "Asia/Seoul")
         self.assertIn("gitCommit", payload["audit"])
@@ -1319,6 +1473,9 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn("rdToRevenuePct", payload["stocks"][0]["fundamentals"])
         self.assertIn("fundamentalSources", payload["stocks"][0])
         self.assertIn("legendCandidates", payload)
+        self.assertIn("beneficiaryIndustries", payload)
+        self.assertEqual(payload["beneficiaryIndustries"][0]["sourceIndustry"], "AI 반도체 및 데이터센터")
+        self.assertIn("displaySummary", payload["beneficiaryIndustries"][0])
         self.assertIn("legendScores", payload["stocks"][0])
         self.assertIn("legendCompositeScore", payload["stocks"][0])
         self.assertEqual(payload["stocks"][0]["momentumRaw"]["latestClose"], 123.4)

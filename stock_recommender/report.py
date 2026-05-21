@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .models import (
+    BeneficiaryIndustryScore,
     EarlyGrowthScore,
     Fundamentals,
     LegendStrategyScore,
@@ -59,7 +60,7 @@ def render_markdown(
             lines.append(f"- {indicator.name}: {value} ({indicator.source}, {date}) - {indicator.note}")
         lines.append("")
 
-    lines.append("## 유망 산업")
+    lines.append("## 현재 활발한 산업")
     lines.append("")
     for rank, item in enumerate(report.industry_scores[:top_industries], start=1):
         lines.append(f"### {rank}. {item.industry.name} - {item.score:.1f}점")
@@ -73,6 +74,15 @@ def render_markdown(
             lines.append(f"- {evidence}")
         lines.append("- 주요 리스크: " + "; ".join(item.industry.risks[:2]))
         lines.append("")
+
+    if report.beneficiary_industry_scores:
+        lines.append("## 미래 수혜 산업")
+        lines.append("")
+        lines.append("현재 활발한 산업이 만든 수요 병목과 투자 흐름이 후행 산업으로 번질 가능성을 정리합니다.")
+        lines.append("")
+        for rank, item in enumerate(report.beneficiary_industry_scores[:top_industries], start=1):
+            lines.extend(_render_beneficiary_industry(rank, item))
+            lines.append("")
 
     lines.append("## 추천 종목 후보")
     lines.append("")
@@ -143,6 +153,25 @@ def render_markdown(
     lines.append("- 낮은 PER은 단독 매수 근거가 아니며, 이익 정점과 성장 둔화 가능성을 함께 봅니다.")
     lines.append("- 점수는 정답이 아니라 후보 압축용 랭킹입니다.")
     return "\n".join(lines)
+
+
+def _render_beneficiary_industry(rank: int, item: BeneficiaryIndustryScore) -> list[str]:
+    profile = item.profile
+    lines = [f"### {rank}. {profile.name} - {item.score:.1f}점", ""]
+    lines.append(profile.description)
+    lines.append("")
+    lines.append(f"- 원인 산업: {profile.source_industry}")
+    lines.append(f"- 예상 시차: {profile.time_horizon}")
+    lines.append(f"- 수혜 논리: {profile.mechanism}")
+    lines.append(
+        f"- 세부 점수: 원인 산업 {item.source_industry_score:.1f}, 연결도 {item.connection_score:.1f}, "
+        f"거시 {item.macro_score:.1f}, 뉴스 {item.news_score:.1f}, 시장 {item.market_score:.1f}"
+    )
+    lines.append("- 근거:")
+    for evidence in item.evidence[:4]:
+        lines.append(f"  - {evidence}")
+    lines.append("- 주요 리스크: " + "; ".join(profile.risks[:2]))
+    return lines
 
 
 def _render_stock(rank: int, item: StockScore) -> list[str]:

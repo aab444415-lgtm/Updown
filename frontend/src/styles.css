@@ -289,6 +289,132 @@ h3 {
   margin-bottom: 14px;
 }
 
+.industry-flow-panel {
+  margin-bottom: 14px;
+}
+
+.industry-flow-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  gap: 14px;
+}
+
+.industry-flow-column {
+  min-width: 0;
+}
+
+.flow-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  color: #60716a;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.flow-heading strong {
+  color: #167568;
+}
+
+.active-industry-list,
+.beneficiary-list {
+  display: grid;
+  gap: 9px;
+}
+
+.active-industry-row,
+.beneficiary-card {
+  min-width: 0;
+  border: 1px solid #d7e0dc;
+  border-radius: 8px;
+  background: #fbfdfb;
+}
+
+.active-industry-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 62px;
+  gap: 10px;
+  padding: 11px;
+}
+
+.active-industry-row div {
+  min-width: 0;
+}
+
+.active-industry-row strong,
+.beneficiary-head strong {
+  overflow-wrap: anywhere;
+}
+
+.active-industry-row p,
+.beneficiary-card p {
+  margin: 4px 0 8px;
+  color: #60716a;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.beneficiary-card {
+  display: grid;
+  gap: 9px;
+  padding: 11px;
+  border-left: 4px solid #d38a19;
+}
+
+.beneficiary-head {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 62px;
+  align-items: start;
+  gap: 10px;
+}
+
+.beneficiary-head small {
+  display: block;
+  margin-top: 2px;
+  color: #60716a;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.beneficiary-meta,
+.risk-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.beneficiary-meta span,
+.risk-strip span {
+  border-radius: 8px;
+  padding: 5px 7px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.beneficiary-meta span {
+  background: #edf4f1;
+  color: #42514c;
+}
+
+.risk-strip span {
+  background: #fff7ea;
+  color: #815117;
+}
+
+.beneficiary-card ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+  color: #35433f;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .term-panel {
   min-width: 0;
 }
@@ -803,6 +929,10 @@ h3 {
     grid-template-columns: 1fr;
   }
 
+  .industry-flow-grid {
+    grid-template-columns: 1fr;
+  }
+
   .control-column {
     grid-template-columns: minmax(280px, 0.8fr) minmax(340px, 1.2fr);
   }
@@ -835,6 +965,7 @@ h3 {
     .summary-grid,
     .control-column,
     .term-dashboard,
+    .industry-flow-grid,
     .strategy-score-grid,
     .metric-grid,
     .backtest-metrics,

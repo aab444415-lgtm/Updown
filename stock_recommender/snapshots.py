@@ -18,7 +18,7 @@ from .snapshot_store import list_snapshot_rows, save_persistent_snapshot
 from .storage import CacheStore
 
 
-SNAPSHOT_PAYLOAD_VERSION = 12
+SNAPSHOT_PAYLOAD_VERSION = 13
 BENCHMARK_TICKERS = ("SPY", "QQQ", "^KS11")
 FUNDAMENTAL_SOURCE_FIELDS = (
     "revenue",
@@ -159,6 +159,10 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                 "evidence": list(item.evidence),
             }
             for item in report.industry_scores
+        ],
+        "beneficiaryIndustries": [
+            _beneficiary_industry_payload(item)
+            for item in report.beneficiary_industry_scores
         ],
         "stocks": [
             {
@@ -356,6 +360,27 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
     }
     payload["snapshotQuality"] = _snapshot_quality(payload)
     return payload
+
+
+def _beneficiary_industry_payload(item) -> dict:
+    profile = item.profile
+    return {
+        "name": profile.name,
+        "description": profile.description,
+        "sourceIndustry": profile.source_industry,
+        "mechanism": profile.mechanism,
+        "timeHorizon": profile.time_horizon,
+        "keywords": list(profile.keywords),
+        "risks": list(profile.risks),
+        "score": item.score,
+        "sourceIndustryScore": item.source_industry_score,
+        "connectionScore": item.connection_score,
+        "macroScore": item.macro_score,
+        "newsScore": item.news_score,
+        "marketScore": item.market_score,
+        "evidence": list(item.evidence),
+        "displaySummary": item.display_summary,
+    }
 
 
 def _legend_metric_coverage(report: RecommendationReport) -> dict[str, float]:

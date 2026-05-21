@@ -175,6 +175,18 @@ class IndustryProfile:
 
 
 @dataclass(frozen=True)
+class BeneficiaryIndustryProfile:
+    name: str
+    description: str
+    source_industry: str
+    mechanism: str
+    time_horizon: str
+    keywords: tuple[str, ...]
+    risks: tuple[str, ...]
+    connection_strength: float
+
+
+@dataclass(frozen=True)
 class NewsItem:
     title: str
     source: str
@@ -225,6 +237,19 @@ class IndustryScore:
     macro_score: float
     market_score: float
     evidence: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class BeneficiaryIndustryScore:
+    profile: BeneficiaryIndustryProfile
+    score: float
+    source_industry_score: float
+    connection_score: float
+    macro_score: float
+    news_score: float
+    market_score: float
+    evidence: tuple[str, ...]
+    display_summary: str
 
 
 @dataclass(frozen=True)
@@ -349,6 +374,7 @@ class RecommendationReport:
     medium_term_scores: tuple[MediumTermScore, ...] = ()
     long_term_scores: tuple[LongTermScore, ...] = ()
     legend_strategy_scores: tuple[LegendStrategyScore, ...] = ()
+    beneficiary_industry_scores: tuple[BeneficiaryIndustryScore, ...] = ()
     macro_snapshot: MacroSnapshot | None = None
     data_quality: DataQuality = field(default_factory=DataQuality)
     momentums: dict[str, Momentum] = field(default_factory=dict)

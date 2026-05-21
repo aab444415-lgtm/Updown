@@ -77,6 +77,7 @@ def empty_report_payload(warning: str) -> dict:
         },
         "macroSnapshot": None,
         "industries": [],
+        "beneficiaryIndustries": [],
         "stocks": [],
         "shortTermCandidates": [],
         "mediumTermCandidates": [],

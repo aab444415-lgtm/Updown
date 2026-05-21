@@ -9,6 +9,8 @@ from datetime import datetime
 from .data_sources import average_industry_momentum, momentum_to_score
 from .macro_data import industry_macro_data_score
 from .models import (
+    BeneficiaryIndustryProfile,
+    BeneficiaryIndustryScore,
     DataQuality,
     EarlyGrowthScore,
     Fundamentals,
@@ -48,6 +50,7 @@ def build_report(
     data_quality: DataQuality | None = None,
     created_at: datetime | None = None,
     source_events: Iterable[dict] | None = None,
+    beneficiary_industries: Iterable[BeneficiaryIndustryProfile] = (),
 ) -> RecommendationReport:
     industries_tuple = tuple(industries)
     stocks_tuple = tuple(stocks)
@@ -60,6 +63,15 @@ def build_report(
         stocks=stocks_tuple,
         news_items=news_tuple,
         momentums=momentums,
+        macro_snapshot=macro_snapshot,
+    )
+    beneficiary_scores = score_beneficiary_industries(
+        beneficiary_industries=beneficiary_industries,
+        industry_scores=industry_scores,
+        stocks=stocks_tuple,
+        news_items=news_tuple,
+        momentums=momentums,
+        macro_context=macro_context,
         macro_snapshot=macro_snapshot,
     )
     stock_scores = score_stocks(stocks_tuple, industry_scores, momentums)
@@ -85,6 +97,7 @@ def build_report(
         medium_term_scores=medium_term_scores,
         long_term_scores=long_term_scores,
         legend_strategy_scores=legend_strategy_scores,
+        beneficiary_industry_scores=beneficiary_scores,
         macro_snapshot=macro_snapshot,
         data_quality=data_quality or DataQuality(),
         momentums=dict(momentums),
@@ -137,6 +150,62 @@ def score_industries(
             )
         )
     return tuple(scores)
+
+
+def score_beneficiary_industries(
+    beneficiary_industries: Iterable[BeneficiaryIndustryProfile],
+    industry_scores: Iterable[IndustryScore],
+    stocks: Iterable[StockProfile],
+    news_items: Iterable[NewsItem],
+    momentums: dict[str, Momentum],
+    macro_context: str,
+    macro_snapshot: MacroSnapshot | None = None,
+) -> tuple[BeneficiaryIndustryScore, ...]:
+    industry_score_by_name = {item.industry.name: item for item in industry_scores}
+    stocks_tuple = tuple(stocks)
+    news_text = " ".join(
+        " ".join(part for part in (item.title, item.summary or "") if part) for item in news_items
+    )
+    news_counter = _counter(news_text)
+    macro_counter = _counter(
+        " ".join(part for part in (macro_context, macro_snapshot.summary if macro_snapshot else "") if part)
+    )
+    results: list[BeneficiaryIndustryScore] = []
+    for profile in beneficiary_industries:
+        source_score = industry_score_by_name.get(profile.source_industry)
+        if source_score is None:
+            continue
+        connection = _clamp(profile.connection_strength, 0, 100)
+        macro = _beneficiary_macro_score(profile, source_score, macro_counter)
+        news = _term_score(news_counter, profile.keywords, baseline=35, scale=9)
+        market = _beneficiary_market_score(profile, stocks_tuple, momentums)
+        if market is None:
+            market = 50
+        total = (
+            source_score.score * 0.45
+            + connection * 0.25
+            + macro * 0.15
+            + news * 0.10
+            + market * 0.05
+        )
+        display_summary = (
+            f"{profile.source_industry} 활황이 {profile.time_horizon} 안에 "
+            f"{profile.name} 수요로 번질 가능성을 점검합니다."
+        )
+        results.append(
+            BeneficiaryIndustryScore(
+                profile=profile,
+                score=round(_clamp(total, 0, 100), 1),
+                source_industry_score=source_score.score,
+                connection_score=round(connection, 1),
+                macro_score=round(macro, 1),
+                news_score=round(news, 1),
+                market_score=round(market, 1),
+                evidence=_beneficiary_evidence(profile, source_score, macro, news, market),
+                display_summary=display_summary,
+            )
+        )
+    return tuple(sorted(results, key=lambda item: item.score, reverse=True))
 
 
 def score_stocks(
@@ -1874,6 +1943,79 @@ def _industry_evidence(
         evidence.append(macro_snapshot.summary)
     evidence.extend(industry.tailwinds[:2])
     return tuple(evidence)
+
+
+def _beneficiary_macro_score(
+    profile: BeneficiaryIndustryProfile,
+    source_score: IndustryScore,
+    macro_counter: Counter[str],
+) -> float:
+    text_score = _term_score(
+        macro_counter,
+        (*profile.keywords, profile.name, *source_score.industry.macro_terms),
+        baseline=40,
+        scale=7,
+    )
+    return _clamp(text_score * 0.65 + source_score.macro_score * 0.35, 0, 100)
+
+
+def _beneficiary_market_score(
+    profile: BeneficiaryIndustryProfile,
+    stocks: Iterable[StockProfile],
+    momentums: dict[str, Momentum],
+) -> float | None:
+    values: list[float] = []
+    for stock in stocks:
+        if stock.industry != profile.name and not _stock_matches_beneficiary(stock, profile):
+            continue
+        score = momentum_to_score(momentums.get(stock.ticker.upper(), Momentum()))
+        if score is not None:
+            values.append(score)
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _stock_matches_beneficiary(
+    stock: StockProfile, profile: BeneficiaryIndustryProfile
+) -> bool:
+    text = " ".join(
+        (
+            stock.name,
+            stock.industry,
+            stock.thesis,
+            " ".join(stock.recent_issues),
+        )
+    )
+    counter = _counter(text)
+    for term in (*profile.keywords, profile.name):
+        tokens = _tokens(term)
+        if len(tokens) == 1 and counter[tokens[0]]:
+            return True
+        if len(tokens) > 1 and (
+            counter[" ".join(tokens)] or all(counter[token] for token in tokens)
+        ):
+            return True
+    return False
+
+
+def _beneficiary_evidence(
+    profile: BeneficiaryIndustryProfile,
+    source_score: IndustryScore,
+    macro_score: float,
+    news_score: float,
+    market_score: float,
+) -> tuple[str, ...]:
+    evidence = [
+        f"원인 산업 {profile.source_industry} 활황 점수 {source_score.score:.1f}/100",
+        f"산업 연결 강도 {profile.connection_strength:.1f}/100",
+        f"거시 적합도 {macro_score:.1f}/100",
+        f"뉴스 키워드 근거 {news_score:.1f}/100",
+        f"관련 종목 시장 모멘텀 {market_score:.1f}/100",
+        profile.mechanism,
+    ]
+    evidence.extend(source_score.evidence[:2])
+    return tuple(dict.fromkeys(evidence))
 
 
 def _stock_reasons(

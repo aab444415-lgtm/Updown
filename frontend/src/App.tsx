@@ -4,6 +4,7 @@ import {
   ArrowUpDown,
   BarChart3,
   Gauge,
+  Network,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -114,10 +115,42 @@ type DataQuality = {
   warnings: string[];
 };
 
+type Industry = {
+  name: string;
+  description: string;
+  score: number;
+  newsScore: number;
+  macroScore: number;
+  marketScore: number;
+  evidence: string[];
+  tailwinds: string[];
+  risks: string[];
+};
+
+type BeneficiaryIndustry = {
+  name: string;
+  description: string;
+  sourceIndustry: string;
+  mechanism: string;
+  timeHorizon: string;
+  keywords: string[];
+  risks: string[];
+  score: number;
+  sourceIndustryScore: number;
+  connectionScore: number;
+  macroScore: number;
+  newsScore: number;
+  marketScore: number;
+  evidence: string[];
+  displaySummary: string;
+};
+
 type Report = {
   createdAtDisplay: string;
   macroContext: string;
   dataQuality: DataQuality;
+  industries: Industry[];
+  beneficiaryIndustries: BeneficiaryIndustry[];
   stocks: Stock[];
   shortTermCandidates: TermCandidate[];
   mediumTermCandidates: TermCandidate[];
@@ -289,6 +322,11 @@ export default function App() {
             ))}
           </section>
 
+          <IndustryFlowPanel
+            industries={report.industries || []}
+            beneficiaries={report.beneficiaryIndustries || []}
+          />
+
           <TermDashboard report={report} onSelect={setSelectedTicker} />
 
           <BacktestPanel
@@ -360,6 +398,85 @@ function StatusPill({ label, active }: { label: string; active?: boolean }) {
       {label}
       <strong>{active ? "연결" : "보조"}</strong>
     </span>
+  );
+}
+
+function IndustryFlowPanel({
+  industries,
+  beneficiaries,
+}: {
+  industries: Industry[];
+  beneficiaries: BeneficiaryIndustry[];
+}) {
+  return (
+    <section className="panel industry-flow-panel" aria-label="산업 흐름">
+      <div className="panel-title">
+        <Network size={18} aria-hidden="true" />
+        <h2>산업 흐름</h2>
+        <span>Now → Next</span>
+      </div>
+      <div className="industry-flow-grid">
+        <section className="industry-flow-column">
+          <div className="flow-heading">
+            <span>현재 활발한 산업</span>
+            <strong>Top 5</strong>
+          </div>
+          <div className="active-industry-list">
+            {industries.slice(0, 5).map((industry, index) => (
+              <article className="active-industry-row" key={industry.name}>
+                <span className="rank-number">{index + 1}</span>
+                <div>
+                  <strong>{industry.name}</strong>
+                  <p>{industry.description}</p>
+                  <div className="term-score-grid">
+                    <ScoreMini label="거시" value={industry.macroScore} />
+                    <ScoreMini label="뉴스" value={industry.newsScore} />
+                    <ScoreMini label="시장" value={industry.marketScore} />
+                  </div>
+                </div>
+                <strong className="rank-score">{formatScore(industry.score)}</strong>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="industry-flow-column">
+          <div className="flow-heading">
+            <span>미래 수혜 산업</span>
+            <strong>Top 5</strong>
+          </div>
+          <div className="beneficiary-list">
+            {beneficiaries.slice(0, 5).map((industry, index) => (
+              <article className="beneficiary-card" key={`${industry.sourceIndustry}-${industry.name}`}>
+                <div className="beneficiary-head">
+                  <span className="rank-number">{index + 1}</span>
+                  <div>
+                    <strong>{industry.name}</strong>
+                    <small>{industry.sourceIndustry}</small>
+                  </div>
+                  <strong className="rank-score">{formatScore(industry.score)}</strong>
+                </div>
+                <p>{industry.displaySummary || industry.description}</p>
+                <div className="beneficiary-meta">
+                  <span>{industry.timeHorizon}</span>
+                  <span>연결도 {formatScore(industry.connectionScore)}</span>
+                </div>
+                <ul>
+                  {(industry.evidence || []).slice(0, 2).map((evidence) => (
+                    <li key={evidence}>{evidence}</li>
+                  ))}
+                </ul>
+                <div className="risk-strip">
+                  {(industry.risks || []).slice(0, 2).map((risk) => (
+                    <span key={risk}>{risk}</span>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
+    </section>
   );
 }
 

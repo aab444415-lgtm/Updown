@@ -76,6 +76,10 @@ def report_to_dict(report: RecommendationReport) -> dict:
             }
             for item in report.industry_scores
         ],
+        "beneficiaryIndustries": [
+            _beneficiary_industry_to_dict(item)
+            for item in report.beneficiary_industry_scores
+        ],
         "stocks": [
             {
                 "ticker": item.stock.ticker,
@@ -231,6 +235,27 @@ def report_to_dict(report: RecommendationReport) -> dict:
             }
             for item in report.news_items[:12]
         ],
+    }
+
+
+def _beneficiary_industry_to_dict(item) -> dict:
+    profile = item.profile
+    return {
+        "name": profile.name,
+        "description": profile.description,
+        "sourceIndustry": profile.source_industry,
+        "mechanism": profile.mechanism,
+        "timeHorizon": profile.time_horizon,
+        "keywords": list(profile.keywords),
+        "risks": list(profile.risks),
+        "score": item.score,
+        "sourceIndustryScore": item.source_industry_score,
+        "connectionScore": item.connection_score,
+        "macroScore": item.macro_score,
+        "newsScore": item.news_score,
+        "marketScore": item.market_score,
+        "evidence": list(item.evidence),
+        "displaySummary": item.display_summary,
     }
 
 
