@@ -1,6 +1,239 @@
 {
-  "lastUpdatedAt": "2026-05-21T22:48:18.561861+00:00",
+  "lastUpdatedAt": "2026-05-22T22:33:18.600422+00:00",
   "snapshots": [
+    {
+      "createdAt": "2026-05-23T07:33:06.310033+09:00",
+      "id": 4,
+      "mode": "live",
+      "payload": {
+        "audit": {
+          "createdAt": "2026-05-23T07:33:06.310033+09:00",
+          "createdAtTimezone": "Asia/Seoul",
+          "gitCommit": "e2d6f7ef7ed399bb87885128aa96762d2eb9db7e",
+          "gitDirty": true,
+          "modelVersion": "stock-recommender/0.1.0",
+          "runId": "26315175926"
+        },
+        "benchmarks": [
+          {
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 745.6400146484375,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "ticker": "SPY"
+          },
+          {
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 717.5399780273438,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "ticker": "QQQ"
+          },
+          {
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 7815.58984375,
+              "latestCloseDate": "2026-05-21",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "ticker": "^KS11"
+          }
+        ],
+        "createdAt": "2026-05-23T07:33:06.310033+09:00",
+        "createdAtDisplay": "2026-05-23 07:33:06",
+        "createdAtTimezone": "Asia/Seoul",
+        "mode": "live",
+        "payloadDigest": "sha256:5deb77e9313435b28c1e874745d0ceb3acc8fe89ffd30a9855b59f3700e89ab1",
+        "payloadKind": "compact",
+        "snapshotDate": "2026-05-23",
+        "snapshotQuality": {
+          "backtestEligible": true,
+          "benchmarkAnchorCoveragePct": 100.0,
+          "exclusionReasons": [],
+          "fundamentalSourceCoveragePct": 44.8,
+          "priceAnchorCoveragePct": 100.0,
+          "sourceErrorCount": 1,
+          "sourceStaleCount": 0
+        },
+        "sourceEventSummary": {
+          "bySource": {
+            "Google News": {
+              "success": 1
+            },
+            "SEC EDGAR": {
+              "success": 21
+            },
+            "Yahoo Finance": {
+              "error": 1,
+              "success": 34
+            }
+          },
+          "byStatus": {
+            "error": 1,
+            "success": 56
+          },
+          "errorCount": 1,
+          "staleCount": 0,
+          "total": 57
+        },
+        "stocks": [
+          {
+            "decisionGrade": "매수 후보",
+            "name": "SK하이닉스",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 1941000.0,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskLevel": "중간",
+            "score": 79.5,
+            "ticker": "000660.KS"
+          },
+          {
+            "decisionGrade": "매수 후보",
+            "name": "NVIDIA",
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 215.3300018310547,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskLevel": "낮음",
+            "score": 77.4,
+            "ticker": "NVDA"
+          },
+          {
+            "decisionGrade": "매수 후보",
+            "name": "제룡전기",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 67300.0,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskLevel": "중간",
+            "score": 77.4,
+            "ticker": "033100.KQ"
+          },
+          {
+            "decisionGrade": "관심",
+            "name": "Broadcom",
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 414.1400146484375,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskLevel": "낮음",
+            "score": 73.7,
+            "ticker": "AVGO"
+          },
+          {
+            "decisionGrade": "관심",
+            "name": "Advanced Micro Devices",
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 467.510009765625,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskLevel": "낮음",
+            "score": 73.0,
+            "ticker": "AMD"
+          },
+          {
+            "decisionGrade": "관심",
+            "name": "Nextracker",
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 130.5,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskLevel": "낮음",
+            "score": 71.3,
+            "ticker": "NXT"
+          },
+          {
+            "decisionGrade": "관심",
+            "name": "삼성전자",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 292500.0,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskLevel": "중간",
+            "score": 71.3,
+            "ticker": "005930.KS"
+          },
+          {
+            "decisionGrade": "관심",
+            "name": "Taiwan Semiconductor Manufacturing",
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 404.5199890136719,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskLevel": "낮음",
+            "score": 70.2,
+            "ticker": "TSM"
+          },
+          {
+            "decisionGrade": "관심",
+            "name": "ACM Research",
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 73.3499984741211,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskLevel": "중간",
+            "score": 70.2,
+            "ticker": "ACMR"
+          },
+          {
+            "decisionGrade": "관심",
+            "name": "ISC",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 210000.0,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskLevel": "낮음",
+            "score": 70.2,
+            "ticker": "095340.KQ"
+          }
+        ],
+        "version": 13
+      },
+      "payloadDigest": "sha256:5deb77e9313435b28c1e874745d0ceb3acc8fe89ffd30a9855b59f3700e89ab1",
+      "payloadKind": "compact",
+      "snapshotDate": "2026-05-23",
+      "topName": "SK하이닉스",
+      "topScore": 79.5,
+      "topTicker": "000660.KS"
+    },
     {
       "createdAt": "2026-05-22T07:48:06.545314+09:00",
       "id": 3,
