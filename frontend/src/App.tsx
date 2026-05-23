@@ -46,6 +46,17 @@ type Fundamentals = {
   evToEbit?: number | null;
   earningsYieldPct?: number | null;
   rdToRevenuePct?: number | null;
+  revenueCagr3yPct?: number | null;
+  revenueCagr5yPct?: number | null;
+  operatingIncomeGrowthPct?: number | null;
+  operatingIncomeCagr3yPct?: number | null;
+  operatingLeverageSpreadPct?: number | null;
+  latestQuarterRevenueYoyPct?: number | null;
+  latestQuarterOperatingIncomeYoyPct?: number | null;
+  quarterlyRevenueYoyStreak?: number | null;
+  quarterlyOperatingLeverageStreak?: number | null;
+  annualFinancials?: Array<Record<string, unknown>>;
+  quarterlyFinancials?: Array<Record<string, unknown>>;
 };
 
 type Stock = {
@@ -54,6 +65,7 @@ type Stock = {
   industry: string;
   role: string;
   score: number;
+  growthQualityScore?: number | null;
   country: string;
   currency: string;
   decisionGrade: string;
@@ -113,6 +125,7 @@ type DataQuality = {
   roicCoveragePct?: number;
   evEbitCoveragePct?: number;
   rdCoveragePct?: number;
+  growthQualityCoveragePct?: number;
   warnings: string[];
 };
 
@@ -1087,7 +1100,13 @@ function StockDetail({ stock }: { stock: WeightedStock }) {
       </div>
 
       <div className="metric-grid">
+        <Metric label="성장 품질" value={formatScore(stock.growthQualityScore)} icon="trend" />
         <Metric label="매출 성장" value={formatPct(stock.fundamentals.revenueGrowthPct)} icon="trend" />
+        <Metric label="3년 CAGR" value={formatPct(stock.fundamentals.revenueCagr3yPct ?? null)} icon="trend" />
+        <Metric label="영업익 성장" value={formatPct(stock.fundamentals.operatingIncomeGrowthPct ?? null)} icon="bar" />
+        <Metric label="영업 레버리지" value={formatPct(stock.fundamentals.operatingLeverageSpreadPct ?? null)} icon="bar" />
+        <Metric label="분기 매출 YoY" value={formatPct(stock.fundamentals.latestQuarterRevenueYoyPct ?? null)} icon="trend" />
+        <Metric label="분기 성장 지속" value={formatCount(stock.fundamentals.quarterlyRevenueYoyStreak ?? null)} icon="shield" />
         <Metric label="영업이익률" value={formatPct(stock.fundamentals.operatingMarginPct)} icon="bar" />
         <Metric label="ROE" value={formatPct(stock.fundamentals.roePct)} icon="shield" />
         <Metric label="ROIC" value={formatPct(stock.fundamentals.roicPct ?? null)} icon="shield" />
@@ -1268,6 +1287,10 @@ function formatScore(value: number | null | undefined) {
 
 function formatPct(value: number | null) {
   return value === null || Number.isNaN(value) ? "-" : `${value.toFixed(1)}%`;
+}
+
+function formatCount(value: number | null) {
+  return value === null || Number.isNaN(value) ? "-" : `${value}회`;
 }
 
 function formatReturn(value: number | null | undefined) {

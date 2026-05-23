@@ -18,7 +18,7 @@ from .snapshot_store import list_snapshot_rows, save_persistent_snapshot
 from .storage import CacheStore
 
 
-SNAPSHOT_PAYLOAD_VERSION = 14
+SNAPSHOT_PAYLOAD_VERSION = 15
 BENCHMARK_TICKERS = ("SPY", "QQQ", "^KS11")
 FUNDAMENTAL_SOURCE_FIELDS = (
     "revenue",
@@ -39,6 +39,13 @@ FUNDAMENTAL_SOURCE_FIELDS = (
     "evToEbit",
     "earningsYield",
     "rdToRevenue",
+    "revenueCagr3y",
+    "revenueCagr5y",
+    "operatingIncomeGrowth",
+    "operatingIncomeCagr3y",
+    "operatingLeverageSpread",
+    "latestQuarterRevenueYoy",
+    "latestQuarterOperatingIncomeYoy",
 )
 SECRET_QUERY_KEYS = {"api_key", "apikey", "crtfc_key", "key", "token", "secret", "access_token"}
 LONG_TOKEN_RE = re.compile(r"\b[A-Za-z0-9_-]{24,}\b")
@@ -175,6 +182,7 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                 "score": item.score,
                 "industryScore": item.industry_score,
                 "qualityScore": item.quality_score,
+                "growthQualityScore": item.growth_quality_score,
                 "valuationScore": item.valuation_score,
                 "momentumScore": item.momentum_score,
                 "roleScore": item.role_score,
@@ -221,6 +229,17 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                     "evToEbit": item.stock.fundamentals.ev_to_ebit,
                     "earningsYieldPct": item.stock.fundamentals.earnings_yield_pct,
                     "rdToRevenuePct": item.stock.fundamentals.rd_to_revenue_pct,
+                    "revenueCagr3yPct": item.stock.fundamentals.revenue_cagr_3y_pct,
+                    "revenueCagr5yPct": item.stock.fundamentals.revenue_cagr_5y_pct,
+                    "operatingIncomeGrowthPct": item.stock.fundamentals.operating_income_growth_pct,
+                    "operatingIncomeCagr3yPct": item.stock.fundamentals.operating_income_cagr_3y_pct,
+                    "operatingLeverageSpreadPct": item.stock.fundamentals.operating_leverage_spread_pct,
+                    "latestQuarterRevenueYoyPct": item.stock.fundamentals.latest_quarter_revenue_yoy_pct,
+                    "latestQuarterOperatingIncomeYoyPct": item.stock.fundamentals.latest_quarter_operating_income_yoy_pct,
+                    "quarterlyRevenueYoyStreak": item.stock.fundamentals.quarterly_revenue_yoy_streak,
+                    "quarterlyOperatingLeverageStreak": item.stock.fundamentals.quarterly_operating_leverage_streak,
+                    "annualFinancials": list(item.stock.fundamentals.annual_financials),
+                    "quarterlyFinancials": list(item.stock.fundamentals.quarterly_financials),
                 },
                 "fundamentalSources": _fundamental_sources(item.stock.fundamentals.sources),
                 "momentumRaw": _momentum_payload(report.momentums.get(item.stock.ticker.upper())),
@@ -409,6 +428,7 @@ def _legend_metric_coverage(report: RecommendationReport) -> dict[str, float]:
         "roicCoveragePct": _coverage_pct(fundamentals, "roic_pct"),
         "evEbitCoveragePct": _coverage_pct(fundamentals, "ev_to_ebit"),
         "rdCoveragePct": _coverage_pct(fundamentals, "rd_to_revenue_pct"),
+        "growthQualityCoveragePct": _coverage_pct(fundamentals, "revenue_cagr_3y_pct"),
     }
 
 

@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 import gzip
 from dataclasses import dataclass, replace
+from datetime import date
 from typing import Iterable
 
 from .config import AppConfig
@@ -16,7 +17,8 @@ from .storage import CacheStore
 
 TICKER_MAP_URL = "https://www.sec.gov/files/company_tickers.json"
 COMPANY_FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
-ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
+ANNUAL_FORMS = {"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"}
+QUARTERLY_FORMS = {"10-Q", "10-Q/A", "10-K", "10-K/A"}
 USD = "USD"
 
 REVENUE_TAGS = (
@@ -235,9 +237,13 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
     pretax_income = _latest_and_previous_facts(us_gaap, PRETAX_INCOME_TAGS)
     income_tax_expense = _latest_and_previous_facts(us_gaap, INCOME_TAX_EXPENSE_TAGS)
     research_and_development = _latest_and_previous_facts(us_gaap, RESEARCH_AND_DEVELOPMENT_TAGS)
+    annual_financials_for_calc = _annual_financial_series(us_gaap, limit=6)
+    annual_financials = tuple(annual_financials_for_calc[:5])
+    quarterly_financials = _quarterly_financial_series(us_gaap, limit=8)
 
     latest_revenue, previous_revenue = _fact_values(revenue)
     latest_operating_income, _ = _fact_values(operating_income)
+    _, previous_operating_income = _fact_values(operating_income)
     latest_net_income, _ = _fact_values(net_income)
     latest_liabilities, _ = _fact_values(liabilities)
     latest_equity, previous_equity = _fact_values(equity)
@@ -256,6 +262,17 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
     latest_research_and_development, _ = _fact_values(research_and_development)
 
     revenue_growth_pct = _growth_pct(latest_revenue, previous_revenue)
+    operating_income_growth_pct = _growth_pct_positive_base(latest_operating_income, previous_operating_income)
+    revenue_cagr_3y_pct = _cagr_from_financials(annual_financials_for_calc, "revenue", 3)
+    revenue_cagr_5y_pct = _cagr_from_financials(annual_financials_for_calc, "revenue", 5)
+    operating_income_cagr_3y_pct = _cagr_from_financials(annual_financials_for_calc, "operatingIncome", 3)
+    operating_leverage_spread_pct = _subtract(operating_income_growth_pct, revenue_growth_pct)
+    latest_quarter_revenue_yoy_pct = _latest_quarter_metric(quarterly_financials, "revenueYoYPct")
+    latest_quarter_operating_income_yoy_pct = _latest_quarter_metric(
+        quarterly_financials, "operatingIncomeYoYPct"
+    )
+    quarterly_revenue_yoy_streak = _quarterly_positive_streak(quarterly_financials, "revenueYoYPct")
+    quarterly_operating_leverage_streak = _quarterly_operating_leverage_streak(quarterly_financials)
     operating_margin_pct = _ratio_pct(latest_operating_income, latest_revenue)
     average_equity = _average(latest_equity, previous_equity)
     roe_pct = _ratio_pct(latest_net_income, average_equity)
@@ -350,6 +367,25 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
             research_and_development[0] or revenue[0],
             derived_from=("researchAndDevelopment", "revenue"),
         )
+    _set_derived_growth_sources(
+        sources,
+        source_name="SEC EDGAR",
+        annual_financials=annual_financials,
+        quarterly_financials=quarterly_financials,
+        fields=(
+            ("revenueCagr3y", revenue_cagr_3y_pct, ("annualFinancials",)),
+            ("revenueCagr5y", revenue_cagr_5y_pct, ("annualFinancials",)),
+            ("operatingIncomeGrowth", operating_income_growth_pct, ("operatingIncome",)),
+            ("operatingIncomeCagr3y", operating_income_cagr_3y_pct, ("annualFinancials",)),
+            ("operatingLeverageSpread", operating_leverage_spread_pct, ("revenueGrowth", "operatingIncomeGrowth")),
+            ("latestQuarterRevenueYoy", latest_quarter_revenue_yoy_pct, ("quarterlyFinancials",)),
+            (
+                "latestQuarterOperatingIncomeYoy",
+                latest_quarter_operating_income_yoy_pct,
+                ("quarterlyFinancials",),
+            ),
+        ),
+    )
 
     return Fundamentals(
         revenue_growth_pct=_coalesce(revenue_growth_pct, fallback.revenue_growth_pct),
@@ -385,6 +421,38 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
         ev_to_ebit=_coalesce(ev_to_ebit, fallback.ev_to_ebit),
         earnings_yield_pct=_coalesce(earnings_yield_pct, fallback.earnings_yield_pct),
         rd_to_revenue_pct=_coalesce(rd_to_revenue_pct, fallback.rd_to_revenue_pct),
+        revenue_cagr_3y_pct=_coalesce(revenue_cagr_3y_pct, fallback.revenue_cagr_3y_pct),
+        revenue_cagr_5y_pct=_coalesce(revenue_cagr_5y_pct, fallback.revenue_cagr_5y_pct),
+        operating_income_growth_pct=_coalesce(
+            operating_income_growth_pct,
+            fallback.operating_income_growth_pct,
+        ),
+        operating_income_cagr_3y_pct=_coalesce(
+            operating_income_cagr_3y_pct,
+            fallback.operating_income_cagr_3y_pct,
+        ),
+        operating_leverage_spread_pct=_coalesce(
+            operating_leverage_spread_pct,
+            fallback.operating_leverage_spread_pct,
+        ),
+        latest_quarter_revenue_yoy_pct=_coalesce(
+            latest_quarter_revenue_yoy_pct,
+            fallback.latest_quarter_revenue_yoy_pct,
+        ),
+        latest_quarter_operating_income_yoy_pct=_coalesce(
+            latest_quarter_operating_income_yoy_pct,
+            fallback.latest_quarter_operating_income_yoy_pct,
+        ),
+        quarterly_revenue_yoy_streak=_coalesce_int(
+            quarterly_revenue_yoy_streak,
+            fallback.quarterly_revenue_yoy_streak,
+        ),
+        quarterly_operating_leverage_streak=_coalesce_int(
+            quarterly_operating_leverage_streak,
+            fallback.quarterly_operating_leverage_streak,
+        ),
+        annual_financials=annual_financials or fallback.annual_financials,
+        quarterly_financials=quarterly_financials or fallback.quarterly_financials,
         sources=sources,
     )
 
@@ -469,6 +537,115 @@ def _latest_and_previous_summed_facts(
     return latest, previous
 
 
+def _annual_financial_series(us_gaap: dict, limit: int = 6) -> tuple[dict, ...]:
+    revenue_by_period = _selected_fact_series(us_gaap, REVENUE_TAGS, _is_annual_fact, _annual_period_key)
+    operating_by_period = _selected_fact_series(
+        us_gaap, OPERATING_INCOME_TAGS, _is_annual_fact, _annual_period_key
+    )
+    return _financial_records(revenue_by_period, operating_by_period, limit=limit)
+
+
+def _quarterly_financial_series(us_gaap: dict, limit: int = 8) -> tuple[dict, ...]:
+    revenue_by_period = _selected_fact_series(us_gaap, REVENUE_TAGS, _is_quarterly_fact, _quarter_period_key)
+    operating_by_period = _selected_fact_series(
+        us_gaap, OPERATING_INCOME_TAGS, _is_quarterly_fact, _quarter_period_key
+    )
+    records = _financial_records(revenue_by_period, operating_by_period, limit=None)
+    return _annotate_quarterly_yoy(records)[:limit]
+
+
+def _selected_fact_series(
+    us_gaap: dict,
+    tags: tuple[str, ...],
+    fact_filter,
+    period_key_fn,
+) -> dict[str, SelectedFact]:
+    candidates: dict[str, tuple[str, SelectedFact]] = {}
+    for tag in tags:
+        concept = us_gaap.get(tag)
+        if not isinstance(concept, dict):
+            continue
+        units = concept.get("units", {})
+        facts = units.get(USD)
+        if not isinstance(facts, list):
+            continue
+        for fact in facts:
+            if not fact_filter(fact):
+                continue
+            value = fact.get("val")
+            period = period_key_fn(fact)
+            filed = str(fact.get("filed") or "")
+            if not isinstance(value, (int, float)) or not math.isfinite(value) or not period:
+                continue
+            existing = candidates.get(period)
+            if existing is None or filed >= existing[0]:
+                candidates[period] = (filed, SelectedFact(float(value), _fact_source(fact, tag)))
+    return {period: selected for period, (_, selected) in candidates.items()}
+
+
+def _financial_records(
+    revenue_by_period: dict[str, SelectedFact],
+    operating_by_period: dict[str, SelectedFact],
+    limit: int | None,
+) -> tuple[dict, ...]:
+    records: list[dict] = []
+    for period in sorted(set(revenue_by_period) | set(operating_by_period), reverse=True):
+        revenue = revenue_by_period.get(period)
+        operating_income = operating_by_period.get(period)
+        source = revenue.source if revenue is not None else operating_income.source if operating_income else {}
+        record = {
+            "source": source.get("source") or "SEC EDGAR",
+            "periodEnd": period,
+            "fiscalYear": source.get("fiscalYear"),
+            "fiscalPeriod": source.get("fiscalPeriod"),
+            "filed": source.get("filed"),
+            "revenue": _fact_value(revenue),
+            "operatingIncome": _fact_value(operating_income),
+        }
+        records.append(record)
+    if limit is None:
+        return tuple(records)
+    return tuple(records[:limit])
+
+
+def _annotate_quarterly_yoy(records: tuple[dict, ...]) -> tuple[dict, ...]:
+    by_identity: dict[tuple[int, str], dict] = {}
+    normalized: list[dict] = []
+    for record in records:
+        next_record = dict(record)
+        year = _record_year(next_record)
+        period = _record_quarter(next_record)
+        next_record["_year"] = year
+        next_record["_quarter"] = period
+        if year is not None and period:
+            by_identity[(year, period)] = next_record
+        normalized.append(next_record)
+
+    annotated: list[dict] = []
+    for record in normalized:
+        prior = None
+        year = record.get("_year")
+        period = record.get("_quarter")
+        if isinstance(year, int) and isinstance(period, str):
+            prior = by_identity.get((year - 1, period))
+        next_record = {key: value for key, value in record.items() if not key.startswith("_")}
+        if prior is not None:
+            revenue_yoy = _growth_pct_positive_base(
+                _number(next_record.get("revenue")),
+                _number(prior.get("revenue")),
+            )
+            operating_yoy = _growth_pct_positive_base(
+                _number(next_record.get("operatingIncome")),
+                _number(prior.get("operatingIncome")),
+            )
+            leverage = _subtract(operating_yoy, revenue_yoy)
+            next_record["revenueYoYPct"] = revenue_yoy
+            next_record["operatingIncomeYoYPct"] = operating_yoy
+            next_record["operatingLeverageSpreadPct"] = leverage
+        annotated.append(next_record)
+    return tuple(annotated)
+
+
 def _fact_values(facts: tuple[SelectedFact | None, SelectedFact | None]) -> tuple[float | None, float | None]:
     return _fact_value(facts[0]), _fact_value(facts[1])
 
@@ -483,6 +660,7 @@ def _fact_source(fact: dict, tag: str) -> dict:
         "tag": tag,
         "periodEnd": fact.get("end") if isinstance(fact.get("end"), str) else None,
         "fiscalYear": fact.get("fy") if isinstance(fact.get("fy"), (int, str)) else None,
+        "fiscalPeriod": fact.get("fp") if isinstance(fact.get("fp"), str) else None,
         "filed": fact.get("filed") if isinstance(fact.get("filed"), str) else None,
         "form": fact.get("form") if isinstance(fact.get("form"), str) else None,
         "reportCode": None,
@@ -507,6 +685,29 @@ def _set_source(
     sources[field] = source
 
 
+def _set_derived_growth_sources(
+    sources: dict[str, dict],
+    source_name: str,
+    annual_financials: tuple[dict, ...],
+    quarterly_financials: tuple[dict, ...],
+    fields: tuple[tuple[str, float | None, tuple[str, ...]], ...],
+) -> None:
+    reference = annual_financials[0] if annual_financials else quarterly_financials[0] if quarterly_financials else {}
+    for field, value, derived_from in fields:
+        if value is None:
+            continue
+        sources[field] = {
+            "source": source_name,
+            "periodEnd": reference.get("periodEnd"),
+            "fiscalYear": reference.get("fiscalYear"),
+            "filed": reference.get("filed"),
+            "form": None,
+            "reportCode": None,
+            "fallback": False,
+            "derivedFrom": list(derived_from),
+        }
+
+
 def _annual_period_key(fact: dict) -> str | None:
     end = fact.get("end")
     if isinstance(end, str) and end:
@@ -520,6 +721,11 @@ def _annual_period_key(fact: dict) -> str | None:
     return None
 
 
+def _quarter_period_key(fact: dict) -> str | None:
+    end = fact.get("end")
+    return end if isinstance(end, str) and end else None
+
+
 def _is_annual_fact(fact: dict) -> bool:
     form = str(fact.get("form", ""))
     if form not in ANNUAL_FORMS:
@@ -531,10 +737,140 @@ def _is_annual_fact(fact: dict) -> bool:
     return True
 
 
+def _is_quarterly_fact(fact: dict) -> bool:
+    form = str(fact.get("form", ""))
+    if form not in QUARTERLY_FORMS:
+        return False
+    if _duration_days(fact) is None or not 45 <= _duration_days(fact) <= 130:
+        return False
+    fp = fact.get("fp")
+    frame = str(fact.get("frame") or "")
+    if fp in {"Q1", "Q2", "Q3", "Q4"}:
+        return True
+    return "Q" in frame
+
+
+def _duration_days(fact: dict) -> int | None:
+    start = _parse_date(fact.get("start"))
+    end = _parse_date(fact.get("end"))
+    if start is None or end is None:
+        return None
+    return (end - start).days + 1
+
+
+def _parse_date(value: object) -> date | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _record_year(record: dict) -> int | None:
+    fiscal_year = record.get("fiscalYear")
+    if isinstance(fiscal_year, int):
+        return fiscal_year
+    if isinstance(fiscal_year, str) and fiscal_year.isdigit():
+        return int(fiscal_year)
+    period_end = record.get("periodEnd")
+    if isinstance(period_end, str) and len(period_end) >= 4 and period_end[:4].isdigit():
+        return int(period_end[:4])
+    return None
+
+
+def _record_quarter(record: dict) -> str | None:
+    fiscal_period = record.get("fiscalPeriod")
+    if fiscal_period in {"Q1", "Q2", "Q3", "Q4"}:
+        return str(fiscal_period)
+    period_end = _parse_date(record.get("periodEnd"))
+    if period_end is None:
+        return None
+    return f"Q{((period_end.month - 1) // 3) + 1}"
+
+
 def _growth_pct(latest: float | None, previous: float | None) -> float | None:
     if latest is None or previous is None or previous == 0:
         return None
     return ((latest / previous) - 1) * 100
+
+
+def _growth_pct_positive_base(latest: float | None, previous: float | None) -> float | None:
+    if latest is None or previous is None or previous <= 0:
+        return None
+    return ((latest / previous) - 1) * 100
+
+
+def _cagr_from_financials(records: tuple[dict, ...], field: str, years: int) -> float | None:
+    latest = next((record for record in records if _number(record.get(field)) is not None), None)
+    if latest is None:
+        return None
+    latest_year = _record_year(latest)
+    older = None
+    if latest_year is not None:
+        older = next((record for record in records if _record_year(record) == latest_year - years), None)
+    if older is None and len(records) > years:
+        older = records[years]
+    if older is None:
+        return None
+    return _cagr_pct(_number(latest.get(field)), _number(older.get(field)), years)
+
+
+def _cagr_pct(latest: float | None, previous: float | None, years: int) -> float | None:
+    if latest is None or previous is None or latest <= 0 or previous <= 0 or years <= 0:
+        return None
+    return ((latest / previous) ** (1 / years) - 1) * 100
+
+
+def _latest_quarter_metric(records: tuple[dict, ...], field: str) -> float | None:
+    for record in records:
+        value = _number(record.get(field))
+        if value is not None:
+            return value
+    return None
+
+
+def _quarterly_positive_streak(records: tuple[dict, ...], field: str) -> int | None:
+    if not records:
+        return None
+    count = 0
+    saw_metric = False
+    for record in records:
+        value = _number(record.get(field))
+        if value is None:
+            if not saw_metric:
+                continue
+            break
+        saw_metric = True
+        if value <= 0:
+            break
+        count += 1
+    return count if saw_metric else None
+
+
+def _quarterly_operating_leverage_streak(records: tuple[dict, ...]) -> int | None:
+    if not records:
+        return None
+    count = 0
+    saw_metric = False
+    for record in records:
+        revenue_yoy = _number(record.get("revenueYoYPct"))
+        operating_yoy = _number(record.get("operatingIncomeYoYPct"))
+        if revenue_yoy is None or operating_yoy is None:
+            if not saw_metric:
+                continue
+            break
+        saw_metric = True
+        if revenue_yoy <= 0 or operating_yoy <= revenue_yoy:
+            break
+        count += 1
+    return count if saw_metric else None
+
+
+def _number(value: object) -> float | None:
+    if isinstance(value, (int, float)) and math.isfinite(value):
+        return float(value)
+    return None
 
 
 def _ratio_pct(numerator: float | None, denominator: float | None) -> float | None:
@@ -638,6 +974,10 @@ def _clamp_ratio(value: float, low: float, high: float) -> float:
 
 def _coalesce(value: float | None, fallback: float | None) -> float | None:
     return value if value is not None and math.isfinite(value) else fallback
+
+
+def _coalesce_int(value: int | None, fallback: int | None) -> int | None:
+    return value if value is not None else fallback
 
 
 class DataSourceError(RuntimeError):

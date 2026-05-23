@@ -260,6 +260,7 @@ def score_stocks(
     results: list[StockScore] = []
     for stock in stocks:
         industry_score = industry_score_by_name[stock.industry]
+        growth_quality = growth_quality_score(stock.fundamentals)
         quality = quality_score(stock.fundamentals)
         valuation = valuation_score(stock.fundamentals)
         momentum = momentum_to_score(momentums.get(stock.ticker.upper(), Momentum()))
@@ -277,7 +278,14 @@ def score_stocks(
             + role * 0.10
         )
         reasons = _stock_reasons(
-            stock, quality, valuation, momentum, industry_score, analysis_style, valuation_note
+            stock,
+            quality,
+            growth_quality,
+            valuation,
+            momentum,
+            industry_score,
+            analysis_style,
+            valuation_note,
         )
         analysis_checks = analysis_checks_for_stock(stock, valuation_note, valuation_range)
         second_order_checks = second_order_checks_for_stock(stock, industry_score, analysis_style)
@@ -299,6 +307,7 @@ def score_stocks(
                 score=round(total, 1),
                 industry_score=industry_score.score,
                 quality_score=round(quality, 1),
+                growth_quality_score=round(growth_quality, 1),
                 valuation_score=round(valuation, 1),
                 momentum_score=round(momentum, 1),
                 role_score=role,
@@ -1594,7 +1603,7 @@ def quality_score(fundamentals: Fundamentals) -> float:
     cash_flow = _scale(fcf_margin, low=-10, high=25)
     liquidity = _scale(fundamentals.current_ratio_pct, low=80, high=220)
     interest_safety = _scale(fundamentals.interest_coverage, low=1, high=10)
-    return (
+    base = (
         revenue_growth * 0.26
         + margin * 0.25
         + roe * 0.22
@@ -1602,6 +1611,39 @@ def quality_score(fundamentals: Fundamentals) -> float:
         + cash_flow * 0.08
         + liquidity * 0.04
         + interest_safety * 0.03
+    )
+    return base * 0.70 + growth_quality_score(fundamentals) * 0.30
+
+
+def growth_quality_score(fundamentals: Fundamentals) -> float:
+    revenue_cagr = _first_finite(
+        fundamentals.revenue_cagr_5y_pct,
+        fundamentals.revenue_cagr_3y_pct,
+        fundamentals.revenue_growth_pct,
+    )
+    operating_growth = _average_finite(
+        fundamentals.operating_income_growth_pct,
+        fundamentals.operating_income_cagr_3y_pct,
+    )
+    quarter_growth = _average_finite(
+        fundamentals.latest_quarter_revenue_yoy_pct,
+        fundamentals.latest_quarter_operating_income_yoy_pct,
+    )
+    revenue_score = _scale(revenue_cagr, low=0, high=30)
+    operating_score = _scale(operating_growth, low=0, high=45)
+    leverage_score = _scale(fundamentals.operating_leverage_spread_pct, low=-10, high=20)
+    quarter_score = _scale(quarter_growth, low=-5, high=35)
+    revenue_streak = _scale(fundamentals.quarterly_revenue_yoy_streak, low=0, high=4)
+    leverage_streak = _scale(fundamentals.quarterly_operating_leverage_streak, low=0, high=4)
+    streak_score = (revenue_streak + leverage_streak) / 2
+    return _clamp(
+        revenue_score * 0.25
+        + operating_score * 0.25
+        + leverage_score * 0.20
+        + quarter_score * 0.20
+        + streak_score * 0.10,
+        0,
+        100,
     )
 
 
@@ -1626,6 +1668,7 @@ def valuation_score(fundamentals: Fundamentals) -> float:
     margin = fundamentals.operating_margin_pct
     roe = fundamentals.roe_pct
     debt_to_equity = fundamentals.debt_to_equity_pct
+    growth_quality = growth_quality_score(fundamentals)
 
     if growth is not None and math.isfinite(growth):
         if pe > 35 and growth >= 25 and _at_least(margin, 10):
@@ -1650,6 +1693,11 @@ def valuation_score(fundamentals: Fundamentals) -> float:
         base -= 6
     if fundamentals.interest_coverage is not None and fundamentals.interest_coverage < 3:
         base -= 5
+    if pe > 35:
+        if growth_quality >= 72:
+            base += 8
+        elif growth_quality < 48:
+            base -= 8
 
     return _clamp(base, 0, 100)
 
@@ -1738,6 +1786,7 @@ def analysis_checks_for_stock(
     fundamentals = stock.fundamentals
     return (
         _growth_check(fundamentals),
+        _growth_quality_check(fundamentals),
         _profitability_check(fundamentals),
         _cash_flow_check(fundamentals),
         _stability_check(fundamentals),
@@ -1774,6 +1823,21 @@ def risk_cautions_for_stock(stock: StockProfile, analysis_style: str) -> tuple[s
         cautions.append("유동비율이 낮아 단기 지급능력 확인 필요")
     if stock.fundamentals.free_cash_flow is not None and stock.fundamentals.free_cash_flow < 0:
         cautions.append("잉여현금흐름이 음수라 투자/운전자본 부담 확인 필요")
+    if (
+        stock.fundamentals.revenue_growth_pct is not None
+        and stock.fundamentals.revenue_growth_pct > 8
+        and stock.fundamentals.operating_income_growth_pct is not None
+        and stock.fundamentals.operating_income_growth_pct < stock.fundamentals.revenue_growth_pct
+    ):
+        cautions.append("매출은 성장하지만 영업이익 성장 속도가 더 느려 마진 압박 여부 확인 필요")
+    if stock.fundamentals.quarterly_revenue_yoy_streak == 0:
+        cautions.append("최근 분기 YoY 성장 지속성이 끊겨 다음 실적 확인 필요")
+    if (
+        analysis_style in {"고멀티플 검증", "성장주"}
+        and stock.fundamentals.revenue_cagr_3y_pct is not None
+        and stock.fundamentals.revenue_cagr_3y_pct < 10
+    ):
+        cautions.append("CAGR 대비 현재 멀티플 부담이 커 성장 재가속 근거 확인 필요")
     return tuple(cautions)
 
 
@@ -2164,6 +2228,7 @@ def _beneficiary_evidence(
 def _stock_reasons(
     stock: StockProfile,
     quality: float,
+    growth_quality: float,
     valuation: float,
     momentum: float,
     industry_score: IndustryScore,
@@ -2175,7 +2240,8 @@ def _stock_reasons(
         f"{industry_score.industry.name} 산업의 {role_text}",
         stock.thesis,
         f"분석 스타일: {analysis_style}",
-        f"기본적 분석 점수 {quality:.1f}/100, 밸류에이션 점수 {valuation:.1f}/100",
+        f"기본적 분석 점수 {quality:.1f}/100, 성장 품질 {growth_quality:.1f}/100, 밸류에이션 점수 {valuation:.1f}/100",
+        _growth_quality_reason(stock.fundamentals),
         valuation_note,
         f"가격 모멘텀 점수 {momentum:.1f}/100",
     ]
@@ -2372,6 +2438,44 @@ def _growth_check(fundamentals: Fundamentals) -> str:
     return f"매출 성장: {growth:.1f}%로 {tone} 흐름"
 
 
+def _growth_quality_check(fundamentals: Fundamentals) -> str:
+    cagr = _first_finite(fundamentals.revenue_cagr_5y_pct, fundamentals.revenue_cagr_3y_pct)
+    leverage = fundamentals.operating_leverage_spread_pct
+    quarter = fundamentals.latest_quarter_revenue_yoy_pct
+    parts: list[str] = []
+    if cagr is not None:
+        parts.append(f"장기 CAGR {cagr:.1f}%")
+    if leverage is not None:
+        if leverage > 0:
+            parts.append(f"영업 레버리지 +{leverage:.1f}%p")
+        else:
+            parts.append(f"영업 레버리지 {leverage:.1f}%p")
+    if quarter is not None:
+        parts.append(f"최근 분기 매출 YoY {quarter:.1f}%")
+    if fundamentals.quarterly_revenue_yoy_streak is not None:
+        parts.append(f"분기 성장 지속 {fundamentals.quarterly_revenue_yoy_streak}회")
+    if not parts:
+        return "성장 품질: 다년 CAGR과 분기 YoY 데이터 부족, 공식 공시 추세 추가 확인 필요"
+    tone = "성장 지속성과 영업 레버리지 확인"
+    if _at_least(leverage, 0) and _at_least(quarter, 0):
+        tone = "성장 지속성과 영업 레버리지가 함께 확인"
+    elif leverage is not None and leverage < 0:
+        tone = "매출 성장 대비 이익 증가 속도 확인 필요"
+    return "성장 품질: " + ", ".join(parts) + f" - {tone}"
+
+
+def _growth_quality_reason(fundamentals: Fundamentals) -> str:
+    growth = fundamentals.revenue_growth_pct
+    operating_growth = fundamentals.operating_income_growth_pct
+    if growth is not None and operating_growth is not None:
+        if operating_growth > growth:
+            return f"영업이익 증가율 {operating_growth:.1f}%가 매출 성장률 {growth:.1f}%보다 높아 영업 레버리지 확인"
+        return f"매출 성장률 {growth:.1f}% 대비 영업이익 증가율 {operating_growth:.1f}%로 이익 전환 속도 확인 필요"
+    if fundamentals.quarterly_revenue_yoy_streak:
+        return f"최근 {fundamentals.quarterly_revenue_yoy_streak}개 분기 매출 YoY 성장 지속"
+    return "성장 품질 데이터는 제한적이어서 매출 성장, 마진, 현금흐름을 함께 확인"
+
+
 def _profitability_check(fundamentals: Fundamentals) -> str:
     margin = fundamentals.operating_margin_pct
     roe = fundamentals.roe_pct
@@ -2566,6 +2670,24 @@ def _at_least(value: float | None, threshold: float) -> bool:
 
 def _finite(value: float | None) -> bool:
     return value is not None and math.isfinite(value)
+
+
+def _first_finite(*values: float | int | None) -> float | None:
+    for value in values:
+        if isinstance(value, (int, float)) and math.isfinite(value):
+            return float(value)
+    return None
+
+
+def _average_finite(*values: float | int | None) -> float | None:
+    valid_values = [
+        float(value)
+        for value in values
+        if isinstance(value, (int, float)) and math.isfinite(value)
+    ]
+    if not valid_values:
+        return None
+    return sum(valid_values) / len(valid_values)
 
 
 def _has_momentum_data(momentum: Momentum) -> bool:

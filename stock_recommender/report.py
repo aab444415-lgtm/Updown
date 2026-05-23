@@ -199,6 +199,7 @@ def _render_stock(rank: int, item: StockScore) -> list[str]:
     lines.append(f"- 분석 스타일: {item.analysis_style}")
     lines.append(
         f"- 세부 점수: 산업 {item.industry_score:.1f}, 기본적 분석 {item.quality_score:.1f}, "
+        f"성장 품질 {item.growth_quality_score:.1f}, "
         f"밸류에이션 {item.valuation_score:.1f}, 모멘텀 {item.momentum_score:.1f}"
     )
     lines.append(f"- 약식 적정 시총 범위: {_format_valuation_range(item)}")
@@ -324,6 +325,12 @@ def _format_fundamentals(fundamentals: Fundamentals) -> str:
     currency = fundamentals.market_cap_currency
     parts = [
         ("매출성장", _pct(fundamentals.revenue_growth_pct)),
+        ("3년 CAGR", _pct(fundamentals.revenue_cagr_3y_pct)),
+        ("5년 CAGR", _pct(fundamentals.revenue_cagr_5y_pct)),
+        ("영업익성장", _pct(fundamentals.operating_income_growth_pct)),
+        ("영업레버리지", _pct(fundamentals.operating_leverage_spread_pct)),
+        ("분기매출 YoY", _pct(fundamentals.latest_quarter_revenue_yoy_pct)),
+        ("분기성장지속", _count(fundamentals.quarterly_revenue_yoy_streak)),
         ("영업이익률", _pct(fundamentals.operating_margin_pct)),
         ("ROE", _pct(fundamentals.roe_pct)),
         ("부채비율", _pct(fundamentals.debt_to_equity_pct)),
@@ -357,6 +364,10 @@ def _format_valuation_range(item: StockScore) -> str:
 
 def _pct(value: float | None) -> str:
     return "N/A" if value is None else f"{value:.1f}%"
+
+
+def _count(value: int | None) -> str:
+    return "N/A" if value is None else f"{value}회"
 
 
 def _pct_range(low: float | None, high: float | None) -> str:

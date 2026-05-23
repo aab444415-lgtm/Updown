@@ -26,7 +26,7 @@ from stock_recommender.models import (
 from stock_recommender.opendart_financials import extract_opendart_fundamentals
 from stock_recommender.pipeline import beneficiary_market_proxy_tickers
 from stock_recommender.report import render_markdown
-from stock_recommender.scoring import build_report, decision_grade_for_stock, quality_score, valuation_score
+from stock_recommender.scoring import build_report, decision_grade_for_stock, growth_quality_score, quality_score, valuation_score
 from stock_recommender.sec_edgar import extract_fundamentals
 from stock_recommender.snapshot_store import SnapshotFileStore, SnapshotStoreError
 from stock_recommender.snapshots import report_to_snapshot_payload, save_recommendation_snapshot, snapshot_history
@@ -67,6 +67,39 @@ class ScoringTests(unittest.TestCase):
         )
 
         self.assertGreater(valuation_score(reasonable_growth), valuation_score(cheap_but_stagnant))
+
+    def test_growth_quality_rewards_operating_leverage_and_quarterly_streak(self):
+        strong = Fundamentals(
+            revenue_growth_pct=22.0,
+            operating_margin_pct=24.0,
+            roe_pct=20.0,
+            debt_to_equity_pct=35.0,
+            revenue_cagr_3y_pct=18.0,
+            operating_income_growth_pct=42.0,
+            operating_income_cagr_3y_pct=28.0,
+            operating_leverage_spread_pct=20.0,
+            latest_quarter_revenue_yoy_pct=26.0,
+            latest_quarter_operating_income_yoy_pct=48.0,
+            quarterly_revenue_yoy_streak=4,
+            quarterly_operating_leverage_streak=3,
+        )
+        hollow = Fundamentals(
+            revenue_growth_pct=22.0,
+            operating_margin_pct=12.0,
+            roe_pct=10.0,
+            debt_to_equity_pct=35.0,
+            revenue_cagr_3y_pct=7.0,
+            operating_income_growth_pct=6.0,
+            operating_income_cagr_3y_pct=5.0,
+            operating_leverage_spread_pct=-16.0,
+            latest_quarter_revenue_yoy_pct=-2.0,
+            latest_quarter_operating_income_yoy_pct=-12.0,
+            quarterly_revenue_yoy_streak=0,
+            quarterly_operating_leverage_streak=0,
+        )
+
+        self.assertGreater(growth_quality_score(strong), growth_quality_score(hollow) + 35)
+        self.assertGreater(quality_score(strong), quality_score(hollow))
 
     def test_stock_scores_include_analysis_checks(self):
         report = build_report(
@@ -1207,6 +1240,63 @@ class SecEdgarTests(unittest.TestCase):
         self.assertEqual(fundamentals.revenue, 150)
         self.assertAlmostEqual(fundamentals.revenue_growth_pct, 50.0)
 
+    def test_extract_fundamentals_calculates_growth_quality_series(self):
+        annual_revenue = [
+            _annual_fact("2019-01-01", "2019-12-31", "2020-02-01", 100),
+            _annual_fact("2020-01-01", "2020-12-31", "2021-02-01", 120),
+            _annual_fact("2021-01-01", "2021-12-31", "2022-02-01", 140),
+            _annual_fact("2022-01-01", "2022-12-31", "2023-02-01", 165),
+            _annual_fact("2023-01-01", "2023-12-31", "2024-02-01", 180),
+            _annual_fact("2024-01-01", "2024-12-31", "2025-02-01", 200),
+            _annual_fact("2024-01-01", "2024-12-31", "2026-02-01", 220),
+        ]
+        annual_operating_income = [
+            _annual_fact("2019-01-01", "2019-12-31", "2020-02-01", 10),
+            _annual_fact("2020-01-01", "2020-12-31", "2021-02-01", 14),
+            _annual_fact("2021-01-01", "2021-12-31", "2022-02-01", 18),
+            _annual_fact("2022-01-01", "2022-12-31", "2023-02-01", 25),
+            _annual_fact("2023-01-01", "2023-12-31", "2024-02-01", 30),
+            _annual_fact("2024-01-01", "2024-12-31", "2025-02-01", 44),
+        ]
+        quarterly_revenue = [
+            _quarter_fact("2024-01-01", "2024-03-31", "2024-05-01", 100, "Q1", 2024),
+            _quarter_fact("2024-04-01", "2024-06-30", "2024-08-01", 110, "Q2", 2024),
+            _quarter_fact("2025-01-01", "2025-03-31", "2025-05-01", 130, "Q1", 2025),
+            _quarter_fact("2025-04-01", "2025-06-30", "2025-08-01", 160, "Q2", 2025),
+            _quarter_fact("2025-01-01", "2025-06-30", "2025-08-15", 999, "Q2", 2025),
+        ]
+        quarterly_operating_income = [
+            _quarter_fact("2024-01-01", "2024-03-31", "2024-05-01", 20, "Q1", 2024),
+            _quarter_fact("2024-04-01", "2024-06-30", "2024-08-01", 22, "Q2", 2024),
+            _quarter_fact("2025-01-01", "2025-03-31", "2025-05-01", 35, "Q1", 2025),
+            _quarter_fact("2025-04-01", "2025-06-30", "2025-08-01", 50, "Q2", 2025),
+        ]
+        facts = {
+            "facts": {
+                "us-gaap": {
+                    "RevenueFromContractWithCustomerExcludingAssessedTax": {
+                        "units": {"USD": [*annual_revenue, *quarterly_revenue]}
+                    },
+                    "OperatingIncomeLoss": {
+                        "units": {"USD": [*annual_operating_income, *quarterly_operating_income]}
+                    },
+                }
+            }
+        }
+
+        fundamentals = extract_fundamentals(facts)
+
+        self.assertEqual(fundamentals.revenue, 220)
+        self.assertAlmostEqual(fundamentals.revenue_cagr_3y_pct, ((220 / 140) ** (1 / 3) - 1) * 100)
+        self.assertAlmostEqual(fundamentals.revenue_cagr_5y_pct, ((220 / 100) ** (1 / 5) - 1) * 100)
+        self.assertAlmostEqual(fundamentals.operating_income_growth_pct, ((44 / 30) - 1) * 100)
+        self.assertAlmostEqual(fundamentals.operating_leverage_spread_pct, fundamentals.operating_income_growth_pct - fundamentals.revenue_growth_pct)
+        self.assertAlmostEqual(fundamentals.latest_quarter_revenue_yoy_pct, ((160 / 110) - 1) * 100)
+        self.assertAlmostEqual(fundamentals.latest_quarter_operating_income_yoy_pct, ((50 / 22) - 1) * 100)
+        self.assertEqual(fundamentals.quarterly_revenue_yoy_streak, 2)
+        self.assertEqual(len(fundamentals.annual_financials), 5)
+        self.assertLess(fundamentals.quarterly_financials[0]["revenue"], 999)
+
     def test_extract_fundamentals_uses_default_tax_rate_when_tax_data_missing(self):
         facts = {
             "facts": {
@@ -1300,6 +1390,37 @@ class OpenDartTests(unittest.TestCase):
         self.assertEqual(fundamentals.sources["revenue"]["source"], "OpenDART")
         self.assertEqual(fundamentals.sources["revenue"]["reportCode"], "11011")
         self.assertFalse(fundamentals.sources["roic"]["taxRateDefault"])
+
+    def test_extract_opendart_fundamentals_calculates_growth_quality_series(self):
+        annual_payloads = (
+            _dart_payload(2024, "11011", 220_000, 44_000),
+            _dart_payload(2023, "11011", 180_000, 30_000),
+            _dart_payload(2022, "11011", 165_000, 25_000),
+            _dart_payload(2021, "11011", 140_000, 18_000),
+            _dart_payload(2020, "11011", 120_000, 14_000),
+            _dart_payload(2019, "11011", 100_000, 10_000),
+        )
+        quarterly_payloads = (
+            _dart_payload(2025, "11013", 130_000, 35_000),
+            _dart_payload(2025, "11012", 290_000, 85_000),
+            _dart_payload(2024, "11013", 100_000, 20_000),
+            _dart_payload(2024, "11012", 210_000, 42_000),
+        )
+
+        fundamentals = extract_opendart_fundamentals(
+            annual_payloads[0],
+            fallback=Fundamentals(market_cap_currency="KRW"),
+            annual_payloads=annual_payloads,
+            quarterly_payloads=quarterly_payloads,
+        )
+
+        self.assertAlmostEqual(fundamentals.revenue_cagr_3y_pct, ((220_000 / 140_000) ** (1 / 3) - 1) * 100)
+        self.assertAlmostEqual(fundamentals.revenue_cagr_5y_pct, ((220_000 / 100_000) ** (1 / 5) - 1) * 100)
+        self.assertAlmostEqual(fundamentals.operating_income_growth_pct, ((44_000 / 30_000) - 1) * 100)
+        self.assertAlmostEqual(fundamentals.latest_quarter_revenue_yoy_pct, ((160_000 / 110_000) - 1) * 100)
+        self.assertAlmostEqual(fundamentals.latest_quarter_operating_income_yoy_pct, ((50_000 / 22_000) - 1) * 100)
+        self.assertEqual(fundamentals.quarterly_revenue_yoy_streak, 2)
+        self.assertEqual(fundamentals.quarterly_financials[0]["fiscalPeriod"], "Q2")
 
 
 class MarketDataSourceTests(unittest.TestCase):
@@ -1640,7 +1761,7 @@ class SnapshotTests(unittest.TestCase):
 
         payload = report_to_snapshot_payload(report, mode="live")
 
-        self.assertEqual(payload["version"], 14)
+        self.assertEqual(payload["version"], 15)
         self.assertEqual(payload["snapshotDate"], "2026-05-18")
         self.assertEqual(payload["createdAtTimezone"], "Asia/Seoul")
         self.assertIn("gitCommit", payload["audit"])
@@ -2109,12 +2230,41 @@ def _annual_fact(start: str, end: str, filed: str, value: float) -> dict:
     }
 
 
+def _quarter_fact(start: str, end: str, filed: str, value: float, period: str, year: int) -> dict:
+    return {
+        "start": start,
+        "end": end,
+        "filed": filed,
+        "form": "10-Q",
+        "fp": period,
+        "fy": year,
+        "val": value,
+    }
+
+
 def _dart_row(fs_div: str, account_name: str, current: str, previous: str) -> dict:
     return {
         "fs_div": fs_div,
         "account_nm": account_name,
         "thstrm_amount": current,
         "frmtrm_amount": previous,
+    }
+
+
+def _dart_payload(year: int, report_code: str, revenue: int, operating_income: int) -> dict:
+    rows = [
+        _dart_row("CFS", "매출액", f"{revenue:,}", "0"),
+        _dart_row("CFS", "영업이익", f"{operating_income:,}", "0"),
+    ]
+    for row in rows:
+        row["bsns_year"] = str(year)
+        row["reprt_code"] = report_code
+        row["thstrm_dt"] = f"{year}-12-31"
+    return {
+        "status": "000",
+        "bsns_year": str(year),
+        "reprt_code": report_code,
+        "list": rows,
     }
 
 

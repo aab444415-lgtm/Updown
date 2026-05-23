@@ -41,6 +41,17 @@ class Fundamentals:
     ev_to_ebit: float | None = None
     earnings_yield_pct: float | None = None
     rd_to_revenue_pct: float | None = None
+    revenue_cagr_3y_pct: float | None = None
+    revenue_cagr_5y_pct: float | None = None
+    operating_income_growth_pct: float | None = None
+    operating_income_cagr_3y_pct: float | None = None
+    operating_leverage_spread_pct: float | None = None
+    latest_quarter_revenue_yoy_pct: float | None = None
+    latest_quarter_operating_income_yoy_pct: float | None = None
+    quarterly_revenue_yoy_streak: int | None = None
+    quarterly_operating_leverage_streak: int | None = None
+    annual_financials: tuple[dict, ...] = ()
+    quarterly_financials: tuple[dict, ...] = ()
     sources: dict[str, dict] = field(default_factory=dict)
 
     def __init__(
@@ -75,6 +86,17 @@ class Fundamentals:
         ev_to_ebit: float | None = None,
         earnings_yield_pct: float | None = None,
         rd_to_revenue_pct: float | None = None,
+        revenue_cagr_3y_pct: float | None = None,
+        revenue_cagr_5y_pct: float | None = None,
+        operating_income_growth_pct: float | None = None,
+        operating_income_cagr_3y_pct: float | None = None,
+        operating_leverage_spread_pct: float | None = None,
+        latest_quarter_revenue_yoy_pct: float | None = None,
+        latest_quarter_operating_income_yoy_pct: float | None = None,
+        quarterly_revenue_yoy_streak: int | None = None,
+        quarterly_operating_leverage_streak: int | None = None,
+        annual_financials: tuple[dict, ...] = (),
+        quarterly_financials: tuple[dict, ...] = (),
         market_cap_usd: float | None = None,
         sources: dict[str, dict] | None = None,
     ) -> None:
@@ -111,6 +133,17 @@ class Fundamentals:
             "ev_to_ebit": ev_to_ebit,
             "earnings_yield_pct": earnings_yield_pct,
             "rd_to_revenue_pct": rd_to_revenue_pct,
+            "revenue_cagr_3y_pct": revenue_cagr_3y_pct,
+            "revenue_cagr_5y_pct": revenue_cagr_5y_pct,
+            "operating_income_growth_pct": operating_income_growth_pct,
+            "operating_income_cagr_3y_pct": operating_income_cagr_3y_pct,
+            "operating_leverage_spread_pct": operating_leverage_spread_pct,
+            "latest_quarter_revenue_yoy_pct": latest_quarter_revenue_yoy_pct,
+            "latest_quarter_operating_income_yoy_pct": latest_quarter_operating_income_yoy_pct,
+            "quarterly_revenue_yoy_streak": quarterly_revenue_yoy_streak,
+            "quarterly_operating_leverage_streak": quarterly_operating_leverage_streak,
+            "annual_financials": tuple(annual_financials or ()),
+            "quarterly_financials": tuple(quarterly_financials or ()),
             "sources": dict(sources or {}),
         }
         for key, value in values.items():
@@ -288,6 +321,7 @@ class StockScore:
     score: float
     industry_score: float
     quality_score: float
+    growth_quality_score: float
     valuation_score: float
     momentum_score: float
     role_score: float
