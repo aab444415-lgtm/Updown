@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from .config import configured_source_names, load_config, missing_optional_source_names
 from .data_sources import enrich_with_live_market_data, fetch_many_momentums, fetch_news
 from .macro_data import fetch_macro_snapshot
-from .models import DataQuality, RecommendationReport
+from .models import (
+    FUNDAMENTAL_SOURCE_BY_ATTR,
+    DataQuality,
+    RecommendationReport,
+    StockProfile,
+    fundamentals_with_real_sources_only,
+    real_fundamental_value_count,
+)
 from .opendart_financials import OpenDartFinancialClient
 from .scoring import build_report
 from .sec_edgar import SecEdgarClient
@@ -85,6 +94,11 @@ def create_recommendation_report(
     live_korea_fundamentals = dart_result.updated_count > 0
     warnings.extend(dart_result.warnings)
     live_fundamentals = live_fundamentals or live_korea_fundamentals
+    stocks, removed_fundamental_values = _keep_real_fundamentals_only(stocks)
+    if removed_fundamental_values:
+        warnings.append(
+            f"출처가 확인되지 않은 내장 재무 데이터 {removed_fundamental_values}개를 추천 계산과 표시에서 제외했습니다."
+        )
 
     momentum_tickers = tuple(
         dict.fromkeys(
@@ -136,4 +150,26 @@ def create_recommendation_report(
             missing_sources=missing_optional_source_names(config),
             warnings=tuple(dict.fromkeys(warnings)),
         ),
+    )
+
+
+def _keep_real_fundamentals_only(
+    stocks: tuple[StockProfile, ...],
+) -> tuple[tuple[StockProfile, ...], int]:
+    cleaned: list[StockProfile] = []
+    removed_values = 0
+    for stock in stocks:
+        before = _present_fundamental_value_count(stock)
+        fundamentals = fundamentals_with_real_sources_only(stock.fundamentals)
+        after = real_fundamental_value_count(fundamentals)
+        removed_values += max(0, before - after)
+        cleaned.append(replace(stock, fundamentals=fundamentals))
+    return tuple(cleaned), removed_values
+
+
+def _present_fundamental_value_count(stock: StockProfile) -> int:
+    return sum(
+        1
+        for attr in FUNDAMENTAL_SOURCE_BY_ATTR
+        if getattr(stock.fundamentals, attr) is not None
     )

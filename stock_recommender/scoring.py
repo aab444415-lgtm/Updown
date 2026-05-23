@@ -620,7 +620,7 @@ def score_legend_strategy_candidates(
 def lynch_strategy_score(item: StockScore) -> float:
     fundamentals = item.stock.fundamentals
     growth = _scale(fundamentals.revenue_growth_pct, low=0, high=35)
-    peg = _peg_proxy(fundamentals)
+    peg = 50
     leverage = _inverse_scale(fundamentals.debt_to_equity_pct, low=40, high=200)
     size = company_size_score(fundamentals.market_cap, fundamentals.market_cap_currency)
     understandable = 68 if item.stock.thesis else 50
@@ -704,7 +704,7 @@ def legend_strategy_reasons(
     greenblatt_basis = _greenblatt_basis_text(fundamentals)
     fisher_basis = _fisher_basis_text(fundamentals)
     return (
-        f"린치 {lynch:.1f}/100: PEG 프록시 {_peg_proxy_text(fundamentals)}, {_growth_check(fundamentals)}",
+        f"린치 {lynch:.1f}/100: EPS 성장률 미연결로 PEG는 제외, {_growth_check(fundamentals)}",
         f"오닐 {oneil:.1f}/100: 상대강도 {(_momentum_label(momentum))}, 최근 이슈 {'있음' if item.stock.recent_issues else '미확인'}",
         f"그린블라트 {greenblatt:.1f}/100: {greenblatt_basis}",
         f"피셔 {fisher:.1f}/100: {fisher_basis}",
@@ -714,20 +714,17 @@ def legend_strategy_reasons(
 def legend_strategy_warnings(item: StockScore, momentum: Momentum) -> tuple[str, ...]:
     fundamentals = item.stock.fundamentals
     warnings: list[str] = []
-    if _peg_proxy_value(fundamentals) is None:
-        warnings.append("EPS 성장률 데이터가 없어 매출 성장률 기반 PEG 프록시를 제한적으로 사용")
-    else:
-        warnings.append("EPS 성장률이 없어 매출 성장률을 PEG 계산의 성장률 대체값으로 사용")
+    warnings.append("EPS 성장률 데이터가 없어 PEG 항목은 점수에 포함하지 않음")
     if not _has_momentum_data(momentum):
         warnings.append("가격 상대강도 데이터가 부족해 오닐 모멘텀 항목은 중립 처리")
-    warnings.append("기관 신규 매수와 거래량 급증 데이터는 아직 연결되지 않아 정량 프록시로 대체")
+    warnings.append("기관 신규 매수 데이터는 아직 연결되지 않아 점수에 포함하지 않음")
     if fundamentals.rd_to_revenue_pct is None:
         warnings.append("R&D 투자 데이터가 없어 피셔 연구개발 항목은 중립 처리")
-    warnings.append("경영진 정성 평가는 아직 없어 ROE/부채비율 기반 자본효율 프록시로 대체")
+    warnings.append("경영진 정성 평가는 아직 연결되지 않아 점수에 포함하지 않음")
     if fundamentals.roic_pct is None:
-        warnings.append("ROIC 원천 데이터가 부족해 ROE/마진 프록시로 그린블라트 자본수익률을 대체")
+        warnings.append("ROIC 원천 데이터가 부족해 실제 ROE/마진 지표만 반영")
     if fundamentals.earnings_yield_pct is None or fundamentals.ev_to_ebit is None:
-        warnings.append("EV/EBIT 원천 데이터가 부족해 PER 또는 시가총액 기반 이익수익률 프록시로 대체")
+        warnings.append("EV/EBIT 원천 데이터가 부족해 실제 이익/시가총액 지표만 반영")
     roic_source = fundamentals.sources.get("roic") if isinstance(fundamentals.sources, dict) else None
     if isinstance(roic_source, dict) and roic_source.get("taxRateDefault"):
         default_rate = roic_source.get("defaultTaxRate")
@@ -741,7 +738,7 @@ def _greenblatt_basis_text(fundamentals: Fundamentals) -> str:
     if _finite(fundamentals.roic_pct):
         parts.append(f"실제 ROIC {fundamentals.roic_pct:.1f}%")
     else:
-        parts.append("ROE/마진 프록시")
+        parts.append("ROIC 미연결, 실제 ROE/마진")
     if _finite(fundamentals.earnings_yield_pct):
         if _finite(fundamentals.ev_to_ebit):
             parts.append(
@@ -751,7 +748,7 @@ def _greenblatt_basis_text(fundamentals: Fundamentals) -> str:
         else:
             parts.append(f"이익수익률 {fundamentals.earnings_yield_pct:.1f}%")
     else:
-        parts.append("이익수익률 프록시")
+        parts.append("EV/EBIT 미연결, 실제 이익/시가총액")
     return "와 ".join(parts) + "를 결합"
 
 
@@ -760,7 +757,7 @@ def _fisher_basis_text(fundamentals: Fundamentals) -> str:
         rd_text = f"R&D/매출 {fundamentals.rd_to_revenue_pct:.1f}%"
     else:
         rd_text = "R&D 중립값"
-    return f"장기 성장성, 영업이익률, {rd_text}, ROE 기반 자본배분 프록시를 반영"
+    return f"장기 성장성, 영업이익률, {rd_text}, ROE/부채비율 기반 재무 건전성을 반영"
 
 
 def early_revenue_growth_score(growth_pct: float | None) -> float:

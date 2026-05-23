@@ -28,7 +28,7 @@ npm run build
 
 Cloudflare Pages 자동 업데이트는 [docs/cloudflare-auto-update.md](docs/cloudflare-auto-update.md)를 참고하세요.
 
-기본 실행은 항상 Google News/Yahoo Finance 공개 데이터, SEC EDGAR, OpenDART, FRED, ECOS 갱신을 시도합니다. 외부 데이터가 일부 실패하면 기본 유니버스 지표와 중립 모멘텀을 보조값으로 사용하고 경고에 남깁니다.
+기본 실행은 항상 Google News/Yahoo Finance 공개 데이터, SEC EDGAR, OpenDART, FRED, ECOS 갱신을 시도합니다. 재무 지표는 실제 출처가 확인된 값만 추천 계산과 화면에 사용하며, 내장 유니버스 숫자나 출처 없는 값은 제외하고 경고에 남깁니다.
 
 특정 산업 개수와 종목 개수를 조정하려면:
 

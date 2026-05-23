@@ -318,6 +318,33 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
     _set_source(sources, "pretaxIncome", pretax_income[0])
     _set_source(sources, "incomeTaxExpense", income_tax_expense[0])
     _set_source(sources, "researchAndDevelopment", research_and_development[0])
+    if revenue_growth_pct is not None:
+        _set_source(sources, "revenueGrowth", revenue[0], derived_from=("revenue",))
+    if operating_margin_pct is not None:
+        _set_source(sources, "operatingMargin", operating_income[0] or revenue[0], derived_from=("operatingIncome", "revenue"))
+    if roe_pct is not None:
+        _set_source(sources, "roe", net_income[0] or equity[0], derived_from=("netIncome", "equity"))
+    if debt_to_equity_pct is not None:
+        _set_source(
+            sources,
+            "debtToEquity",
+            direct_debt[0] or debt_components[0] or liabilities[0] or equity[0],
+            derived_from=("totalDebt", "liabilities", "equity"),
+        )
+    if current_ratio_pct is not None:
+        _set_source(
+            sources,
+            "currentRatio",
+            current_assets[0] or current_liabilities[0],
+            derived_from=("currentAssets", "currentLiabilities"),
+        )
+    if interest_coverage is not None:
+        _set_source(
+            sources,
+            "interestCoverage",
+            operating_income[0] or interest_expense[0],
+            derived_from=("operatingIncome", "interestExpense"),
+        )
     if ebitda is not None:
         _set_source(sources, "ebitda", operating_income[0] or depreciation_amortization[0])
     if free_cash_flow is not None:

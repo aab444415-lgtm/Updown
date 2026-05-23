@@ -92,7 +92,7 @@ def render_markdown(
 
     lines.append("## 투자 전설 전략 후보")
     lines.append("")
-    lines.append("린치, 오닐, 그린블라트, 피셔의 정량 프록시를 결합해 후보를 따로 정렬합니다.")
+    lines.append("린치, 오닐, 그린블라트, 피셔 기준에 맞춰 실제 출처가 있는 정량 지표만 결합해 후보를 따로 정렬합니다.")
     lines.append("")
     for rank, item in enumerate(report.legend_strategy_scores[:top_stocks], start=1):
         lines.extend(_render_legend_strategy_stock(rank, item))
@@ -353,7 +353,8 @@ def _format_fundamentals(fundamentals: Fundamentals) -> str:
         ("Forward PER", _multiple(fundamentals.forward_pe)),
         ("시가총액", _market_cap(fundamentals.market_cap, fundamentals.market_cap_currency)),
     ]
-    return ", ".join(f"{name} {value}" for name, value in parts if value != "N/A")
+    formatted = ", ".join(f"{name} {value}" for name, value in parts if value != "N/A")
+    return formatted or "실제 출처 확인 지표 없음"
 
 
 def _format_valuation_range(item: StockScore) -> str:

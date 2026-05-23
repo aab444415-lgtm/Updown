@@ -253,6 +253,48 @@ def extract_opendart_fundamentals(
         research_and_development_rows[0] if research_and_development_rows else None,
         payload,
     )
+    if revenue_growth_pct is not None:
+        _set_row_source(sources, "revenueGrowth", revenue_row, payload, derived_from=("revenue",))
+    if operating_margin_pct is not None:
+        _set_row_source(
+            sources,
+            "operatingMargin",
+            operating_income_row or revenue_row,
+            payload,
+            derived_from=("operatingIncome", "revenue"),
+        )
+    if roe_pct is not None:
+        _set_row_source(
+            sources,
+            "roe",
+            net_income_row or equity_row,
+            payload,
+            derived_from=("netIncome", "equity"),
+        )
+    if debt_to_equity_pct is not None:
+        _set_row_source(
+            sources,
+            "debtToEquity",
+            (debt_rows[0] if debt_rows else None) or liabilities_row or equity_row,
+            payload,
+            derived_from=("totalDebt", "liabilities", "equity"),
+        )
+    if current_ratio_pct is not None:
+        _set_row_source(
+            sources,
+            "currentRatio",
+            current_assets_row or current_liabilities_row,
+            payload,
+            derived_from=("currentAssets", "currentLiabilities"),
+        )
+    if interest_coverage is not None:
+        _set_row_source(
+            sources,
+            "interestCoverage",
+            operating_income_row or interest_expense_row,
+            payload,
+            derived_from=("operatingIncome", "interestExpense"),
+        )
     if ebitda is not None:
         _set_row_source(sources, "ebitda", operating_income_row or depreciation_row or amortization_row, payload)
     if free_cash_flow is not None:
