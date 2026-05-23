@@ -559,11 +559,15 @@ h3 {
   gap: 3px 8px;
   min-width: min(100%, 168px);
   max-width: 240px;
+  border: 0;
   border-left: 2px solid #167568;
+  background: transparent;
   padding-left: 7px;
   color: #24312d;
   font-size: 11px;
+  font-family: inherit;
   line-height: 1.25;
+  text-align: left;
 }
 
 .stock-pick-item span {
@@ -592,6 +596,26 @@ h3 {
 .stock-pick-item i {
   grid-column: 1 / -1;
   color: #815117;
+}
+
+.stock-pick-item.selectable {
+  cursor: pointer;
+}
+
+.stock-pick-item.selectable:hover b,
+.stock-pick-item.selectable:focus-visible b {
+  color: #167568;
+  text-decoration: underline;
+}
+
+.stock-pick-item.selectable:focus-visible {
+  outline: 2px solid #167568;
+  outline-offset: 3px;
+}
+
+.stock-pick-item.muted {
+  border-left-color: #aebdb6;
+  opacity: 0.8;
 }
 
 .news-signal-grid {

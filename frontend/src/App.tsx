@@ -166,6 +166,7 @@ type StockPick = {
   name: string;
   label: string;
   detail: string;
+  selectable?: boolean;
 };
 
 type Report = {
@@ -289,6 +290,12 @@ export default function App() {
   const selectedStock =
     rankedStocks.find((stock) => stock.ticker === selectedTicker) || rankedStocks[0] || null;
 
+  const openStockDetail = (ticker: string) => {
+    setQuery("");
+    setSelectedTicker(ticker);
+    setActiveView("stocks");
+  };
+
   useEffect(() => {
     if (rankedStocks.length && !rankedStocks.some((stock) => stock.ticker === selectedTicker)) {
       setSelectedTicker(rankedStocks[0].ticker);
@@ -392,6 +399,7 @@ export default function App() {
               industries={report.industries || []}
               beneficiaries={report.beneficiaryIndustries || []}
               stocks={report.stocks || []}
+              onSelectStock={openStockDetail}
               createdAt={report.createdAtDisplay}
             />
           )}
@@ -466,11 +474,13 @@ function IndustryFlowListView({
   industries,
   beneficiaries,
   stocks,
+  onSelectStock,
   createdAt,
 }: {
   industries: Industry[];
   beneficiaries: BeneficiaryIndustry[];
   stocks: Stock[];
+  onSelectStock: (ticker: string) => void;
   createdAt: string;
 }) {
   const [flowQuery, setFlowQuery] = useState("");
@@ -488,6 +498,9 @@ function IndustryFlowListView({
     });
     grouped.forEach((items) => items.sort((a, b) => b.score - a.score));
     return grouped;
+  }, [stocks]);
+  const stocksByTicker = useMemo(() => {
+    return new Map(stocks.map((stock) => [stock.ticker.toUpperCase(), stock]));
   }, [stocks]);
   const normalizedQuery = flowQuery.trim().toLowerCase();
   const visibleIndustries = useMemo(() => {
@@ -595,7 +608,9 @@ function IndustryFlowListView({
                       name: stock.name,
                       label: stock.decisionGrade,
                       detail: formatScore(stock.score),
+                      selectable: true,
                     }))}
+                    onSelect={onSelectStock}
                   />
                 </div>
                 <strong className="rank-score">{formatScore(industry.score)}</strong>
@@ -646,12 +661,17 @@ function IndustryFlowListView({
                     picks={(industry.marketProxies || [])
                       .filter((proxy) => proxy.role === "representative")
                       .slice(0, 4)
-                      .map((proxy) => ({
-                        ticker: proxy.ticker,
-                        name: proxy.name,
-                        label: "대표주",
-                        detail: `가중치 ${proxy.weight.toFixed(1)}`,
-                      }))}
+                      .map((proxy) => {
+                        const stock = stocksByTicker.get(proxy.ticker.toUpperCase());
+                        return {
+                          ticker: stock?.ticker || proxy.ticker,
+                          name: stock?.name || proxy.name,
+                          label: stock ? stock.decisionGrade : "대표주",
+                          detail: stock ? formatScore(stock.score) : `가중치 ${proxy.weight.toFixed(1)}`,
+                          selectable: Boolean(stock),
+                        };
+                      })}
+                    onSelect={onSelectStock}
                   />
                   <div className="news-signal-grid">
                     <ScoreMini label="뉴스 7일" value={industry.newsRecentScore} />
@@ -698,22 +718,48 @@ function IndustryFlowListView({
   );
 }
 
-function StockPickList({ title, picks }: { title: string; picks: StockPick[] }) {
+function StockPickList({
+  title,
+  picks,
+  onSelect,
+}: {
+  title: string;
+  picks: StockPick[];
+  onSelect?: (ticker: string) => void;
+}) {
   if (!picks.length) return null;
   return (
     <div className="stock-pick-list" aria-label={title}>
       <strong>{title}</strong>
       <div className="stock-pick-items">
-        {picks.map((pick) => (
-          <span className="stock-pick-item" key={`${title}-${pick.ticker}`}>
-            <span>
-              <b>{pick.ticker}</b>
-              <small>{pick.name}</small>
+        {picks.map((pick) => {
+          const canSelect = Boolean(onSelect && pick.selectable !== false);
+          const content = (
+            <>
+              <span>
+                <b>{pick.ticker}</b>
+                <small>{pick.name}</small>
+              </span>
+              <em>{pick.detail}</em>
+              <i>{pick.label}</i>
+            </>
+          );
+          return canSelect ? (
+            <button
+              className="stock-pick-item selectable"
+              key={`${title}-${pick.ticker}`}
+              type="button"
+              onClick={() => onSelect?.(pick.ticker)}
+              title={`${pick.name} 상세 보기`}
+            >
+              {content}
+            </button>
+          ) : (
+            <span className="stock-pick-item muted" key={`${title}-${pick.ticker}`}>
+              {content}
             </span>
-            <em>{pick.detail}</em>
-            <i>{pick.label}</i>
-          </span>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
