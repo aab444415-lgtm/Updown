@@ -497,14 +497,18 @@ h3 {
 }
 
 .beneficiary-meta,
-.risk-strip {
+.risk-strip,
+.proxy-chip-row,
+.source-chip-row {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
 .beneficiary-meta span,
-.risk-strip span {
+.risk-strip span,
+.proxy-chip-row span,
+.source-chip-row span {
   border-radius: 8px;
   padding: 5px 7px;
   font-size: 11px;
@@ -519,6 +523,98 @@ h3 {
 .risk-strip span {
   background: #fff7ea;
   color: #815117;
+}
+
+.proxy-chip-row span {
+  background: #eaf2ff;
+  color: #244b78;
+}
+
+.source-chip-row span {
+  background: #eef5ed;
+  color: #3d673b;
+}
+
+.stock-pick-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.stock-pick-list > strong {
+  color: #60716a;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.stock-pick-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stock-pick-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 8px;
+  min-width: min(100%, 168px);
+  max-width: 240px;
+  border-left: 2px solid #167568;
+  padding-left: 7px;
+  color: #24312d;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.stock-pick-item span {
+  display: grid;
+  min-width: 0;
+}
+
+.stock-pick-item b,
+.stock-pick-item small {
+  overflow-wrap: anywhere;
+}
+
+.stock-pick-item small {
+  color: #60716a;
+}
+
+.stock-pick-item em,
+.stock-pick-item i {
+  align-self: start;
+  color: #167568;
+  font-style: normal;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.stock-pick-item i {
+  grid-column: 1 / -1;
+  color: #815117;
+}
+
+.news-signal-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.news-signal-grid span {
+  display: inline-flex;
+  justify-content: space-between;
+  gap: 5px;
+  min-width: 0;
+  border-radius: 8px;
+  background: #edf4f1;
+  color: #42514c;
+  padding: 5px 7px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.news-signal-grid strong {
+  color: #167568;
 }
 
 .beneficiary-card ul {

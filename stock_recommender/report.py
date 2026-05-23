@@ -163,10 +163,24 @@ def _render_beneficiary_industry(rank: int, item: BeneficiaryIndustryScore) -> l
     lines.append(f"- 원인 산업: {profile.source_industry}")
     lines.append(f"- 예상 시차: {profile.time_horizon}")
     lines.append(f"- 수혜 논리: {profile.mechanism}")
+    if profile.market_proxies:
+        proxy_text = ", ".join(
+            f"{proxy.ticker}({proxy.role})" for proxy in profile.market_proxies
+        )
+        lines.append(f"- 대표 ETF/종목: {proxy_text}")
     lines.append(
         f"- 세부 점수: 원인 산업 {item.source_industry_score:.1f}, 연결도 {item.connection_score:.1f}, "
         f"거시 {item.macro_score:.1f}, 뉴스 {item.news_score:.1f}, 시장 {item.market_score:.1f}"
     )
+    lines.append(
+        f"- Proxy 모멘텀: {item.proxy_momentum_score:.1f}/100, 커버리지 {item.proxy_coverage_pct:.1f}%"
+    )
+    lines.append(
+        f"- 뉴스 흐름: 7일 {item.news_recent_score:.1f}, 30일 {item.news_baseline_score:.1f}, "
+        f"증가율 {item.news_acceleration_score:.1f} ({item.news_coverage_label})"
+    )
+    if item.news_top_sources:
+        lines.append("- 주요 출처: " + ", ".join(item.news_top_sources[:3]))
     lines.append("- 근거:")
     for evidence in item.evidence[:4]:
         lines.append(f"  - {evidence}")

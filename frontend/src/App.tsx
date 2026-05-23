@@ -128,6 +128,13 @@ type Industry = {
   risks: string[];
 };
 
+type MarketProxy = {
+  ticker: string;
+  name: string;
+  role: "etf" | "representative" | string;
+  weight: number;
+};
+
 type BeneficiaryIndustry = {
   name: string;
   description: string;
@@ -136,14 +143,29 @@ type BeneficiaryIndustry = {
   timeHorizon: string;
   keywords: string[];
   risks: string[];
+  marketProxies: MarketProxy[];
   score: number;
   sourceIndustryScore: number;
   connectionScore: number;
   macroScore: number;
   newsScore: number;
   marketScore: number;
+  proxyMomentumScore: number;
+  proxyCoveragePct: number;
+  newsRecentScore: number;
+  newsBaselineScore: number;
+  newsAccelerationScore: number;
+  newsCoverageLabel: string;
+  newsTopSources: string[];
   evidence: string[];
   displaySummary: string;
+};
+
+type StockPick = {
+  ticker: string;
+  name: string;
+  label: string;
+  detail: string;
 };
 
 type Report = {
@@ -369,6 +391,7 @@ export default function App() {
             <IndustryFlowListView
               industries={report.industries || []}
               beneficiaries={report.beneficiaryIndustries || []}
+              stocks={report.stocks || []}
               createdAt={report.createdAtDisplay}
             />
           )}
@@ -442,10 +465,12 @@ function ViewSwitcher({
 function IndustryFlowListView({
   industries,
   beneficiaries,
+  stocks,
   createdAt,
 }: {
   industries: Industry[];
   beneficiaries: BeneficiaryIndustry[];
+  stocks: Stock[];
   createdAt: string;
 }) {
   const [flowQuery, setFlowQuery] = useState("");
@@ -454,16 +479,33 @@ function IndustryFlowListView({
     () => Array.from(new Set(beneficiaries.map((item) => item.sourceIndustry))).sort(),
     [beneficiaries],
   );
+  const stocksByIndustry = useMemo(() => {
+    const grouped = new Map<string, Stock[]>();
+    stocks.forEach((stock) => {
+      const items = grouped.get(stock.industry) || [];
+      items.push(stock);
+      grouped.set(stock.industry, items);
+    });
+    grouped.forEach((items) => items.sort((a, b) => b.score - a.score));
+    return grouped;
+  }, [stocks]);
   const normalizedQuery = flowQuery.trim().toLowerCase();
   const visibleIndustries = useMemo(() => {
-    if (!normalizedQuery) return industries;
     return industries.filter((industry) =>
-      [industry.name, industry.description, ...industry.evidence, ...industry.tailwinds, ...industry.risks]
+      !normalizedQuery ||
+      [
+        industry.name,
+        industry.description,
+        ...industry.evidence,
+        ...industry.tailwinds,
+        ...industry.risks,
+        ...(stocksByIndustry.get(industry.name) || []).flatMap((stock) => [stock.ticker, stock.name]),
+      ]
         .join(" ")
         .toLowerCase()
         .includes(normalizedQuery),
     );
-  }, [industries, normalizedQuery]);
+  }, [industries, normalizedQuery, stocksByIndustry]);
   const visibleBeneficiaries = useMemo(() => {
     return beneficiaries.filter((industry) => {
       const sourceMatches = sourceFilter === "all" || industry.sourceIndustry === sourceFilter;
@@ -476,6 +518,9 @@ function IndustryFlowListView({
           industry.mechanism,
           industry.timeHorizon,
           ...industry.keywords,
+          ...(industry.marketProxies || []).flatMap((proxy) => [proxy.ticker, proxy.name, proxy.role]),
+          ...(industry.newsTopSources || []),
+          industry.newsCoverageLabel,
           ...industry.evidence,
           ...industry.risks,
         ]
@@ -543,6 +588,15 @@ function IndustryFlowListView({
                     <ScoreMini label="뉴스" value={industry.newsScore} />
                     <ScoreMini label="시장" value={industry.marketScore} />
                   </div>
+                  <StockPickList
+                    title="추천주식"
+                    picks={(stocksByIndustry.get(industry.name) || []).slice(0, 3).map((stock) => ({
+                      ticker: stock.ticker,
+                      name: stock.name,
+                      label: stock.decisionGrade,
+                      detail: formatScore(stock.score),
+                    }))}
+                  />
                 </div>
                 <strong className="rank-score">{formatScore(industry.score)}</strong>
               </article>
@@ -574,8 +628,43 @@ function IndustryFlowListView({
                     <span>연결도 {formatScore(industry.connectionScore)}</span>
                     <span>거시 {formatScore(industry.macroScore)}</span>
                     <span>뉴스 {formatScore(industry.newsScore)}</span>
-                    <span>시장 {formatScore(industry.marketScore)}</span>
+                    <span>Proxy {formatScore(industry.proxyMomentumScore ?? industry.marketScore)}</span>
+                    <span>커버리지 {formatPct(industry.proxyCoveragePct ?? null)}</span>
+                    <span>{industry.newsCoverageLabel || "뉴스 데이터 부족"}</span>
                   </div>
+                  {(industry.marketProxies || []).length ? (
+                    <div className="proxy-chip-row" aria-label={`${industry.name} 대표 ETF 및 종목`}>
+                      {industry.marketProxies.slice(0, 6).map((proxy) => (
+                        <span key={`${industry.name}-${proxy.ticker}`} title={`${proxy.name} · ${proxy.role}`}>
+                          {proxy.ticker}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  <StockPickList
+                    title="추천주식"
+                    picks={(industry.marketProxies || [])
+                      .filter((proxy) => proxy.role === "representative")
+                      .slice(0, 4)
+                      .map((proxy) => ({
+                        ticker: proxy.ticker,
+                        name: proxy.name,
+                        label: "대표주",
+                        detail: `가중치 ${proxy.weight.toFixed(1)}`,
+                      }))}
+                  />
+                  <div className="news-signal-grid">
+                    <ScoreMini label="뉴스 7일" value={industry.newsRecentScore} />
+                    <ScoreMini label="뉴스 30일" value={industry.newsBaselineScore} />
+                    <ScoreMini label="증가율" value={industry.newsAccelerationScore} />
+                  </div>
+                  {(industry.newsTopSources || []).length ? (
+                    <div className="source-chip-row" aria-label={`${industry.name} 주요 뉴스 출처`}>
+                      {industry.newsTopSources.slice(0, 3).map((source) => (
+                        <span key={`${industry.name}-${source}`}>{source}</span>
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="beneficiary-detail-grid">
                     <section>
                       <h3>근거</h3>
@@ -606,6 +695,27 @@ function IndustryFlowListView({
         </section>
       </section>
     </section>
+  );
+}
+
+function StockPickList({ title, picks }: { title: string; picks: StockPick[] }) {
+  if (!picks.length) return null;
+  return (
+    <div className="stock-pick-list" aria-label={title}>
+      <strong>{title}</strong>
+      <div className="stock-pick-items">
+        {picks.map((pick) => (
+          <span className="stock-pick-item" key={`${title}-${pick.ticker}`}>
+            <span>
+              <b>{pick.ticker}</b>
+              <small>{pick.name}</small>
+            </span>
+            <em>{pick.detail}</em>
+            <i>{pick.label}</i>
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 

@@ -1,12 +1,24 @@
 from __future__ import annotations
 
-from .models import BeneficiaryIndustryProfile, Fundamentals, IndustryProfile, StockProfile
+from dataclasses import replace
+
+from .models import (
+    BeneficiaryIndustryProfile,
+    Fundamentals,
+    IndustryMarketProxy,
+    IndustryProfile,
+    StockProfile,
+)
 
 
 DEFAULT_MACRO_CONTEXT = (
     "AI 인프라 투자, 전력 수요 증가, 자동화, 방산 지출, 비만/만성질환 치료제, "
     "공급망 재편, 금리 인하 기대와 경기 둔화 우려가 동시에 존재하는 환경"
 )
+
+
+def _proxy(ticker: str, name: str, role: str, weight: float = 1.0) -> IndustryMarketProxy:
+    return IndustryMarketProxy(ticker=ticker, name=name, role=role, weight=weight)
 
 
 INDUSTRIES: tuple[IndustryProfile, ...] = (
@@ -264,6 +276,118 @@ BENEFICIARY_INDUSTRIES: tuple[BeneficiaryIndustryProfile, ...] = (
         risks=("도입 프로젝트 장기화", "규제 변화에 따른 제품 요구사항 변화"),
         connection_strength=76,
     ),
+)
+
+
+_BENEFICIARY_MARKET_PROXIES: dict[str, tuple[IndustryMarketProxy, ...]] = {
+    "전력 인프라 및 에너지 장비": (
+        _proxy("GRID", "First Trust Nasdaq Clean Edge Smart Grid Infrastructure ETF", "etf", 1.2),
+        _proxy("PAVE", "Global X U.S. Infrastructure Development ETF", "etf", 1.1),
+        _proxy("ETN", "Eaton", "representative", 1.0),
+        _proxy("PWR", "Quanta Services", "representative", 1.0),
+    ),
+    "냉각/HVAC": (
+        _proxy("CARR", "Carrier Global", "representative", 1.0),
+        _proxy("TT", "Trane Technologies", "representative", 1.0),
+        _proxy("JCI", "Johnson Controls", "representative", 0.9),
+    ),
+    "네트워킹": (
+        _proxy("ANET", "Arista Networks", "representative", 1.1),
+        _proxy("AVGO", "Broadcom", "representative", 1.0),
+        _proxy("CRDO", "Credo Technology", "representative", 0.9),
+    ),
+    "반도체 장비": (
+        _proxy("SMH", "VanEck Semiconductor ETF", "etf", 1.1),
+        _proxy("SOXX", "iShares Semiconductor ETF", "etf", 1.1),
+        _proxy("ASML", "ASML Holding", "representative", 1.0),
+        _proxy("AMAT", "Applied Materials", "representative", 1.0),
+        _proxy("LRCX", "Lam Research", "representative", 0.9),
+    ),
+    "발전 장비": (
+        _proxy("GEV", "GE Vernova", "representative", 1.1),
+        _proxy("VST", "Vistra", "representative", 1.0),
+        _proxy("CEG", "Constellation Energy", "representative", 1.0),
+        _proxy("BWXT", "BWX Technologies", "representative", 0.8),
+    ),
+    "ESS": (
+        _proxy("LIT", "Global X Lithium & Battery Tech ETF", "etf", 1.1),
+        _proxy("TSLA", "Tesla", "representative", 0.9),
+        _proxy("FLNC", "Fluence Energy", "representative", 1.0),
+        _proxy("NEE", "NextEra Energy", "representative", 0.8),
+    ),
+    "전력 기자재": (
+        _proxy("GRID", "First Trust Nasdaq Clean Edge Smart Grid Infrastructure ETF", "etf", 1.2),
+        _proxy("ETN", "Eaton", "representative", 1.0),
+        _proxy("HUBB", "Hubbell", "representative", 1.0),
+        _proxy("PWR", "Quanta Services", "representative", 0.9),
+    ),
+    "산업 자동화": (
+        _proxy("ROBO", "ROBO Global Robotics and Automation ETF", "etf", 1.1),
+        _proxy("ROK", "Rockwell Automation", "representative", 1.0),
+        _proxy("EMR", "Emerson Electric", "representative", 0.9),
+        _proxy("HON", "Honeywell", "representative", 0.9),
+    ),
+    "CDMO": (
+        _proxy("IBB", "iShares Biotechnology ETF", "etf", 1.0),
+        _proxy("XBI", "SPDR S&P Biotech ETF", "etf", 0.9),
+        _proxy("207940.KS", "Samsung Biologics", "representative", 1.1),
+        _proxy("WST", "West Pharmaceutical Services", "representative", 0.8),
+    ),
+    "바이오 생산설비": (
+        _proxy("IBB", "iShares Biotechnology ETF", "etf", 0.9),
+        _proxy("TMO", "Thermo Fisher Scientific", "representative", 1.1),
+        _proxy("DHR", "Danaher", "representative", 1.0),
+        _proxy("WST", "West Pharmaceutical Services", "representative", 0.9),
+    ),
+    "헬스케어 플랫폼": (
+        _proxy("XLV", "Health Care Select Sector SPDR Fund", "etf", 1.0),
+        _proxy("TDOC", "Teladoc Health", "representative", 0.8),
+        _proxy("UNH", "UnitedHealth Group", "representative", 1.0),
+        _proxy("CVS", "CVS Health", "representative", 0.8),
+    ),
+    "위성통신": (
+        _proxy("ARKX", "ARK Space Exploration & Innovation ETF", "etf", 1.1),
+        _proxy("RKLB", "Rocket Lab", "representative", 1.0),
+        _proxy("IRDM", "Iridium Communications", "representative", 1.0),
+        _proxy("LHX", "L3Harris Technologies", "representative", 0.9),
+    ),
+    "사이버보안": (
+        _proxy("HACK", "ETFMG Prime Cyber Security ETF", "etf", 1.1),
+        _proxy("CIBR", "First Trust Nasdaq Cybersecurity ETF", "etf", 1.1),
+        _proxy("PANW", "Palo Alto Networks", "representative", 1.0),
+        _proxy("CRWD", "CrowdStrike", "representative", 1.0),
+        _proxy("NET", "Cloudflare", "representative", 0.8),
+    ),
+    "첨단소재": (
+        _proxy("XLB", "Materials Select Sector SPDR Fund", "etf", 1.0),
+        _proxy("ATI", "ATI", "representative", 1.0),
+        _proxy("CRS", "Carpenter Technology", "representative", 0.9),
+        _proxy("HWM", "Howmet Aerospace", "representative", 0.9),
+    ),
+    "ID 관리": (
+        _proxy("CIBR", "First Trust Nasdaq Cybersecurity ETF", "etf", 1.0),
+        _proxy("OKTA", "Okta", "representative", 1.1),
+        _proxy("MSFT", "Microsoft", "representative", 0.9),
+        _proxy("PANW", "Palo Alto Networks", "representative", 0.9),
+    ),
+    "클라우드 보안": (
+        _proxy("CIBR", "First Trust Nasdaq Cybersecurity ETF", "etf", 1.0),
+        _proxy("PANW", "Palo Alto Networks", "representative", 1.0),
+        _proxy("CRWD", "CrowdStrike", "representative", 1.0),
+        _proxy("NET", "Cloudflare", "representative", 0.9),
+    ),
+    "데이터 거버넌스": (
+        _proxy("IGV", "iShares Expanded Tech-Software Sector ETF", "etf", 1.0),
+        _proxy("ORCL", "Oracle", "representative", 0.9),
+        _proxy("SNOW", "Snowflake", "representative", 1.0),
+        _proxy("MSFT", "Microsoft", "representative", 0.9),
+    ),
+}
+
+
+BENEFICIARY_INDUSTRIES = tuple(
+    replace(profile, market_proxies=_BENEFICIARY_MARKET_PROXIES.get(profile.name, ()))
+    for profile in BENEFICIARY_INDUSTRIES
 )
 
 

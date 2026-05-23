@@ -15,6 +15,32 @@ from .universe import BENEFICIARY_INDUSTRIES, DEFAULT_MACRO_CONTEXT, INDUSTRIES,
 SNAPSHOT_BENCHMARK_TICKERS = ("SPY", "QQQ", "^KS11")
 
 
+def beneficiary_market_proxy_tickers(
+    beneficiary_industries=BENEFICIARY_INDUSTRIES,
+) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            proxy.ticker.upper()
+            for profile in beneficiary_industries
+            for proxy in profile.market_proxies
+            if proxy.ticker
+        )
+    )
+
+
+def beneficiary_news_terms(
+    beneficiary_industries=BENEFICIARY_INDUSTRIES,
+) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            term
+            for profile in beneficiary_industries
+            for term in profile.keywords
+            if term
+        )
+    )
+
+
 def create_recommendation_report(
     macro_context: str = DEFAULT_MACRO_CONTEXT,
     use_sec_fundamentals: bool = True,
@@ -34,7 +60,14 @@ def create_recommendation_report(
     macro_snapshot = fetch_macro_snapshot(config, cache)
     warnings.extend(macro_snapshot.warnings)
 
-    all_terms = tuple(term for industry in INDUSTRIES for term in industry.news_terms)
+    all_terms = tuple(
+        dict.fromkeys(
+            (
+                *(term for industry in INDUSTRIES for term in industry.news_terms),
+                *beneficiary_news_terms(),
+            )
+        )
+    )
     news_items = fetch_news(all_terms, cache=cache)
     if not news_items:
         warnings.append("뉴스 RSS 수집에 실패해 산업 테마 키워드만 사용했습니다.")
@@ -53,7 +86,15 @@ def create_recommendation_report(
     warnings.extend(dart_result.warnings)
     live_fundamentals = live_fundamentals or live_korea_fundamentals
 
-    momentum_tickers = tuple(dict.fromkeys((*(stock.ticker for stock in stocks), *SNAPSHOT_BENCHMARK_TICKERS)))
+    momentum_tickers = tuple(
+        dict.fromkeys(
+            (
+                *(stock.ticker for stock in stocks),
+                *beneficiary_market_proxy_tickers(),
+                *SNAPSHOT_BENCHMARK_TICKERS,
+            )
+        )
+    )
     momentums = fetch_many_momentums(momentum_tickers, cache=cache)
     live_market_data = any(
         any(

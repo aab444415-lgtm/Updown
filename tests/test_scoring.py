@@ -15,6 +15,7 @@ from stock_recommender.models import (
     BeneficiaryIndustryProfile,
     DataQuality,
     Fundamentals,
+    IndustryMarketProxy,
     IndustryProfile,
     MacroIndicator,
     MacroSnapshot,
@@ -23,6 +24,7 @@ from stock_recommender.models import (
     StockProfile,
 )
 from stock_recommender.opendart_financials import extract_opendart_fundamentals
+from stock_recommender.pipeline import beneficiary_market_proxy_tickers
 from stock_recommender.report import render_markdown
 from stock_recommender.scoring import build_report, decision_grade_for_stock, quality_score, valuation_score
 from stock_recommender.sec_edgar import extract_fundamentals
@@ -261,6 +263,183 @@ class ScoringTests(unittest.TestCase):
         self.assertGreater(scores["Matched Benefit"].news_score, scores["Unmatched Benefit"].news_score)
         self.assertGreater(scores["Matched Benefit"].score, scores["Unmatched Benefit"].score)
 
+    def test_beneficiary_market_proxy_tickers_are_pipeline_targets(self):
+        profile = BeneficiaryIndustryProfile(
+            name="Proxy Benefit",
+            description="명시 proxy를 가진 수혜 산업",
+            source_industry="Source",
+            mechanism="원인 산업 수요가 후행합니다.",
+            time_horizon="3~12개월",
+            keywords=("proxybenefit",),
+            risks=("지연",),
+            connection_strength=80,
+            market_proxies=(
+                IndustryMarketProxy("pxa", "Proxy A", "etf", 1.2),
+                IndustryMarketProxy("PXB", "Proxy B", "representative", 1.0),
+            ),
+        )
+
+        self.assertEqual(beneficiary_market_proxy_tickers((profile,)), ("PXA", "PXB"))
+
+    def test_beneficiary_proxy_momentum_uses_explicit_market_proxies(self):
+        source = IndustryProfile(
+            name="Proxy Source",
+            description="원인 산업",
+            news_terms=("proxysource",),
+            macro_terms=("proxycapex",),
+            tailwinds=("투자 확대",),
+            risks=("과열",),
+        )
+        source_stock = StockProfile(
+            ticker="SRC",
+            name="Source Co",
+            industry=source.name,
+            role="core",
+            thesis="원인 산업 대표 기업입니다.",
+            risks=("변동성",),
+            fundamentals=Fundamentals(20.0, 20.0, 18.0, 30.0, 25.0, 20.0, 10_000_000_000),
+        )
+        proxied = BeneficiaryIndustryProfile(
+            name="Proxied Benefit",
+            description="proxy 모멘텀이 있는 수혜 산업",
+            source_industry=source.name,
+            mechanism="후행 투자로 연결됩니다.",
+            time_horizon="3~12개월",
+            keywords=("proxied",),
+            risks=("발주 지연",),
+            connection_strength=80,
+            market_proxies=(IndustryMarketProxy("PXHIGH", "High Proxy", "representative", 1.0),),
+        )
+        no_proxy = BeneficiaryIndustryProfile(
+            name="No Proxy Benefit",
+            description="proxy가 없는 수혜 산업",
+            source_industry=source.name,
+            mechanism="후행 투자로 연결됩니다.",
+            time_horizon="3~12개월",
+            keywords=("noproxy",),
+            risks=("발주 지연",),
+            connection_strength=80,
+        )
+
+        report = build_report(
+            macro_context="proxycapex",
+            industries=(source,),
+            stocks=(source_stock,),
+            news_items=(),
+            momentums={"PXHIGH": Momentum(24.0, 30.0, 36.0)},
+            beneficiary_industries=(proxied, no_proxy),
+        )
+        scores = {item.profile.name: item for item in report.beneficiary_industry_scores}
+
+        self.assertGreater(scores["Proxied Benefit"].market_score, scores["No Proxy Benefit"].market_score)
+        self.assertEqual(scores["Proxied Benefit"].proxy_coverage_pct, 100)
+        self.assertEqual(scores["No Proxy Benefit"].proxy_coverage_pct, 0)
+
+    def test_beneficiary_news_trend_rewards_recent_acceleration(self):
+        source = IndustryProfile(
+            name="Trend Source",
+            description="원인 산업",
+            news_terms=("trendsource",),
+            macro_terms=("trendcapex",),
+            tailwinds=("투자 확대",),
+            risks=("과열",),
+        )
+        source_stock = StockProfile(
+            ticker="TRD",
+            name="Trend Co",
+            industry=source.name,
+            role="core",
+            thesis="원인 산업 대표 기업입니다.",
+            risks=("변동성",),
+            fundamentals=Fundamentals(20.0, 20.0, 18.0, 30.0, 25.0, 20.0, 10_000_000_000),
+        )
+        beneficiary = BeneficiaryIndustryProfile(
+            name="Cooling Trend",
+            description="뉴스가 늘어난 수혜 산업",
+            source_industry=source.name,
+            mechanism="수요 병목이 후행 투자로 이어집니다.",
+            time_horizon="3~12개월",
+            keywords=("cooling", "thermal management"),
+            risks=("발주 지연",),
+            connection_strength=80,
+        )
+        created_at = datetime(2026, 5, 21, tzinfo=timezone.utc)
+        news_items = tuple(
+            NewsItem(
+                "data center cooling thermal management orders rise",
+                "Reuters",
+                published=(created_at - timedelta(days=day)).isoformat(),
+            )
+            for day in (1, 2, 3)
+        )
+
+        report = build_report(
+            macro_context="trendcapex",
+            industries=(source,),
+            stocks=(source_stock,),
+            news_items=news_items,
+            beneficiary_industries=(beneficiary,),
+            created_at=created_at,
+        )
+        score = report.beneficiary_industry_scores[0]
+
+        self.assertGreater(score.news_acceleration_score, 50)
+        self.assertIn("증가", score.news_coverage_label)
+
+    def test_beneficiary_news_source_weights_raise_high_trust_sources(self):
+        source = IndustryProfile(
+            name="Source Trust",
+            description="원인 산업",
+            news_terms=("trustsource",),
+            macro_terms=("trustcapex",),
+            tailwinds=("투자 확대",),
+            risks=("과열",),
+        )
+        source_stock = StockProfile(
+            ticker="TRU",
+            name="Trust Co",
+            industry=source.name,
+            role="core",
+            thesis="원인 산업 대표 기업입니다.",
+            risks=("변동성",),
+            fundamentals=Fundamentals(20.0, 20.0, 18.0, 30.0, 25.0, 20.0, 10_000_000_000),
+        )
+        beneficiary = BeneficiaryIndustryProfile(
+            name="Security Trust",
+            description="출처 가중치를 테스트하는 수혜 산업",
+            source_industry=source.name,
+            mechanism="후행 투자가 늘어납니다.",
+            time_horizon="3~12개월",
+            keywords=("cybersecurity", "cloud security"),
+            risks=("발주 지연",),
+            connection_strength=80,
+        )
+        created_at = datetime(2026, 5, 21, tzinfo=timezone.utc)
+
+        def score_for_source(source_name: str):
+            report = build_report(
+                macro_context="trustcapex",
+                industries=(source,),
+                stocks=(source_stock,),
+                news_items=(
+                    NewsItem(
+                        "cybersecurity cloud security demand expands",
+                        source_name,
+                        published=(created_at - timedelta(days=1)).isoformat(),
+                    ),
+                    NewsItem(
+                        "cloud security cybersecurity budgets rise",
+                        source_name,
+                        published=(created_at - timedelta(days=2)).isoformat(),
+                    ),
+                ),
+                beneficiary_industries=(beneficiary,),
+                created_at=created_at,
+            )
+            return report.beneficiary_industry_scores[0]
+
+        self.assertGreater(score_for_source("Reuters").news_score, score_for_source("PR Newswire").news_score)
+
     def test_report_renders_beneficiary_industries(self):
         report = build_report(
             macro_context=DEFAULT_MACRO_CONTEXT,
@@ -276,6 +455,8 @@ class ScoringTests(unittest.TestCase):
         self.assertIn("## 미래 수혜 산업", markdown)
         self.assertIn("원인 산업: AI 반도체 및 데이터센터", markdown)
         self.assertIn("예상 시차", markdown)
+        self.assertIn("대표 ETF/종목", markdown)
+        self.assertIn("뉴스 흐름", markdown)
 
     def test_early_growth_ranking_prefers_small_growth_pullback(self):
         industry = INDUSTRIES[0]
@@ -843,6 +1024,11 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(payload["beneficiaryIndustries"][0]["sourceIndustry"], "AI 반도체 및 데이터센터")
         self.assertIn("timeHorizon", payload["beneficiaryIndustries"][0])
         self.assertIn("evidence", payload["beneficiaryIndustries"][0])
+        self.assertIn("marketProxies", payload["beneficiaryIndustries"][0])
+        self.assertIn("proxyMomentumScore", payload["beneficiaryIndustries"][0])
+        self.assertIn("proxyCoveragePct", payload["beneficiaryIndustries"][0])
+        self.assertIn("newsRecentScore", payload["beneficiaryIndustries"][0])
+        self.assertIn("newsCoverageLabel", payload["beneficiaryIndustries"][0])
         self.assertIn("legendScores", payload["stocks"][0])
         self.assertIn("legendCompositeScore", payload["stocks"][0])
         self.assertIn("legendReasons", payload["stocks"][0])
@@ -1454,7 +1640,7 @@ class SnapshotTests(unittest.TestCase):
 
         payload = report_to_snapshot_payload(report, mode="live")
 
-        self.assertEqual(payload["version"], 13)
+        self.assertEqual(payload["version"], 14)
         self.assertEqual(payload["snapshotDate"], "2026-05-18")
         self.assertEqual(payload["createdAtTimezone"], "Asia/Seoul")
         self.assertIn("gitCommit", payload["audit"])
@@ -1476,6 +1662,11 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn("beneficiaryIndustries", payload)
         self.assertEqual(payload["beneficiaryIndustries"][0]["sourceIndustry"], "AI 반도체 및 데이터센터")
         self.assertIn("displaySummary", payload["beneficiaryIndustries"][0])
+        self.assertIn("marketProxies", payload["beneficiaryIndustries"][0])
+        self.assertIn("proxyMomentumScore", payload["beneficiaryIndustries"][0])
+        self.assertIn("proxyCoveragePct", payload["beneficiaryIndustries"][0])
+        self.assertIn("newsAccelerationScore", payload["beneficiaryIndustries"][0])
+        self.assertIn("newsTopSources", payload["beneficiaryIndustries"][0])
         self.assertIn("legendScores", payload["stocks"][0])
         self.assertIn("legendCompositeScore", payload["stocks"][0])
         self.assertEqual(payload["stocks"][0]["momentumRaw"]["latestClose"], 123.4)

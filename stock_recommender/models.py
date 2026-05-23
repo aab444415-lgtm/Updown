@@ -6,6 +6,7 @@ from typing import Literal
 
 
 StockRole = Literal["core", "adjacent"]
+MarketProxyRole = Literal["etf", "representative"]
 
 
 @dataclass(frozen=True, init=False)
@@ -175,6 +176,14 @@ class IndustryProfile:
 
 
 @dataclass(frozen=True)
+class IndustryMarketProxy:
+    ticker: str
+    name: str
+    role: MarketProxyRole
+    weight: float = 1.0
+
+
+@dataclass(frozen=True)
 class BeneficiaryIndustryProfile:
     name: str
     description: str
@@ -184,6 +193,7 @@ class BeneficiaryIndustryProfile:
     keywords: tuple[str, ...]
     risks: tuple[str, ...]
     connection_strength: float
+    market_proxies: tuple[IndustryMarketProxy, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -250,6 +260,13 @@ class BeneficiaryIndustryScore:
     market_score: float
     evidence: tuple[str, ...]
     display_summary: str
+    proxy_momentum_score: float = 50
+    proxy_coverage_pct: float = 0
+    news_recent_score: float = 35
+    news_baseline_score: float = 35
+    news_acceleration_score: float = 50
+    news_coverage_label: str = "30일 데이터 부족"
+    news_top_sources: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

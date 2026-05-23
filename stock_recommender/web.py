@@ -248,12 +248,28 @@ def _beneficiary_industry_to_dict(item) -> dict:
         "timeHorizon": profile.time_horizon,
         "keywords": list(profile.keywords),
         "risks": list(profile.risks),
+        "marketProxies": [
+            {
+                "ticker": proxy.ticker,
+                "name": proxy.name,
+                "role": proxy.role,
+                "weight": proxy.weight,
+            }
+            for proxy in profile.market_proxies
+        ],
         "score": item.score,
         "sourceIndustryScore": item.source_industry_score,
         "connectionScore": item.connection_score,
         "macroScore": item.macro_score,
         "newsScore": item.news_score,
         "marketScore": item.market_score,
+        "proxyMomentumScore": item.proxy_momentum_score,
+        "proxyCoveragePct": item.proxy_coverage_pct,
+        "newsRecentScore": item.news_recent_score,
+        "newsBaselineScore": item.news_baseline_score,
+        "newsAccelerationScore": item.news_acceleration_score,
+        "newsCoverageLabel": item.news_coverage_label,
+        "newsTopSources": list(item.news_top_sources),
         "evidence": list(item.evidence),
         "displaySummary": item.display_summary,
     }

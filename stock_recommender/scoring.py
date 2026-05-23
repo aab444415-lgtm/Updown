@@ -4,7 +4,9 @@ import math
 import re
 from collections import Counter
 from collections.abc import Iterable
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 from .data_sources import average_industry_momentum, momentum_to_score
 from .macro_data import industry_macro_data_score
@@ -38,6 +40,34 @@ LEGEND_DEFAULT_WEIGHTS = {
     "greenblatt": 0.25,
     "fisher": 0.15,
 }
+HIGH_TRUST_NEWS_SOURCES = (
+    "reuters",
+    "bloomberg",
+    "financial times",
+    "wall street journal",
+    "wsj",
+    "associated press",
+    "ap news",
+    "cnbc",
+    "marketwatch",
+)
+LOW_TRUST_NEWS_SOURCES = (
+    "pr newswire",
+    "globenewswire",
+    "business wire",
+    "accesswire",
+    "ein presswire",
+)
+
+
+@dataclass(frozen=True)
+class _BeneficiaryNewsSignal:
+    score: float
+    recent_score: float
+    baseline_score: float
+    acceleration_score: float
+    coverage_label: str
+    top_sources: tuple[str, ...]
 
 
 def build_report(
@@ -56,6 +86,7 @@ def build_report(
     stocks_tuple = tuple(stocks)
     news_tuple = tuple(news_items)
     momentums = momentums or {}
+    report_created_at = created_at or now_in_app_timezone()
 
     industry_scores = score_industries(
         macro_context=macro_context,
@@ -73,6 +104,7 @@ def build_report(
         momentums=momentums,
         macro_context=macro_context,
         macro_snapshot=macro_snapshot,
+        created_at=report_created_at,
     )
     stock_scores = score_stocks(stocks_tuple, industry_scores, momentums)
     early_growth_scores = score_early_growth_candidates(stock_scores, momentums)
@@ -87,7 +119,7 @@ def build_report(
     )
     legend_strategy_scores = score_legend_strategy_candidates(stock_scores, momentums)
     return RecommendationReport(
-        created_at=created_at or now_in_app_timezone(),
+        created_at=report_created_at,
         macro_context=macro_context,
         industry_scores=tuple(sorted(industry_scores, key=lambda item: item.score, reverse=True)),
         stock_scores=tuple(sorted(stock_scores, key=lambda item: item.score, reverse=True)),
@@ -160,13 +192,11 @@ def score_beneficiary_industries(
     momentums: dict[str, Momentum],
     macro_context: str,
     macro_snapshot: MacroSnapshot | None = None,
+    created_at: datetime | None = None,
 ) -> tuple[BeneficiaryIndustryScore, ...]:
     industry_score_by_name = {item.industry.name: item for item in industry_scores}
-    stocks_tuple = tuple(stocks)
-    news_text = " ".join(
-        " ".join(part for part in (item.title, item.summary or "") if part) for item in news_items
-    )
-    news_counter = _counter(news_text)
+    news_tuple = tuple(news_items)
+    reference_time = created_at or now_in_app_timezone()
     macro_counter = _counter(
         " ".join(part for part in (macro_context, macro_snapshot.summary if macro_snapshot else "") if part)
     )
@@ -177,10 +207,9 @@ def score_beneficiary_industries(
             continue
         connection = _clamp(profile.connection_strength, 0, 100)
         macro = _beneficiary_macro_score(profile, source_score, macro_counter)
-        news = _term_score(news_counter, profile.keywords, baseline=35, scale=9)
-        market = _beneficiary_market_score(profile, stocks_tuple, momentums)
-        if market is None:
-            market = 50
+        news_signal = _beneficiary_news_signal(profile, news_tuple, reference_time)
+        news = news_signal.score
+        market, proxy_coverage_pct = _beneficiary_proxy_market_score(profile, momentums)
         total = (
             source_score.score * 0.45
             + connection * 0.25
@@ -201,8 +230,22 @@ def score_beneficiary_industries(
                 macro_score=round(macro, 1),
                 news_score=round(news, 1),
                 market_score=round(market, 1),
-                evidence=_beneficiary_evidence(profile, source_score, macro, news, market),
+                evidence=_beneficiary_evidence(
+                    profile,
+                    source_score,
+                    macro,
+                    news_signal,
+                    market,
+                    proxy_coverage_pct,
+                ),
                 display_summary=display_summary,
+                proxy_momentum_score=round(market, 1),
+                proxy_coverage_pct=round(proxy_coverage_pct, 1),
+                news_recent_score=round(news_signal.recent_score, 1),
+                news_baseline_score=round(news_signal.baseline_score, 1),
+                news_acceleration_score=round(news_signal.acceleration_score, 1),
+                news_coverage_label=news_signal.coverage_label,
+                news_top_sources=news_signal.top_sources,
             )
         )
     return tuple(sorted(results, key=lambda item: item.score, reverse=True))
@@ -1959,61 +2002,161 @@ def _beneficiary_macro_score(
     return _clamp(text_score * 0.65 + source_score.macro_score * 0.35, 0, 100)
 
 
-def _beneficiary_market_score(
+def _beneficiary_proxy_market_score(
     profile: BeneficiaryIndustryProfile,
-    stocks: Iterable[StockProfile],
     momentums: dict[str, Momentum],
-) -> float | None:
-    values: list[float] = []
-    for stock in stocks:
-        if stock.industry != profile.name and not _stock_matches_beneficiary(stock, profile):
+) -> tuple[float, float]:
+    total_weight = 0.0
+    covered_weight = 0.0
+    weighted_score = 0.0
+    for proxy in profile.market_proxies:
+        weight = max(proxy.weight, 0)
+        if weight <= 0:
             continue
-        score = momentum_to_score(momentums.get(stock.ticker.upper(), Momentum()))
-        if score is not None:
-            values.append(score)
-    if not values:
-        return None
-    return sum(values) / len(values)
+        total_weight += weight
+        score = momentum_to_score(momentums.get(proxy.ticker.upper(), Momentum()))
+        if score is None:
+            continue
+        covered_weight += weight
+        weighted_score += score * weight
+    if total_weight <= 0 or covered_weight <= 0:
+        return 50, 0
+    return weighted_score / covered_weight, (covered_weight / total_weight) * 100
 
 
-def _stock_matches_beneficiary(
-    stock: StockProfile, profile: BeneficiaryIndustryProfile
-) -> bool:
-    text = " ".join(
-        (
-            stock.name,
-            stock.industry,
-            stock.thesis,
-            " ".join(stock.recent_issues),
-        )
+def _beneficiary_news_signal(
+    profile: BeneficiaryIndustryProfile,
+    news_items: Iterable[NewsItem],
+    reference_time: datetime,
+) -> _BeneficiaryNewsSignal:
+    if reference_time.tzinfo is None:
+        reference_time = reference_time.replace(tzinfo=timezone.utc)
+    recent_strength = 0.0
+    baseline_strength = 0.0
+    weighted_source_score = 0.0
+    total_source_strength = 0.0
+    matched_count = 0
+    source_counter: Counter[str] = Counter()
+    for item in news_items:
+        match_strength = _beneficiary_news_match_strength(profile, item)
+        if match_strength <= 0:
+            continue
+        published_at = _parse_news_datetime(item.published, reference_time)
+        age_days = max((reference_time - published_at).total_seconds() / 86_400, 0)
+        if age_days > 30:
+            continue
+        source_weight = _news_source_weight(item.source)
+        recency_weight = _news_recency_weight(age_days)
+        strength = min(match_strength, 4) * source_weight * recency_weight
+        baseline_strength += strength
+        matched_count += 1
+        source_name = item.source or "Unknown"
+        source_counter[source_name] += strength
+        weighted_source_score += _source_weight_to_score(source_weight) * strength
+        total_source_strength += strength
+        if age_days <= 7:
+            recent_strength += strength
+
+    recent_score = _clamp(35 + recent_strength * 11, 0, 100)
+    baseline_score = _clamp(35 + baseline_strength * 5, 0, 100)
+    if matched_count < 2 or baseline_strength < 1:
+        acceleration_score = 50.0
+        coverage_label = "30일 데이터 부족"
+    else:
+        recent_daily = recent_strength / 7
+        baseline_daily = baseline_strength / 30
+        ratio = recent_daily / max(baseline_daily, 0.05)
+        acceleration_score = _clamp(50 + math.log2(max(ratio, 0.05)) * 18, 0, 100)
+        if ratio >= 1.35:
+            coverage_label = "7일 뉴스 증가"
+        elif ratio <= 0.75:
+            coverage_label = "7일 뉴스 둔화"
+        else:
+            coverage_label = "7일/30일 보통"
+
+    source_score = (
+        weighted_source_score / total_source_strength
+        if total_source_strength > 0
+        else 50.0
     )
+    score = _clamp(
+        recent_score * 0.40
+        + baseline_score * 0.20
+        + acceleration_score * 0.25
+        + source_score * 0.15,
+        0,
+        100,
+    )
+    top_sources = tuple(source for source, _ in source_counter.most_common(3))
+    return _BeneficiaryNewsSignal(
+        score=score,
+        recent_score=recent_score,
+        baseline_score=baseline_score,
+        acceleration_score=acceleration_score,
+        coverage_label=coverage_label,
+        top_sources=top_sources,
+    )
+
+
+def _beneficiary_news_match_strength(profile: BeneficiaryIndustryProfile, item: NewsItem) -> float:
+    text = " ".join(part for part in (item.title, item.summary or "") if part)
     counter = _counter(text)
-    for term in (*profile.keywords, profile.name):
-        tokens = _tokens(term)
-        if len(tokens) == 1 and counter[tokens[0]]:
-            return True
-        if len(tokens) > 1 and (
-            counter[" ".join(tokens)] or all(counter[token] for token in tokens)
-        ):
-            return True
-    return False
+    return _term_match_count(counter, (*profile.keywords, profile.name))
+
+
+def _parse_news_datetime(value: str | None, reference_time: datetime) -> datetime:
+    fallback_tz = reference_time.tzinfo or timezone.utc
+    if not value:
+        return reference_time
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            parsed = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return reference_time
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=fallback_tz)
+    return parsed.astimezone(fallback_tz)
+
+
+def _news_recency_weight(age_days: float) -> float:
+    if age_days <= 7:
+        return _clamp(1.0 - age_days * 0.035, 0.72, 1.0)
+    return _clamp(0.72 - (age_days - 7) * 0.015, 0.35, 0.72)
+
+
+def _news_source_weight(source: str | None) -> float:
+    normalized = (source or "").lower()
+    if any(name in normalized for name in HIGH_TRUST_NEWS_SOURCES):
+        return 1.3
+    if any(name in normalized for name in LOW_TRUST_NEWS_SOURCES):
+        return 0.7
+    return 1.0
+
+
+def _source_weight_to_score(weight: float) -> float:
+    return _clamp(50 + (weight - 1.0) * 90, 0, 100)
 
 
 def _beneficiary_evidence(
     profile: BeneficiaryIndustryProfile,
     source_score: IndustryScore,
     macro_score: float,
-    news_score: float,
+    news_signal: _BeneficiaryNewsSignal,
     market_score: float,
+    proxy_coverage_pct: float,
 ) -> tuple[str, ...]:
     evidence = [
         f"원인 산업 {profile.source_industry} 활황 점수 {source_score.score:.1f}/100",
         f"산업 연결 강도 {profile.connection_strength:.1f}/100",
         f"거시 적합도 {macro_score:.1f}/100",
-        f"뉴스 키워드 근거 {news_score:.1f}/100",
-        f"관련 종목 시장 모멘텀 {market_score:.1f}/100",
+        f"뉴스 신호 {news_signal.score:.1f}/100 ({news_signal.coverage_label})",
+        f"대표 ETF/종목 모멘텀 {market_score:.1f}/100, 커버리지 {proxy_coverage_pct:.0f}%",
         profile.mechanism,
     ]
+    if news_signal.top_sources:
+        evidence.append("주요 뉴스 출처: " + ", ".join(news_signal.top_sources))
     evidence.extend(source_score.evidence[:2])
     return tuple(dict.fromkeys(evidence))
 
@@ -2473,7 +2616,11 @@ def _range_text(low: float | None, high: float | None, suffix: str = "") -> str:
 
 
 def _term_score(counter: Counter[str], terms: Iterable[str], baseline: float, scale: float) -> float:
-    count = 0
+    return _clamp(baseline + _term_match_count(counter, terms) * scale, 0, 100)
+
+
+def _term_match_count(counter: Counter[str], terms: Iterable[str]) -> float:
+    count = 0.0
     for term in terms:
         tokens = _tokens(term)
         if len(tokens) == 1:
@@ -2482,7 +2629,7 @@ def _term_score(counter: Counter[str], terms: Iterable[str], baseline: float, sc
         phrase = " ".join(tokens)
         count += counter[phrase] * 2
         count += min(counter[token] for token in tokens) if tokens else 0
-    return _clamp(baseline + count * scale, 0, 100)
+    return count
 
 
 def _counter(text: str) -> Counter[str]:
