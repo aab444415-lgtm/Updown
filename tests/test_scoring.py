@@ -37,16 +37,44 @@ from stock_recommender.web import report_to_dict
 
 class ScoringTests(unittest.TestCase):
     def test_quality_score_rewards_profitable_growth(self):
-        nvidia = next(stock for stock in STOCKS if stock.ticker == "NVDA")
-        cloudflare = next(stock for stock in STOCKS if stock.ticker == "NET")
+        nvidia = Fundamentals(
+            revenue_growth_pct=65.0,
+            operating_margin_pct=60.0,
+            roe_pct=80.0,
+            debt_to_equity_pct=12.0,
+            free_cash_flow=90_000_000_000,
+            revenue=200_000_000_000,
+        )
+        cloudflare = Fundamentals(
+            revenue_growth_pct=30.0,
+            operating_margin_pct=-3.0,
+            roe_pct=-7.0,
+            debt_to_equity_pct=160.0,
+            free_cash_flow=-100_000_000,
+            revenue=1_000_000_000,
+        )
 
-        self.assertGreater(quality_score(nvidia.fundamentals), quality_score(cloudflare.fundamentals))
+        self.assertGreater(quality_score(nvidia), quality_score(cloudflare))
 
     def test_valuation_score_penalizes_high_multiple(self):
-        amd = next(stock for stock in STOCKS if stock.ticker == "AMD")
-        lockheed = next(stock for stock in STOCKS if stock.ticker == "LMT")
+        amd = Fundamentals(
+            revenue_growth_pct=12.0,
+            operating_margin_pct=5.0,
+            roe_pct=3.0,
+            debt_to_equity_pct=4.0,
+            pe=120.0,
+            forward_pe=75.0,
+        )
+        lockheed = Fundamentals(
+            revenue_growth_pct=2.0,
+            operating_margin_pct=12.0,
+            roe_pct=35.0,
+            debt_to_equity_pct=160.0,
+            pe=18.0,
+            forward_pe=17.0,
+        )
 
-        self.assertGreater(valuation_score(lockheed.fundamentals), valuation_score(amd.fundamentals))
+        self.assertGreater(valuation_score(lockheed), valuation_score(amd))
 
     def test_valuation_score_does_not_blindly_reward_low_pe(self):
         cheap_but_stagnant = Fundamentals(
@@ -102,10 +130,28 @@ class ScoringTests(unittest.TestCase):
         self.assertGreater(quality_score(strong), quality_score(hollow))
 
     def test_stock_scores_include_analysis_checks(self):
+        industry = INDUSTRIES[0]
+        nvidia_profile = StockProfile(
+            ticker="NVDA",
+            name="NVIDIA",
+            industry=industry.name,
+            role="core",
+            thesis="AI GPU leader",
+            risks=(),
+            fundamentals=Fundamentals(
+                revenue_growth_pct=65.0,
+                operating_margin_pct=60.0,
+                roe_pct=80.0,
+                debt_to_equity_pct=12.0,
+                pe=52.0,
+                forward_pe=35.0,
+                market_cap=3_000_000_000_000,
+            ),
+        )
         report = build_report(
             macro_context=DEFAULT_MACRO_CONTEXT,
-            industries=INDUSTRIES,
-            stocks=STOCKS,
+            industries=(industry,),
+            stocks=(nvidia_profile,),
             news_items=(),
         )
         nvidia = next(item for item in report.stock_scores if item.stock.ticker == "NVDA")
