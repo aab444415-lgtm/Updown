@@ -117,6 +117,100 @@ class ScoringTests(unittest.TestCase):
         self.assertIsNotNone(nvidia.valuation_range.market_cap_low)
         self.assertTrue(any("밸류에이션 범위" in check for check in nvidia.analysis_checks))
 
+    def test_risk_gate_hard_fail_excludes_stock(self):
+        industry = IndustryProfile("테스트 성장 산업", "", (), (), (), ())
+        stock = StockProfile(
+            ticker="FAIL",
+            name="Fail Corp",
+            industry=industry.name,
+            role="core",
+            thesis="위험 재무 구조 테스트",
+            risks=(),
+            fundamentals=Fundamentals(
+                revenue_growth_pct=45.0,
+                operating_margin_pct=-8.0,
+                roe_pct=-12.0,
+                debt_to_equity_pct=450.0,
+                pe=25.0,
+                forward_pe=22.0,
+                free_cash_flow=-100.0,
+                current_ratio_pct=55.0,
+                interest_coverage=0.8,
+            ),
+        )
+
+        report = build_report(DEFAULT_MACRO_CONTEXT, (industry,), (stock,), ())
+        item = report.stock_scores[0]
+
+        self.assertEqual(item.risk_gate, "Hard Fail")
+        self.assertEqual(item.decision_grade, "제외")
+        self.assertEqual(item.target_weight_pct, 0)
+        self.assertTrue(any("즉시 제외" in signal for signal in item.sell_signals))
+
+    def test_aggressive_allow_keeps_high_growth_as_limited_candidate(self):
+        industry = IndustryProfile("테스트 AI 산업", "", (), (), (), ())
+        stock = StockProfile(
+            ticker="AGGR",
+            name="Aggressive Growth",
+            industry=industry.name,
+            role="core",
+            thesis="고성장 리스크 허용 테스트",
+            risks=(),
+            fundamentals=Fundamentals(
+                revenue_growth_pct=48.0,
+                operating_margin_pct=18.0,
+                roe_pct=22.0,
+                debt_to_equity_pct=260.0,
+                pe=38.0,
+                forward_pe=32.0,
+                operating_cash_flow=300.0,
+                free_cash_flow=120.0,
+                current_ratio_pct=150.0,
+                interest_coverage=5.0,
+            ),
+        )
+
+        report = build_report(DEFAULT_MACRO_CONTEXT, (industry,), (stock,), ())
+        item = report.stock_scores[0]
+
+        self.assertEqual(item.risk_gate, "Aggressive Allow")
+        self.assertEqual(item.risk_level, "높음")
+        self.assertLessEqual(item.max_weight_pct, 4.0)
+        self.assertNotEqual(item.decision_grade, "제외")
+
+    def test_style_weight_profile_and_portfolio_fields_are_serialized(self):
+        industry = IndustryProfile("테스트 금융", "", (), (), (), ())
+        stock = StockProfile(
+            ticker="BANK",
+            name="Bank Quality",
+            industry=industry.name,
+            role="core",
+            thesis="가치 금융 테스트",
+            risks=(),
+            fundamentals=Fundamentals(
+                revenue_growth_pct=8.0,
+                operating_margin_pct=32.0,
+                roe_pct=18.0,
+                debt_to_equity_pct=35.0,
+                pe=12.0,
+                forward_pe=10.0,
+                operating_cash_flow=500.0,
+                free_cash_flow=320.0,
+                current_ratio_pct=180.0,
+                interest_coverage=9.0,
+            ),
+        )
+
+        report = build_report(DEFAULT_MACRO_CONTEXT, (industry,), (stock,), ())
+        item = report.stock_scores[0]
+        api_payload = report_to_dict(report)
+        snapshot_payload = report_to_snapshot_payload(report)
+
+        self.assertEqual(item.weight_profile, "가치/금융주")
+        self.assertIn(item.portfolio_signal, {"편입 후보", "분할 관찰", "보유 점검"})
+        self.assertEqual(api_payload["stocks"][0]["riskGate"], item.risk_gate)
+        self.assertEqual(snapshot_payload["stocks"][0]["targetWeightPct"], item.target_weight_pct)
+
     def test_report_contains_data_quality(self):
         report = build_report(
             macro_context=DEFAULT_MACRO_CONTEXT,
@@ -1549,6 +1643,46 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(result.periods[1].tickers, ("BBB",))
         self.assertEqual(payload["periods"][0]["snapshotDate"], "2025-01-31")
 
+    def test_rules_backtest_uses_target_weights_and_risk_gate(self):
+        snapshots = (
+            _rules_snapshot_with_anchors(
+                date(2025, 1, 31),
+                stocks=[
+                    ("AAA", "Alpha", 100, "매수 후보", "Pass", 8.0),
+                    ("BBB", "Beta", 100, "관심", "Pass", 4.0),
+                    ("CCC", "Crash", 100, "매수 후보", "Hard Fail", 8.0),
+                ],
+                spy_close=100,
+            ),
+            _rules_snapshot_with_anchors(
+                date(2025, 2, 28),
+                stocks=[
+                    ("AAA", "Alpha", 120, "매수 후보", "Pass", 8.0),
+                    ("BBB", "Beta", 100, "관심", "Pass", 4.0),
+                    ("CCC", "Crash", 200, "매수 후보", "Hard Fail", 8.0),
+                ],
+                spy_close=100,
+            ),
+        )
+
+        result = run_snapshot_backtest(
+            snapshots=snapshots,
+            histories={},
+            months=1,
+            top_n=2,
+            benchmark_ticker="SPY",
+            created_at=datetime(2025, 3, 1, 9, 0, tzinfo=ZoneInfo("Asia/Seoul")),
+            timezone_name="Asia/Seoul",
+            method="rules",
+        )
+        payload = backtest_to_dict(result)
+
+        self.assertEqual(result.method, "rules")
+        self.assertEqual(result.periods[0].tickers, ("AAA", "BBB"))
+        self.assertEqual(result.periods[0].weights_pct, (8.0, 4.0))
+        self.assertAlmostEqual(result.periods[0].return_pct, 13.33, places=2)
+        self.assertEqual(payload["periods"][0]["weightsPct"], [8.0, 4.0])
+
     def test_snapshot_backtest_uses_horizon_candidate_collections(self):
         snapshots = (
             _term_snapshot_with_anchors(
@@ -1761,7 +1895,7 @@ class SnapshotTests(unittest.TestCase):
 
         payload = report_to_snapshot_payload(report, mode="live")
 
-        self.assertEqual(payload["version"], 15)
+        self.assertEqual(payload["version"], 16)
         self.assertEqual(payload["snapshotDate"], "2026-05-18")
         self.assertEqual(payload["createdAtTimezone"], "Asia/Seoul")
         self.assertIn("gitCommit", payload["audit"])
@@ -2368,6 +2502,45 @@ def _snapshot_with_anchors(snapshot_date: date, stocks: list[tuple[str, str, flo
                     },
                 }
             ],
+        },
+    )
+
+
+def _rules_snapshot_with_anchors(
+    snapshot_date: date,
+    stocks: list[tuple[str, str, float, str, str, float]],
+    spy_close: float,
+) -> SnapshotRecord:
+    return SnapshotRecord(
+        snapshot_date=snapshot_date,
+        payload={
+            "version": 16,
+            "stocks": [
+                {
+                    "ticker": ticker,
+                    "name": name,
+                    "score": 90,
+                    "decisionGrade": decision_grade,
+                    "riskGate": risk_gate,
+                    "targetWeightPct": target_weight,
+                    "priceAnchor": _anchor(snapshot_date, close, "USD"),
+                }
+                for ticker, name, close, decision_grade, risk_gate, target_weight in stocks
+            ],
+            "benchmarks": [
+                {"ticker": "SPY", "priceAnchor": _anchor(snapshot_date, spy_close, "USD")},
+                {"ticker": "QQQ", "priceAnchor": _anchor(snapshot_date, spy_close, "USD")},
+                {"ticker": "^KS11", "priceAnchor": _anchor(snapshot_date, spy_close, "KRW")},
+            ],
+            "snapshotQuality": {
+                "priceAnchorCoveragePct": 100,
+                "benchmarkAnchorCoveragePct": 100,
+                "fundamentalSourceCoveragePct": 0,
+                "sourceErrorCount": 0,
+                "sourceStaleCount": 0,
+                "backtestEligible": True,
+                "exclusionReasons": [],
+            },
         },
     )
 

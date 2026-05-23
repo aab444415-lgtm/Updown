@@ -1016,6 +1016,13 @@ h3 {
   margin-top: 16px;
 }
 
+.portfolio-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
 .strategy-tile,
 .metric-tile {
   min-width: 0;
@@ -1211,6 +1218,7 @@ h3 {
 
   .metric-grid,
   .backtest-metrics,
+  .portfolio-rule-grid,
   .flow-stat-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -1251,6 +1259,7 @@ h3 {
     .industry-list-controls,
     .industry-flow-grid,
     .strategy-score-grid,
+    .portfolio-rule-grid,
     .metric-grid,
     .backtest-metrics,
     .flow-stat-grid,

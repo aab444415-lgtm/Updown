@@ -196,7 +196,11 @@ def _render_stock(rank: int, item: StockScore) -> list[str]:
     lines.append(
         f"- 투자 판단: {item.decision_grade}, 리스크 {item.risk_level}, 밸류에이션 {item.valuation_label}"
     )
-    lines.append(f"- 분석 스타일: {item.analysis_style}")
+    lines.append(
+        f"- 리스크 게이트: {item.risk_gate} / 권장 액션: {item.portfolio_signal} "
+        f"(목표 {item.target_weight_pct:.1f}%, 최대 {item.max_weight_pct:.1f}%)"
+    )
+    lines.append(f"- 분석 스타일: {item.analysis_style}, 가중치 프로필: {item.weight_profile}")
     lines.append(
         f"- 세부 점수: 산업 {item.industry_score:.1f}, 기본적 분석 {item.quality_score:.1f}, "
         f"성장 품질 {item.growth_quality_score:.1f}, "
@@ -210,6 +214,9 @@ def _render_stock(rank: int, item: StockScore) -> list[str]:
     lines.append("- 체크할 리스크:")
     for caution in item.cautions[:3]:
         lines.append(f"  - {caution}")
+    lines.append("- 매도/축소 신호:")
+    for signal in item.sell_signals[:3]:
+        lines.append(f"  - {signal}")
     lines.append("- 분석 체크:")
     for check in item.analysis_checks:
         lines.append(f"  - {check}")

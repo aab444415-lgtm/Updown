@@ -329,8 +329,15 @@ class StockScore:
     cautions: tuple[str, ...]
     decision_grade: str
     risk_level: str
+    risk_gate: str
+    risk_gate_reasons: tuple[str, ...]
     valuation_label: str
     analysis_style: str
+    weight_profile: str
+    portfolio_signal: str
+    target_weight_pct: float
+    max_weight_pct: float
+    sell_signals: tuple[str, ...]
     valuation_note: str
     valuation_range: ValuationRange
     analysis_checks: tuple[str, ...]

@@ -205,6 +205,10 @@ def _compact_stock(item: dict) -> dict:
         "score": item.get("score"),
         "decisionGrade": item.get("decisionGrade"),
         "riskLevel": item.get("riskLevel"),
+        "riskGate": item.get("riskGate"),
+        "portfolioSignal": item.get("portfolioSignal"),
+        "targetWeightPct": item.get("targetWeightPct"),
+        "maxWeightPct": item.get("maxWeightPct"),
         "priceAnchor": item.get("priceAnchor") if isinstance(item.get("priceAnchor"), dict) else {},
     }
 

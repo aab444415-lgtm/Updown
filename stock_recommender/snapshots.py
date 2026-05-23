@@ -18,7 +18,7 @@ from .snapshot_store import list_snapshot_rows, save_persistent_snapshot
 from .storage import CacheStore
 
 
-SNAPSHOT_PAYLOAD_VERSION = 15
+SNAPSHOT_PAYLOAD_VERSION = 16
 BENCHMARK_TICKERS = ("SPY", "QQQ", "^KS11")
 FUNDAMENTAL_SOURCE_FIELDS = (
     "revenue",
@@ -188,6 +188,7 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                 "roleScore": item.role_score,
                 "decisionGrade": item.decision_grade,
                 "riskLevel": item.risk_level,
+                **_portfolio_fields(item),
                 "valuationLabel": item.valuation_label,
                 "analysisStyle": item.analysis_style,
                 "valuationNote": item.valuation_note,
@@ -263,6 +264,7 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                 "baseScore": item.stock_score.score,
                 "decisionGrade": item.stock_score.decision_grade,
                 "riskLevel": item.stock_score.risk_level,
+                **_portfolio_fields(item.stock_score),
                 **_legend_strategy_to_dict(item),
             }
             for item in report.legend_strategy_scores
@@ -291,6 +293,7 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                 "valuationAnchorScore": item.valuation_anchor_score,
                 "decisionGrade": item.stock_score.decision_grade,
                 "riskLevel": item.stock_score.risk_level,
+                **_portfolio_fields(item.stock_score),
                 "reasons": list(item.reasons),
                 "cautions": list(item.cautions),
             }
@@ -316,6 +319,7 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                 "setupLabel": item.setup_label,
                 "decisionGrade": item.stock_score.decision_grade,
                 "riskLevel": item.stock_score.risk_level,
+                **_portfolio_fields(item.stock_score),
                 "reasons": list(item.reasons),
                 "cautions": list(item.cautions),
             }
@@ -339,6 +343,7 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                 "confidenceLabel": item.confidence_label,
                 "decisionGrade": item.stock_score.decision_grade,
                 "riskLevel": item.stock_score.risk_level,
+                **_portfolio_fields(item.stock_score),
                 "reasons": list(item.reasons),
                 "cautions": list(item.cautions),
             }
@@ -362,6 +367,7 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                 "confidenceLabel": item.confidence_label,
                 "decisionGrade": item.stock_score.decision_grade,
                 "riskLevel": item.stock_score.risk_level,
+                **_portfolio_fields(item.stock_score),
                 "reasons": list(item.reasons),
                 "cautions": list(item.cautions),
             }
@@ -415,6 +421,18 @@ def _beneficiary_industry_payload(item) -> dict:
         "newsTopSources": list(item.news_top_sources),
         "evidence": list(item.evidence),
         "displaySummary": item.display_summary,
+    }
+
+
+def _portfolio_fields(item) -> dict:
+    return {
+        "riskGate": item.risk_gate,
+        "riskGateReasons": [_redact_text(text) for text in item.risk_gate_reasons],
+        "weightProfile": item.weight_profile,
+        "portfolioSignal": item.portfolio_signal,
+        "targetWeightPct": item.target_weight_pct,
+        "maxWeightPct": item.max_weight_pct,
+        "sellSignals": [_redact_text(text) for text in item.sell_signals],
     }
 
 

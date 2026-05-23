@@ -40,6 +40,46 @@ LEGEND_DEFAULT_WEIGHTS = {
     "greenblatt": 0.25,
     "fisher": 0.15,
 }
+STYLE_WEIGHT_PROFILES = {
+    "고성장주": {
+        "growth_quality": 0.30,
+        "quality": 0.25,
+        "valuation": 0.15,
+        "momentum": 0.15,
+        "industry": 0.10,
+        "role": 0.05,
+    },
+    "가치/금융주": {
+        "growth_quality": 0.10,
+        "quality": 0.30,
+        "valuation": 0.30,
+        "momentum": 0.10,
+        "industry": 0.15,
+        "role": 0.05,
+    },
+    "경기민감주": {
+        "growth_quality": 0.15,
+        "quality": 0.20,
+        "valuation": 0.20,
+        "momentum": 0.15,
+        "industry": 0.25,
+        "role": 0.05,
+    },
+    "기본형": {
+        "growth_quality": 0.10,
+        "quality": 0.35,
+        "valuation": 0.25,
+        "momentum": 0.10,
+        "industry": 0.15,
+        "role": 0.05,
+    },
+}
+PORTFOLIO_WEIGHT_RULES = {
+    "매수 후보": (8.0, 10.0),
+    "관심": (4.0, 6.0),
+    "관망": (0.0, 3.0),
+    "제외": (0.0, 0.0),
+}
 HIGH_TRUST_NEWS_SOURCES = (
     "reuters",
     "bloomberg",
@@ -268,15 +308,27 @@ def score_stocks(
             momentum = 50
         role = 65 if stock.role == "core" else 55
         analysis_style = analysis_style_for_stock(stock)
+        weight_profile = weight_profile_for_stock(stock, analysis_style)
+        risk_gate, risk_gate_reasons = risk_gate_for_stock(
+            stock,
+            quality=quality,
+            valuation=valuation,
+            momentum=momentum,
+            growth_quality=growth_quality,
+            analysis_style=analysis_style,
+        )
         valuation_note = valuation_note_for_stock(stock, valuation, analysis_style)
         valuation_range = valuation_range_for_stock(stock, analysis_style)
-        total = (
-            industry_score.score * 0.30
-            + quality * 0.28
-            + valuation * 0.16
-            + momentum * 0.16
-            + role * 0.10
+        total = style_weighted_stock_score(
+            industry=industry_score.score,
+            quality=quality,
+            growth_quality=growth_quality,
+            valuation=valuation,
+            momentum=momentum,
+            role=role,
+            weight_profile=weight_profile,
         )
+        total = risk_adjusted_stock_score(total, risk_gate, risk_gate_reasons)
         reasons = _stock_reasons(
             stock,
             quality,
@@ -294,12 +346,29 @@ def score_stocks(
                 (
                     *stock.risks,
                     *industry_score.industry.risks[:1],
+                    *(() if risk_gate == "Pass" else risk_gate_reasons),
                     *risk_cautions_for_stock(stock, analysis_style),
                 )
             )
         )
-        risk_level = risk_level_for_stock(stock, quality, valuation, momentum)
-        decision_grade = decision_grade_for_stock(total, quality, valuation, momentum, risk_level)
+        risk_level = risk_level_for_stock(stock, quality, valuation, momentum, risk_gate)
+        decision_grade = decision_grade_for_stock(
+            total, quality, valuation, momentum, risk_level, risk_gate
+        )
+        portfolio_signal, target_weight_pct, max_weight_pct = portfolio_rule_for_stock(
+            decision_grade=decision_grade,
+            risk_level=risk_level,
+            risk_gate=risk_gate,
+        )
+        sell_signals = sell_signals_for_stock(
+            stock=stock,
+            decision_grade=decision_grade,
+            risk_level=risk_level,
+            risk_gate=risk_gate,
+            quality=quality,
+            valuation=valuation,
+            momentum=momentum,
+        )
         valuation_label = valuation_label_for_score(valuation)
         results.append(
             StockScore(
@@ -315,8 +384,15 @@ def score_stocks(
                 cautions=cautions,
                 decision_grade=decision_grade,
                 risk_level=risk_level,
+                risk_gate=risk_gate,
+                risk_gate_reasons=risk_gate_reasons,
                 valuation_label=valuation_label,
                 analysis_style=analysis_style,
+                weight_profile=weight_profile,
+                portfolio_signal=portfolio_signal,
+                target_weight_pct=target_weight_pct,
+                max_weight_pct=max_weight_pct,
+                sell_signals=sell_signals,
                 valuation_note=valuation_note,
                 valuation_range=valuation_range,
                 analysis_checks=analysis_checks,
@@ -1723,6 +1799,108 @@ def analysis_style_for_stock(stock: StockProfile) -> str:
     return "균형형"
 
 
+def weight_profile_for_stock(stock: StockProfile, analysis_style: str) -> str:
+    if analysis_style in {"성장주", "고멀티플 검증", "턴어라운드 관찰"}:
+        return "고성장주"
+    if analysis_style == "가치/퀄리티" or "금융" in stock.industry or "은행" in stock.industry:
+        return "가치/금융주"
+    if analysis_style in {"경기민감 저PER 관찰", "사이클 회복 성장주"} or _is_cyclical_industry(stock.industry):
+        return "경기민감주"
+    return "기본형"
+
+
+def style_weighted_stock_score(
+    industry: float,
+    quality: float,
+    growth_quality: float,
+    valuation: float,
+    momentum: float,
+    role: float,
+    weight_profile: str,
+) -> float:
+    weights = STYLE_WEIGHT_PROFILES.get(weight_profile, STYLE_WEIGHT_PROFILES["기본형"])
+    return _clamp(
+        growth_quality * weights["growth_quality"]
+        + quality * weights["quality"]
+        + valuation * weights["valuation"]
+        + momentum * weights["momentum"]
+        + industry * weights["industry"]
+        + role * weights["role"],
+        0,
+        100,
+    )
+
+
+def risk_gate_for_stock(
+    stock: StockProfile,
+    quality: float,
+    valuation: float,
+    momentum: float,
+    growth_quality: float,
+    analysis_style: str,
+) -> tuple[str, tuple[str, ...]]:
+    fundamentals = stock.fundamentals
+    hard_fail_reasons: list[str] = []
+    caution_reasons: list[str] = []
+
+    if _at_least(fundamentals.debt_to_equity_pct, 400):
+        hard_fail_reasons.append(f"부채비율 {fundamentals.debt_to_equity_pct:.1f}%로 극단적")
+    elif _at_least(fundamentals.debt_to_equity_pct, 220):
+        caution_reasons.append(f"부채비율 {fundamentals.debt_to_equity_pct:.1f}%로 차환 부담 점검")
+
+    if fundamentals.interest_coverage is not None and math.isfinite(fundamentals.interest_coverage):
+        if fundamentals.interest_coverage < 1.5:
+            hard_fail_reasons.append(f"이자보상배율 {fundamentals.interest_coverage:.1f}배로 위험")
+        elif fundamentals.interest_coverage < 3:
+            caution_reasons.append(f"이자보상배율 {fundamentals.interest_coverage:.1f}배로 낮음")
+
+    if fundamentals.current_ratio_pct is not None and math.isfinite(fundamentals.current_ratio_pct):
+        if fundamentals.current_ratio_pct < 70:
+            hard_fail_reasons.append(f"유동비율 {fundamentals.current_ratio_pct:.1f}%로 단기 지급능력 위험")
+        elif fundamentals.current_ratio_pct < 100:
+            caution_reasons.append(f"유동비율 {fundamentals.current_ratio_pct:.1f}%로 낮음")
+
+    operating_loss = (
+        (fundamentals.operating_income is not None and fundamentals.operating_income < 0)
+        or (fundamentals.operating_margin_pct is not None and fundamentals.operating_margin_pct < 0)
+    )
+    if operating_loss and fundamentals.free_cash_flow is not None and fundamentals.free_cash_flow < 0:
+        hard_fail_reasons.append("영업적자와 FCF 음수가 동시에 발생")
+    elif fundamentals.free_cash_flow is not None and fundamentals.free_cash_flow < 0:
+        caution_reasons.append("FCF 음수로 현금 소진 속도 확인")
+
+    if hard_fail_reasons:
+        return "Hard Fail", tuple(dict.fromkeys(hard_fail_reasons))
+
+    high_growth = _at_least(fundamentals.revenue_growth_pct, 25) or growth_quality >= 70
+    cash_flow_anchor = (
+        fundamentals.free_cash_flow is not None
+        and fundamentals.free_cash_flow >= 0
+    ) or (
+        fundamentals.operating_cash_flow is not None
+        and fundamentals.operating_cash_flow > 0
+    )
+    if caution_reasons and high_growth and cash_flow_anchor and quality >= 48:
+        return "Aggressive Allow", tuple(dict.fromkeys(caution_reasons))
+    if caution_reasons and analysis_style in {"성장주", "고멀티플 검증"} and momentum >= 55:
+        return "Aggressive Allow", tuple(dict.fromkeys(caution_reasons))
+    if caution_reasons:
+        return "Watch", tuple(dict.fromkeys(caution_reasons))
+    if valuation < 35 and momentum < 35:
+        return "Watch", ("밸류 부담과 약한 모멘텀이 동시에 확인",)
+    return "Pass", ("선제 리스크 필터 통과",)
+
+
+def risk_adjusted_stock_score(total: float, risk_gate: str, risk_gate_reasons: tuple[str, ...]) -> float:
+    if risk_gate == "Hard Fail":
+        return min(total, 49)
+    if risk_gate == "Watch":
+        return max(total - 3, 0)
+    if risk_gate == "Aggressive Allow":
+        return max(total - 1.5, 0)
+    return total
+
+
 def valuation_note_for_stock(stock: StockProfile, valuation: float, analysis_style: str) -> str:
     fundamentals = stock.fundamentals
     pe = fundamentals.forward_pe if fundamentals.forward_pe is not None else fundamentals.pe
@@ -1842,8 +2020,15 @@ def risk_cautions_for_stock(stock: StockProfile, analysis_style: str) -> tuple[s
 
 
 def decision_grade_for_stock(
-    total_score: float, quality: float, valuation: float, momentum: float, risk_level: str
+    total_score: float,
+    quality: float,
+    valuation: float,
+    momentum: float,
+    risk_level: str,
+    risk_gate: str = "Pass",
 ) -> str:
+    if risk_gate == "Hard Fail":
+        return "제외"
     adjusted = total_score
     if risk_level == "높음":
         adjusted -= 4
@@ -1851,6 +2036,8 @@ def decision_grade_for_stock(
         adjusted -= 3
     if momentum < 35:
         adjusted -= 3
+    if risk_gate == "Aggressive Allow" and adjusted < 57 <= total_score + 5:
+        return "관망"
     if adjusted >= 75:
         return "매수 후보"
     if adjusted >= 67:
@@ -1861,8 +2048,14 @@ def decision_grade_for_stock(
 
 
 def risk_level_for_stock(
-    stock: StockProfile, quality: float, valuation: float, momentum: float
+    stock: StockProfile,
+    quality: float,
+    valuation: float,
+    momentum: float,
+    risk_gate: str = "Pass",
 ) -> str:
+    if risk_gate in {"Hard Fail", "Aggressive Allow"}:
+        return "높음"
     risk_points = 0
     if valuation <= 40:
         risk_points += 2
@@ -1894,6 +2087,67 @@ def risk_level_for_stock(
     if risk_points >= 1:
         return "중간"
     return "낮음"
+
+
+def portfolio_rule_for_stock(
+    decision_grade: str,
+    risk_level: str,
+    risk_gate: str,
+) -> tuple[str, float, float]:
+    target, maximum = PORTFOLIO_WEIGHT_RULES.get(decision_grade, (0.0, 0.0))
+    if risk_gate == "Hard Fail":
+        return "제외", 0.0, 0.0
+    if risk_gate == "Aggressive Allow":
+        target = min(target, 3.0)
+        maximum = min(maximum, 4.0)
+    elif risk_level == "높음":
+        target = min(target, 3.0)
+        maximum = min(maximum, 5.0)
+
+    if decision_grade == "매수 후보":
+        signal = "편입 후보"
+    elif decision_grade == "관심":
+        signal = "분할 관찰"
+    elif decision_grade == "관망":
+        signal = "보유 점검"
+    else:
+        signal = "제외"
+    if risk_gate == "Aggressive Allow" and signal != "제외":
+        signal = "소액 관찰"
+    return signal, round(target, 1), round(maximum, 1)
+
+
+def sell_signals_for_stock(
+    stock: StockProfile,
+    decision_grade: str,
+    risk_level: str,
+    risk_gate: str,
+    quality: float,
+    valuation: float,
+    momentum: float,
+) -> tuple[str, ...]:
+    signals: list[str] = []
+    fundamentals = stock.fundamentals
+    if risk_gate == "Hard Fail":
+        signals.append("즉시 제외: 리스크 게이트 Hard Fail")
+    if decision_grade == "제외":
+        signals.append("즉시 제외: 현재 종합 등급 제외")
+    if quality < 45:
+        signals.append("비중 축소: 성장성·수익성 훼손 확인")
+    if valuation < 45 and momentum < 40:
+        signals.append("비중 축소: 밸류 부담과 모멘텀 둔화 동시 발생")
+    if risk_level == "높음" and risk_gate != "Hard Fail":
+        signals.append("비중 제한: 고위험 라벨로 최대 비중 축소")
+    if (
+        fundamentals.revenue_growth_pct is not None
+        and fundamentals.revenue_growth_pct < 0
+        and fundamentals.operating_margin_pct is not None
+        and fundamentals.operating_margin_pct < 5
+    ):
+        signals.append("비중 축소: 매출 감소와 낮은 마진 동시 발생")
+    if not signals:
+        signals.append("유지: 성장·수익성 훼손 전까지 월점검, 분기조정")
+    return tuple(dict.fromkeys(signals))
 
 
 def _early_quality_anchor_score(fundamentals: Fundamentals, base_quality: float) -> float:

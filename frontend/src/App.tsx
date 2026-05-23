@@ -15,6 +15,7 @@ import {
 
 type LegendKey = "lynch" | "oneil" | "greenblatt" | "fisher";
 type HorizonKey = "overall" | "short" | "medium" | "long";
+type BacktestMethod = "snapshot" | "rules" | "legacy";
 type ViewKey = "stocks" | "industries";
 
 declare global {
@@ -70,15 +71,22 @@ type Stock = {
   currency: string;
   decisionGrade: string;
   riskLevel: string;
+  riskGate?: string;
+  riskGateReasons?: string[];
+  weightProfile?: string;
+  portfolioSignal?: string;
+  targetWeightPct?: number | null;
+  maxWeightPct?: number | null;
+  sellSignals?: string[];
   valuationLabel: string;
   analysisStyle: string;
   fundamentals: Fundamentals;
   legendScores: LegendScores | null;
   legendCompositeScore: number | null;
-  legendReasons: string[];
-  legendWarnings: string[];
-  reasons: string[];
-  cautions: string[];
+  legendReasons?: string[];
+  legendWarnings?: string[];
+  reasons?: string[];
+  cautions?: string[];
   technical?: TechnicalSnapshot | null;
   shortTerm?: TermCandidate | null;
   mediumTerm?: TermCandidate | null;
@@ -201,6 +209,7 @@ type Report = {
 };
 
 type BacktestResult = {
+  method?: BacktestMethod;
   horizon: HorizonKey;
   months: number;
   topN: number;
@@ -240,6 +249,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [backtestHorizon, setBacktestHorizon] = useState<HorizonKey>("short");
+  const [backtestMethod, setBacktestMethod] = useState<BacktestMethod>("rules");
   const [backtest, setBacktest] = useState<BacktestResult | null>(null);
   const [isBacktestLoading, setIsBacktestLoading] = useState(false);
   const [activeView, setActiveView] = useState<ViewKey>("stocks");
@@ -265,10 +275,11 @@ export default function App() {
   const runBacktest = async () => {
     setIsBacktestLoading(true);
     try {
-      setBacktest(await fetchBacktest(backtestHorizon));
+      setBacktest(await fetchBacktest(backtestHorizon, backtestMethod));
     } catch (caught) {
       setBacktest({
         horizon: backtestHorizon,
+        method: backtestMethod,
         months: 12,
         topN: 5,
         benchmarkTicker: "SPY",
@@ -374,9 +385,11 @@ export default function App() {
 
               <BacktestPanel
                 horizon={backtestHorizon}
+                method={backtestMethod}
                 result={backtest}
                 isLoading={isBacktestLoading}
                 onHorizonChange={setBacktestHorizon}
+                onMethodChange={setBacktestMethod}
                 onRun={runBacktest}
               />
 
@@ -877,15 +890,19 @@ function ScoreMini({ label, value }: { label: string; value: number }) {
 
 function BacktestPanel({
   horizon,
+  method,
   result,
   isLoading,
   onHorizonChange,
+  onMethodChange,
   onRun,
 }: {
   horizon: HorizonKey;
+  method: BacktestMethod;
   result: BacktestResult | null;
   isLoading: boolean;
   onHorizonChange: (horizon: HorizonKey) => void;
+  onMethodChange: (method: BacktestMethod) => void;
   onRun: () => void;
 }) {
   return (
@@ -903,6 +920,14 @@ function BacktestPanel({
             <option value="short">단기</option>
             <option value="medium">중기</option>
             <option value="long">장기</option>
+          </select>
+        </label>
+        <label>
+          <span>검증 방식</span>
+          <select value={method} onChange={(event) => onMethodChange(event.target.value as BacktestMethod)}>
+            <option value="rules">등급별 비중</option>
+            <option value="snapshot">스냅샷 Top N</option>
+            <option value="legacy">Legacy</option>
           </select>
         </label>
         <button className="icon-button primary" type="button" disabled={isLoading} onClick={onRun}>
@@ -1083,10 +1108,18 @@ function StockDetail({ stock }: { stock: WeightedStock }) {
       <div className="tag-row">
         <span>{stock.decisionGrade}</span>
         <span>{stock.riskLevel}</span>
+        <span>{stock.riskGate || "Pass"}</span>
         <span>{stock.valuationLabel}</span>
         <span>{stock.analysisStyle}</span>
+        <span>{stock.weightProfile || "기본형"}</span>
         {stock.shortTerm?.setupLabel ? <span>{stock.shortTerm.setupLabel}</span> : null}
         {stock.shortTerm?.confidenceLabel ? <span>단기 신뢰도 {stock.shortTerm.confidenceLabel}</span> : null}
+      </div>
+
+      <div className="portfolio-rule-grid">
+        <Metric label="권장 액션" value={stock.portfolioSignal || "-"} icon="shield" />
+        <Metric label="목표 비중" value={formatPct(stock.targetWeightPct ?? null)} icon="gauge" />
+        <Metric label="최대 비중" value={formatPct(stock.maxWeightPct ?? null)} icon="alert" />
       </div>
 
       <div className="strategy-score-grid">
@@ -1126,7 +1159,7 @@ function StockDetail({ stock }: { stock: WeightedStock }) {
         <section>
           <h3>전략 근거</h3>
           <ul>
-            {stock.legendReasons.slice(0, 4).map((reason) => (
+            {(stock.legendReasons ?? []).slice(0, 4).map((reason) => (
               <li key={reason}>{reason}</li>
             ))}
           </ul>
@@ -1134,8 +1167,24 @@ function StockDetail({ stock }: { stock: WeightedStock }) {
         <section>
           <h3>데이터 한계</h3>
           <ul>
-            {stock.legendWarnings.slice(0, 4).map((warning) => (
+            {(stock.legendWarnings ?? []).slice(0, 4).map((warning) => (
               <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </section>
+        <section>
+          <h3>리스크 게이트</h3>
+          <ul>
+            {(stock.riskGateReasons?.length ? stock.riskGateReasons : ["선제 리스크 필터 통과"]).slice(0, 4).map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        </section>
+        <section>
+          <h3>매도/축소 신호</h3>
+          <ul>
+            {(stock.sellSignals?.length ? stock.sellSignals : ["유지: 월점검, 분기조정"]).slice(0, 4).map((signal) => (
+              <li key={signal}>{signal}</li>
             ))}
           </ul>
         </section>
@@ -1218,12 +1267,12 @@ async function fetchReport(): Promise<Report> {
   throw lastError || new Error("리포트를 불러오지 못했습니다.");
 }
 
-async function fetchBacktest(horizon: HorizonKey): Promise<BacktestResult> {
+async function fetchBacktest(horizon: HorizonKey, method: BacktestMethod): Promise<BacktestResult> {
   const params = new URLSearchParams({
     months: "12",
     top: "5",
     benchmark: "SPY",
-    method: "snapshot",
+    method,
     horizon,
   });
   const endpoints = window.STATIC_DATA_ONLY
@@ -1243,6 +1292,7 @@ async function fetchBacktest(horizon: HorizonKey): Promise<BacktestResult> {
   }
   if (!payload) throw lastError || new Error("백테스트를 불러오지 못했습니다.");
   return {
+    method: payload.method ?? method,
     horizon: payload.horizon ?? horizon,
     months: payload.months ?? 12,
     topN: payload.topN ?? 5,

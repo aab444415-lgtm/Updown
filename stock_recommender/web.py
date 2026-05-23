@@ -97,6 +97,7 @@ def report_to_dict(report: RecommendationReport) -> dict:
                 "recentIssues": list(item.stock.recent_issues),
                 "decisionGrade": item.decision_grade,
                 "riskLevel": item.risk_level,
+                **_portfolio_fields(item),
                 "valuationLabel": item.valuation_label,
                 "analysisStyle": item.analysis_style,
                 "valuationNote": item.valuation_note,
@@ -178,6 +179,7 @@ def report_to_dict(report: RecommendationReport) -> dict:
                 "baseScore": item.stock_score.score,
                 "decisionGrade": item.stock_score.decision_grade,
                 "riskLevel": item.stock_score.risk_level,
+                **_portfolio_fields(item.stock_score),
                 **_legend_strategy_to_dict(item),
             }
             for item in report.legend_strategy_scores
@@ -192,6 +194,7 @@ def report_to_dict(report: RecommendationReport) -> dict:
                 "baseScore": item.stock_score.score,
                 "decisionGrade": item.stock_score.decision_grade,
                 "riskLevel": item.stock_score.risk_level,
+                **_portfolio_fields(item.stock_score),
                 **_short_term_to_dict(item),
             }
             for item in report.short_term_scores
@@ -206,6 +209,7 @@ def report_to_dict(report: RecommendationReport) -> dict:
                 "baseScore": item.stock_score.score,
                 "decisionGrade": item.stock_score.decision_grade,
                 "riskLevel": item.stock_score.risk_level,
+                **_portfolio_fields(item.stock_score),
                 **_medium_term_to_dict(item),
             }
             for item in report.medium_term_scores
@@ -220,6 +224,7 @@ def report_to_dict(report: RecommendationReport) -> dict:
                 "baseScore": item.stock_score.score,
                 "decisionGrade": item.stock_score.decision_grade,
                 "riskLevel": item.stock_score.risk_level,
+                **_portfolio_fields(item.stock_score),
                 **_long_term_to_dict(item),
             }
             for item in report.long_term_scores
@@ -234,6 +239,7 @@ def report_to_dict(report: RecommendationReport) -> dict:
                 "baseScore": item.stock_score.score,
                 "decisionGrade": item.stock_score.decision_grade,
                 "riskLevel": item.stock_score.risk_level,
+                **_portfolio_fields(item.stock_score),
                 **_early_growth_to_dict(item),
             }
             for item in report.early_growth_scores
@@ -332,6 +338,18 @@ def _valuation_range_to_dict(item) -> dict:
         "upsideLowPct": valuation_range.upside_low_pct,
         "upsideHighPct": valuation_range.upside_high_pct,
         "note": valuation_range.note,
+    }
+
+
+def _portfolio_fields(item) -> dict:
+    return {
+        "riskGate": item.risk_gate,
+        "riskGateReasons": list(item.risk_gate_reasons),
+        "weightProfile": item.weight_profile,
+        "portfolioSignal": item.portfolio_signal,
+        "targetWeightPct": item.target_weight_pct,
+        "maxWeightPct": item.max_weight_pct,
+        "sellSignals": list(item.sell_signals),
     }
 
 
