@@ -8,8 +8,9 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from stock_recommender.backtest import PricePoint, SnapshotRecord, backtest_to_dict, run_backtest, run_snapshot_backtest
-from stock_recommender.config import configured_source_names, load_config, missing_optional_source_names
+from stock_recommender.config import AppConfig, configured_source_names, load_config, missing_optional_source_names
 import stock_recommender.data_sources as data_sources
+import stock_recommender.universe_loader as universe_loader
 from stock_recommender.macro_data import industry_macro_data_score
 from stock_recommender.models import (
     BeneficiaryIndustryProfile,
@@ -24,9 +25,16 @@ from stock_recommender.models import (
     StockProfile,
 )
 from stock_recommender.opendart_financials import extract_opendart_fundamentals
-from stock_recommender.pipeline import beneficiary_market_proxy_tickers
+from stock_recommender.pipeline import beneficiary_market_proxy_tickers, create_recommendation_report
 from stock_recommender.report import render_markdown
-from stock_recommender.scoring import build_report, decision_grade_for_stock, growth_quality_score, quality_score, valuation_score
+from stock_recommender.scoring import (
+    build_report,
+    data_coverage_gate_for_stock,
+    decision_grade_for_stock,
+    growth_quality_score,
+    quality_score,
+    valuation_score,
+)
 from stock_recommender.sec_edgar import extract_fundamentals
 from stock_recommender.snapshot_store import SnapshotFileStore, SnapshotStoreError
 from stock_recommender.snapshots import report_to_snapshot_payload, save_recommendation_snapshot, snapshot_history
@@ -1230,6 +1238,12 @@ class ConfigTests(unittest.TestCase):
                     [
                         'SEC_USER_AGENT="stock-recommender test@example.com"',
                         "FRED_API_KEY=fred-key",
+                        "STOCK_RECOMMENDER_UNIVERSE_MODE=curated",
+                        "STOCK_RECOMMENDER_UNIVERSE_LIMIT=42",
+                        "STOCK_RECOMMENDER_US_UNIVERSE_LIMIT=30",
+                        "STOCK_RECOMMENDER_KR_UNIVERSE_LIMIT=12",
+                        "STOCK_RECOMMENDER_US_FUNDAMENTAL_LIMIT=9",
+                        "STOCK_RECOMMENDER_KR_FUNDAMENTAL_LIMIT=3",
                     ]
                 ),
                 encoding="utf-8",
@@ -1242,6 +1256,12 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("SEC EDGAR", configured_source_names(config))
         self.assertIn("FRED", configured_source_names(config))
         self.assertIn("OpenDART", missing_optional_source_names(config))
+        self.assertEqual(config.universe_mode, "curated")
+        self.assertEqual(config.universe_limit, 42)
+        self.assertEqual(config.us_universe_limit, 30)
+        self.assertEqual(config.kr_universe_limit, 12)
+        self.assertEqual(config.us_fundamental_limit, 9)
+        self.assertEqual(config.kr_fundamental_limit, 3)
 
     def test_load_config_defaults_to_korea_timezone(self):
         with TemporaryDirectory() as tmpdir:
@@ -1254,6 +1274,150 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.timezone_name, "Asia/Seoul")
         self.assertFalse(config.persist_repo_ledger)
         self.assertIsNone(config.full_snapshot_dir)
+
+
+class UniverseLoaderTests(unittest.TestCase):
+    def test_sec_ticker_map_creates_us_candidates_from_real_source(self):
+        with TemporaryDirectory() as tmpdir:
+            config = _test_app_config(tmpdir, universe_limit=2, us_universe_limit=2)
+            cache = CacheStore(config.cache_db_path)
+            quotes = {
+                "AAA": _quote("AAA", "AAA Semiconductor", 30_000_000_000),
+                "BBB": _quote("BBB", "BBB Health", 20_000_000_000),
+                "MISS": {},
+            }
+
+            with (
+                patch.object(universe_loader.SecEdgarClient, "fetch_ticker_map", return_value={"AAA": "1", "BBB": "2", "MISS": "3"}),
+                patch.object(universe_loader.OpenDartClient, "fetch_corp_code_map") as dart_map,
+                patch.object(universe_loader, "fetch_yahoo_quotes", side_effect=lambda tickers, **kwargs: {
+                    ticker: quotes[ticker]
+                    for ticker in tickers
+                    if ticker in quotes and quotes[ticker]
+                }),
+            ):
+                result = universe_loader.load_stock_universe(config, cache)
+
+        dart_map.assert_not_called()
+        self.assertEqual(result.candidate_count, 3)
+        self.assertEqual(result.quote_ready_count, 2)
+        self.assertEqual([stock.ticker for stock in result.stocks], ["AAA", "BBB"])
+        self.assertEqual(result.stocks[0].industry, "AI 반도체 및 데이터센터")
+        self.assertEqual(result.stocks[0].fundamentals.sources["marketCap"]["source"], "Yahoo Finance")
+        self.assertTrue(any("OpenDART API 키" in warning for warning in result.warnings))
+
+    def test_opendart_candidates_confirm_ks_or_kq_quote(self):
+        with TemporaryDirectory() as tmpdir:
+            config = _test_app_config(
+                tmpdir,
+                opendart_api_key="dart-key",
+                universe_limit=3,
+                us_universe_limit=0,
+                kr_universe_limit=3,
+            )
+            cache = CacheStore(config.cache_db_path)
+
+            def fake_quotes(tickers, **kwargs):
+                symbols = set(tickers)
+                payload = {}
+                if "005930.KS" in symbols:
+                    payload["005930.KS"] = _quote("005930.KS", "Samsung Electronics", 400_000_000_000_000, "KRW")
+                if "123456.KQ" in symbols:
+                    payload["123456.KQ"] = _quote("123456.KQ", "KQ Bio", 700_000_000_000, "KRW")
+                return payload
+
+            with (
+                patch.object(universe_loader.SecEdgarClient, "fetch_ticker_map", return_value={}),
+                patch.object(
+                    universe_loader.OpenDartClient,
+                    "fetch_corp_code_map",
+                    return_value=type("Response", (), {
+                        "ok": True,
+                        "source": "OpenDART",
+                        "payload": {
+                            "005930": {"corp_code": "00126380", "corp_name": "삼성전자"},
+                            "123456": {"corp_code": "00999999", "corp_name": "코스닥바이오"},
+                            "654321": {"corp_code": "00888888", "corp_name": "가격없음"},
+                        },
+                        "warning": None,
+                    })(),
+                ),
+                patch.object(universe_loader, "fetch_yahoo_quotes", side_effect=fake_quotes),
+            ):
+                result = universe_loader.load_stock_universe(config, cache)
+
+        self.assertEqual(result.candidate_count, 3)
+        self.assertEqual(result.quote_ready_count, 2)
+        self.assertEqual({stock.ticker for stock in result.stocks}, {"005930.KS", "123456.KQ"})
+        self.assertTrue(all(stock.country == "KR" for stock in result.stocks))
+        self.assertEqual({stock.dart_stock_code for stock in result.stocks}, {"005930", "123456"})
+
+    def test_data_coverage_gate_caps_source_less_financials(self):
+        cap, cautions = data_coverage_gate_for_stock(Fundamentals(market_cap=100, pe=20))
+
+        self.assertEqual(cap, 58.0)
+        self.assertIn("공식 재무 데이터가 없어", cautions[0])
+
+    def test_screened_pipeline_uses_mocked_universe_and_reports_stats(self):
+        industry = INDUSTRIES[0]
+        stock = StockProfile(
+            ticker="AAA",
+            name="AAA Semiconductor",
+            industry=industry.name,
+            role="core",
+            thesis="실제 소스 기반 후보",
+            risks=(),
+            fundamentals=Fundamentals(
+                market_cap=30_000_000_000,
+                sources={"marketCap": {"source": "Yahoo Finance"}},
+            ),
+        )
+        universe_result = universe_loader.UniverseLoadResult(
+            stocks=(stock,),
+            candidate_count=3,
+            quote_ready_count=1,
+            financial_target_count=1,
+        )
+
+        with TemporaryDirectory() as tmpdir:
+            with (
+                patch("stock_recommender.pipeline.load_stock_universe", return_value=universe_result),
+                patch("stock_recommender.pipeline.SCREENED_INDUSTRIES", (industry,)),
+                patch("stock_recommender.pipeline.fetch_macro_snapshot", return_value=MacroSnapshot()),
+                patch("stock_recommender.pipeline.fetch_news", return_value=()),
+                patch("stock_recommender.pipeline.enrich_with_live_market_data", side_effect=lambda stocks, **kwargs: tuple(stocks)),
+                patch("stock_recommender.pipeline.fetch_many_momentums", return_value={}),
+                patch("stock_recommender.pipeline.SecEdgarClient") as sec_client,
+                patch("stock_recommender.pipeline.OpenDartFinancialClient") as dart_client,
+                patch("stock_recommender.pipeline.load_config", return_value=_test_app_config(tmpdir, universe_limit=1, us_fundamental_limit=1)),
+            ):
+                sec_client.return_value.enrich_stocks.return_value = type("Result", (), {
+                    "stocks": (stock,),
+                    "updated_count": 0,
+                    "warnings": (),
+                })()
+                dart_client.return_value.enrich_stocks.return_value = type("Result", (), {
+                    "stocks": (),
+                    "updated_count": 0,
+                    "warnings": (),
+                })()
+                report = create_recommendation_report()
+
+        self.assertEqual(report.data_quality.universe_mode, "screened")
+        self.assertEqual(report.data_quality.universe_candidate_count, 3)
+        self.assertEqual(report.data_quality.universe_quote_ready_count, 1)
+        self.assertEqual(report.data_quality.universe_final_count, 1)
+        self.assertLessEqual(report.stock_scores[0].score, 58.0)
+
+    def test_curated_pipeline_mode_keeps_existing_universe(self):
+        with TemporaryDirectory() as tmpdir:
+            config = _test_app_config(tmpdir, universe_mode="curated", universe_limit=2)
+            cache = CacheStore(config.cache_db_path)
+            result = universe_loader.load_stock_universe(config, cache)
+
+        self.assertEqual(result.candidate_count, len(STOCKS))
+        self.assertEqual(len(result.stocks), 2)
+        self.assertEqual(result.quote_ready_count, 2)
 
 
 class SecEdgarTests(unittest.TestCase):
@@ -2690,6 +2854,52 @@ def _anchor(snapshot_date: date, close: float | None, currency: str) -> dict:
         "currency": currency,
         "source": "Yahoo Finance" if close is not None else None,
         "stale": False,
+    }
+
+
+def _test_app_config(
+    root: str,
+    *,
+    opendart_api_key: str | None = None,
+    universe_mode: str = "screened",
+    universe_limit: int = 500,
+    us_universe_limit: int = 350,
+    kr_universe_limit: int = 150,
+    us_fundamental_limit: int = 200,
+    kr_fundamental_limit: int = 30,
+) -> AppConfig:
+    project_root = Path(root)
+    data_dir = project_root / "data"
+    return AppConfig(
+        project_root=project_root,
+        data_dir=data_dir,
+        cache_db_path=data_dir / "cache.sqlite",
+        snapshot_store_path=project_root / "snapshot_store" / "recommendation_snapshots.json",
+        full_snapshot_dir=None,
+        persist_repo_ledger=False,
+        sec_user_agent="stock-recommender-test test@example.com",
+        opendart_api_key=opendart_api_key,
+        timezone_name="Asia/Seoul",
+        universe_mode=universe_mode,
+        universe_limit=universe_limit,
+        us_universe_limit=us_universe_limit,
+        kr_universe_limit=kr_universe_limit,
+        us_fundamental_limit=us_fundamental_limit,
+        kr_fundamental_limit=kr_fundamental_limit,
+    )
+
+
+def _quote(symbol: str, name: str, market_cap: float, currency: str = "USD") -> dict:
+    return {
+        "symbol": symbol,
+        "shortName": name,
+        "longName": name,
+        "regularMarketPrice": 100.0,
+        "marketCap": market_cap,
+        "currency": currency,
+        "financialCurrency": currency,
+        "trailingPE": 20.0,
+        "forwardPE": 18.0,
     }
 
 

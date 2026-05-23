@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TIMEZONE = "Asia/Seoul"
+DEFAULT_UNIVERSE_MODE = "screened"
+UNIVERSE_MODES = {"screened", "curated"}
 
 
 @dataclass(frozen=True)
@@ -26,6 +28,12 @@ class AppConfig:
     polygon_api_key: str | None = None
     news_api_key: str | None = None
     timezone_name: str = DEFAULT_TIMEZONE
+    universe_mode: str = DEFAULT_UNIVERSE_MODE
+    universe_limit: int = 500
+    us_universe_limit: int = 350
+    kr_universe_limit: int = 150
+    us_fundamental_limit: int = 200
+    kr_fundamental_limit: int = 30
 
 
 def load_config(env_path: Path | None = None) -> AppConfig:
@@ -47,6 +55,18 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         polygon_api_key=_clean(merged.get("POLYGON_API_KEY")),
         news_api_key=_clean(merged.get("NEWS_API_KEY")),
         timezone_name=_timezone_name(_clean(merged.get("STOCK_RECOMMENDER_TIMEZONE"))),
+        universe_mode=_universe_mode(_clean(merged.get("STOCK_RECOMMENDER_UNIVERSE_MODE"))),
+        universe_limit=_positive_int(_clean(merged.get("STOCK_RECOMMENDER_UNIVERSE_LIMIT")), 500),
+        us_universe_limit=_positive_int(_clean(merged.get("STOCK_RECOMMENDER_US_UNIVERSE_LIMIT")), 350),
+        kr_universe_limit=_positive_int(_clean(merged.get("STOCK_RECOMMENDER_KR_UNIVERSE_LIMIT")), 150),
+        us_fundamental_limit=_positive_int(
+            _clean(merged.get("STOCK_RECOMMENDER_US_FUNDAMENTAL_LIMIT")),
+            200,
+        ),
+        kr_fundamental_limit=_positive_int(
+            _clean(merged.get("STOCK_RECOMMENDER_KR_FUNDAMENTAL_LIMIT")),
+            30,
+        ),
     )
 
 
@@ -141,3 +161,18 @@ def _timezone_name(value: str | None) -> str:
     except ZoneInfoNotFoundError:
         return DEFAULT_TIMEZONE
     return name
+
+
+def _universe_mode(value: str | None) -> str:
+    mode = (value or DEFAULT_UNIVERSE_MODE).strip().lower()
+    return mode if mode in UNIVERSE_MODES else DEFAULT_UNIVERSE_MODE
+
+
+def _positive_int(value: str | None, default: int) -> int:
+    if not value:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else default

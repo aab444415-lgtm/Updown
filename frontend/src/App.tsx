@@ -130,6 +130,14 @@ type DataQuality = {
   liveFundamentals: boolean;
   liveMacro: boolean;
   liveKoreaFundamentals: boolean;
+  universeMode?: string;
+  universeCandidateCount?: number;
+  universeQuoteReadyCount?: number;
+  universeFinancialTargetCount?: number;
+  universeFinancialReadyCount?: number;
+  universeFinalCount?: number;
+  universeUsCount?: number;
+  universeKrCount?: number;
   roicCoveragePct?: number;
   evEbitCoveragePct?: number;
   rdCoveragePct?: number;
@@ -367,6 +375,7 @@ export default function App() {
       {report && (
         <>
           <ViewSwitcher activeView={activeView} onChange={setActiveView} />
+          <UniverseStats dataQuality={report.dataQuality} />
 
           {activeView === "stocks" ? (
             <>
@@ -493,6 +502,42 @@ function ViewSwitcher({
         산업 흐름
       </button>
     </nav>
+  );
+}
+
+function UniverseStats({ dataQuality }: { dataQuality: DataQuality }) {
+  return (
+    <section className="universe-strip" aria-label="유니버스 데이터 상태">
+      <div className="panel-title">
+        <BarChart3 size={18} aria-hidden="true" />
+        <h2>유니버스</h2>
+      </div>
+      <div className="universe-stat-grid">
+        <Metric label="모드" value={dataQuality.universeMode || "screened"} icon="gauge" />
+        <Metric label="전체 후보" value={formatInteger(dataQuality.universeCandidateCount)} icon="bar" />
+        <Metric label="가격 확인" value={formatInteger(dataQuality.universeQuoteReadyCount)} icon="shield" />
+        <Metric label="최종 점수화" value={formatInteger(dataQuality.universeFinalCount)} icon="trend" />
+        <Metric
+          label="재무 확보"
+          value={`${formatInteger(dataQuality.universeFinancialReadyCount)} / ${formatInteger(
+            dataQuality.universeFinancialTargetCount,
+          )}`}
+          icon="gauge"
+        />
+        <Metric
+          label="미국/한국"
+          value={`${formatInteger(dataQuality.universeUsCount)} / ${formatInteger(dataQuality.universeKrCount)}`}
+          icon="bar"
+        />
+      </div>
+      {dataQuality.warnings?.length ? (
+        <div className="universe-warning-row">
+          {dataQuality.warnings.slice(0, 3).map((warning) => (
+            <span key={warning}>{warning}</span>
+          ))}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -1341,6 +1386,12 @@ function formatPct(value: number | null) {
 
 function formatCount(value: number | null) {
   return value === null || Number.isNaN(value) ? "-" : `${value}회`;
+}
+
+function formatInteger(value: number | null | undefined) {
+  return value === null || value === undefined || Number.isNaN(value)
+    ? "-"
+    : Math.round(value).toLocaleString();
 }
 
 function formatReturn(value: number | null | undefined) {

@@ -132,7 +132,7 @@ class SecEdgarClient:
             enriched.append(replace(stock, fundamentals=fundamentals))
 
         if updated_count == 0:
-            warnings.append("SEC EDGAR에서 갱신 가능한 재무지표를 찾지 못해 내장 지표를 유지했습니다.")
+            warnings.append("SEC EDGAR에서 갱신 가능한 공식 재무지표를 찾지 못했습니다.")
         else:
             warnings.append(f"SEC EDGAR 재무지표로 {updated_count}개 종목을 갱신했습니다.")
         if stale_count:

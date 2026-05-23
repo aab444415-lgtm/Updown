@@ -14,11 +14,12 @@ from .models import (
     real_fundamental_value_count,
 )
 from .opendart_financials import OpenDartFinancialClient
-from .scoring import build_report
+from .scoring import build_report, official_fundamental_coverage_pct
 from .sec_edgar import SecEdgarClient
 from .storage import CacheStore
 from .time_utils import now_in_app_timezone
-from .universe import BENEFICIARY_INDUSTRIES, DEFAULT_MACRO_CONTEXT, INDUSTRIES, STOCKS
+from .universe import BENEFICIARY_INDUSTRIES, DEFAULT_MACRO_CONTEXT, INDUSTRIES
+from .universe_loader import SCREENED_INDUSTRIES, load_stock_universe, select_financial_targets
 
 
 SNAPSHOT_BENCHMARK_TICKERS = ("SPY", "QQQ", "^KS11")
@@ -53,12 +54,18 @@ def beneficiary_news_terms(
 def create_recommendation_report(
     macro_context: str = DEFAULT_MACRO_CONTEXT,
     use_sec_fundamentals: bool = True,
+    universe_mode: str | None = None,
 ) -> RecommendationReport:
     config = load_config()
+    if universe_mode:
+        config = replace(config, universe_mode=universe_mode)
     cache = CacheStore(config.cache_db_path)
     run_started_at = now_in_app_timezone(config)
     warnings: list[str] = []
-    stocks = STOCKS
+    universe_result = load_stock_universe(config, cache)
+    stocks = universe_result.stocks
+    industries = SCREENED_INDUSTRIES if config.universe_mode == "screened" else INDUSTRIES
+    warnings.extend(universe_result.warnings)
     news_items = ()
     momentums = {}
     live_market_data = False
@@ -72,7 +79,7 @@ def create_recommendation_report(
     all_terms = tuple(
         dict.fromkeys(
             (
-                *(term for industry in INDUSTRIES for term in industry.news_terms),
+                *(term for industry in industries for term in industry.news_terms),
                 *beneficiary_news_terms(),
             )
         )
@@ -83,16 +90,21 @@ def create_recommendation_report(
 
     stocks = enrich_with_live_market_data(stocks, cache=cache)
 
+    financial_targets = select_financial_targets(stocks, config)
     if use_sec_fundamentals:
-        sec_result = SecEdgarClient(config, cache).enrich_stocks(stocks)
-        stocks = sec_result.stocks
-        live_fundamentals = sec_result.updated_count > 0
-        warnings.extend(sec_result.warnings)
+        sec_targets = tuple(stock for stock in financial_targets if stock.country != "KR")
+        if sec_targets:
+            sec_result = SecEdgarClient(config, cache).enrich_stocks(sec_targets)
+            stocks = _merge_enriched_stocks(stocks, sec_result.stocks)
+            live_fundamentals = sec_result.updated_count > 0
+            warnings.extend(sec_result.warnings)
 
-    dart_result = OpenDartFinancialClient(config, cache).enrich_stocks(stocks)
-    stocks = dart_result.stocks
-    live_korea_fundamentals = dart_result.updated_count > 0
-    warnings.extend(dart_result.warnings)
+    dart_targets = tuple(stock for stock in financial_targets if stock.country == "KR")
+    if dart_targets:
+        dart_result = OpenDartFinancialClient(config, cache).enrich_stocks(dart_targets)
+        stocks = _merge_enriched_stocks(stocks, dart_result.stocks)
+        live_korea_fundamentals = dart_result.updated_count > 0
+        warnings.extend(dart_result.warnings)
     live_fundamentals = live_fundamentals or live_korea_fundamentals
     stocks, removed_fundamental_values = _keep_real_fundamentals_only(stocks)
     if removed_fundamental_values:
@@ -132,7 +144,7 @@ def create_recommendation_report(
 
     return build_report(
         macro_context=macro_context,
-        industries=INDUSTRIES,
+        industries=industries,
         stocks=stocks,
         news_items=news_items,
         momentums=momentums,
@@ -146,11 +158,27 @@ def create_recommendation_report(
             live_fundamentals=live_fundamentals,
             live_macro=bool(macro_snapshot and macro_snapshot.indicators),
             live_korea_fundamentals=live_korea_fundamentals,
+            universe_mode=config.universe_mode,
+            universe_candidate_count=universe_result.candidate_count,
+            universe_quote_ready_count=universe_result.quote_ready_count,
+            universe_financial_target_count=universe_result.financial_target_count,
+            universe_financial_ready_count=_financial_ready_count(stocks),
+            universe_final_count=len(stocks),
+            universe_us_count=sum(1 for stock in stocks if stock.country != "KR"),
+            universe_kr_count=sum(1 for stock in stocks if stock.country == "KR"),
             configured_sources=configured_source_names(config),
             missing_sources=missing_optional_source_names(config),
             warnings=tuple(dict.fromkeys(warnings)),
         ),
     )
+
+
+def _merge_enriched_stocks(
+    stocks: tuple[StockProfile, ...],
+    enriched: tuple[StockProfile, ...],
+) -> tuple[StockProfile, ...]:
+    enriched_by_ticker = {stock.ticker.upper(): stock for stock in enriched}
+    return tuple(enriched_by_ticker.get(stock.ticker.upper(), stock) for stock in stocks)
 
 
 def _keep_real_fundamentals_only(
@@ -173,3 +201,7 @@ def _present_fundamental_value_count(stock: StockProfile) -> int:
         for attr in FUNDAMENTAL_SOURCE_BY_ATTR
         if getattr(stock.fundamentals, attr) is not None
     )
+
+
+def _financial_ready_count(stocks: tuple[StockProfile, ...]) -> int:
+    return sum(1 for stock in stocks if official_fundamental_coverage_pct(stock.fundamentals) > 0)

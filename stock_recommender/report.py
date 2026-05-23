@@ -35,6 +35,20 @@ def render_markdown(
     lines.append(f"- 공식 재무 데이터 사용: {'예' if report.data_quality.live_fundamentals else '아니오'}")
     lines.append(f"- 한국 OpenDART 재무 사용: {'예' if report.data_quality.live_korea_fundamentals else '아니오'}")
     lines.append(f"- 거시경제 지표 사용: {'예' if report.data_quality.live_macro else '아니오'}")
+    lines.append(f"- 유니버스 모드: {report.data_quality.universe_mode}")
+    lines.append(
+        f"- 유니버스 통계: 후보 {report.data_quality.universe_candidate_count:,}개, "
+        f"가격/시총 확인 {report.data_quality.universe_quote_ready_count:,}개, "
+        f"최종 점수화 {report.data_quality.universe_final_count:,}개"
+    )
+    lines.append(
+        f"- 공식 재무 수집 대상/확보: {report.data_quality.universe_financial_target_count:,}개 / "
+        f"{report.data_quality.universe_financial_ready_count:,}개"
+    )
+    lines.append(
+        f"- 시장 비중: 미국 {report.data_quality.universe_us_count:,}개, "
+        f"한국 {report.data_quality.universe_kr_count:,}개"
+    )
     if report.data_quality.configured_sources:
         lines.append("- 설정된 데이터 소스: " + ", ".join(report.data_quality.configured_sources))
     if report.data_quality.missing_sources:

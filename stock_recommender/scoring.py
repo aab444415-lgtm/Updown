@@ -14,6 +14,7 @@ from .models import (
     BeneficiaryIndustryProfile,
     BeneficiaryIndustryScore,
     DataQuality,
+    FUNDAMENTAL_SOURCE_BY_ATTR,
     EarlyGrowthScore,
     Fundamentals,
     IndustryProfile,
@@ -40,6 +41,19 @@ LEGEND_DEFAULT_WEIGHTS = {
     "greenblatt": 0.25,
     "fisher": 0.15,
 }
+OFFICIAL_FUNDAMENTAL_SOURCES = {"SEC EDGAR", "OpenDART"}
+OFFICIAL_COVERAGE_FIELDS = (
+    "revenue_growth_pct",
+    "operating_margin_pct",
+    "roe_pct",
+    "debt_to_equity_pct",
+    "revenue",
+    "operating_income",
+    "net_income",
+    "operating_cash_flow",
+    "free_cash_flow",
+    "current_ratio_pct",
+)
 STYLE_WEIGHT_PROFILES = {
     "고성장주": {
         "growth_quality": 0.30,
@@ -329,6 +343,8 @@ def score_stocks(
             weight_profile=weight_profile,
         )
         total = risk_adjusted_stock_score(total, risk_gate, risk_gate_reasons)
+        data_cap, data_cautions = data_coverage_gate_for_stock(stock.fundamentals)
+        total = min(total, data_cap)
         reasons = _stock_reasons(
             stock,
             quality,
@@ -347,6 +363,7 @@ def score_stocks(
                     *stock.risks,
                     *industry_score.industry.risks[:1],
                     *(() if risk_gate == "Pass" else risk_gate_reasons),
+                    *data_cautions,
                     *risk_cautions_for_stock(stock, analysis_style),
                 )
             )
@@ -714,6 +731,9 @@ def legend_strategy_reasons(
 def legend_strategy_warnings(item: StockScore, momentum: Momentum) -> tuple[str, ...]:
     fundamentals = item.stock.fundamentals
     warnings: list[str] = []
+    official_coverage = official_fundamental_coverage_pct(fundamentals)
+    if official_coverage < 30:
+        warnings.append(f"공식 재무 데이터 커버리지 {official_coverage:.0f}%로 정량 판단 신뢰도 제한")
     warnings.append("EPS 성장률 데이터가 없어 PEG 항목은 점수에 포함하지 않음")
     if not _has_momentum_data(momentum):
         warnings.append("가격 상대강도 데이터가 부족해 오닐 모멘텀 항목은 중립 처리")
@@ -1176,6 +1196,30 @@ def _fundamental_coverage_score(fundamentals: Fundamentals) -> float:
     )
     covered = sum(1 for value in fields if _finite(value))
     return covered / len(fields) * 100
+
+
+def official_fundamental_coverage_pct(fundamentals: Fundamentals) -> float:
+    covered = 0
+    for attr in OFFICIAL_COVERAGE_FIELDS:
+        value = getattr(fundamentals, attr)
+        source_key = FUNDAMENTAL_SOURCE_BY_ATTR.get(attr)
+        source = fundamentals.sources.get(source_key) if source_key else None
+        if _finite(value) and _official_source(source):
+            covered += 1
+    return covered / len(OFFICIAL_COVERAGE_FIELDS) * 100
+
+
+def data_coverage_gate_for_stock(fundamentals: Fundamentals) -> tuple[float, tuple[str, ...]]:
+    coverage = official_fundamental_coverage_pct(fundamentals)
+    if coverage == 0:
+        return 58.0, ("공식 재무 데이터가 없어 가격/시총 중심 후보로만 봐야 합니다.",)
+    if coverage < 30:
+        return 68.0, (f"공식 재무 데이터 커버리지 {coverage:.0f}%로 점수 상한을 적용했습니다.",)
+    return 100.0, ()
+
+
+def _official_source(source: object) -> bool:
+    return isinstance(source, dict) and source.get("source") in OFFICIAL_FUNDAMENTAL_SOURCES
 
 
 def short_term_reasons(
@@ -2492,6 +2536,7 @@ def _stock_reasons(
         stock.thesis,
         f"분석 스타일: {analysis_style}",
         f"기본적 분석 점수 {quality:.1f}/100, 성장 품질 {growth_quality:.1f}/100, 밸류에이션 점수 {valuation:.1f}/100",
+        f"공식 재무 데이터 커버리지 {official_fundamental_coverage_pct(stock.fundamentals):.0f}%",
         _growth_quality_reason(stock.fundamentals),
         valuation_note,
         f"가격 모멘텀 점수 {momentum:.1f}/100",

@@ -20,6 +20,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, help="Markdown 리포트 저장 경로")
     parser.add_argument("--save-snapshot", action="store_true", help="이번 추천 결과를 일별 스냅샷으로 저장합니다.")
     parser.add_argument(
+        "--universe-mode",
+        choices=("screened", "curated"),
+        help="screened는 실제 상장종목 스크리너, curated는 기존 31개 디버그 유니버스를 사용합니다.",
+    )
+    parser.add_argument(
         "--skip-sec",
         action="store_true",
         help="SEC EDGAR 재무제표 갱신을 건너뜁니다.",
@@ -29,6 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     report = create_recommendation_report(
         macro_context=args.macro,
         use_sec_fundamentals=not args.skip_sec,
+        universe_mode=args.universe_mode,
     )
     output = render_markdown(report, top_industries=args.top_industries, top_stocks=args.top_stocks)
 

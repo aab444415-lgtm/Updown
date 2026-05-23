@@ -359,6 +359,14 @@ class DataQuality:
     live_fundamentals: bool = False
     live_macro: bool = False
     live_korea_fundamentals: bool = False
+    universe_mode: str = "screened"
+    universe_candidate_count: int = 0
+    universe_quote_ready_count: int = 0
+    universe_financial_target_count: int = 0
+    universe_financial_ready_count: int = 0
+    universe_final_count: int = 0
+    universe_us_count: int = 0
+    universe_kr_count: int = 0
     configured_sources: tuple[str, ...] = ()
     missing_sources: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
