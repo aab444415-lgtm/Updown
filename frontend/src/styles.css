@@ -775,6 +775,36 @@ h3 {
   font-weight: 900;
 }
 
+.term-tags em.trade-tag {
+  background: #eef3f2;
+  color: #31423d;
+}
+
+.term-tags em.signal-buy {
+  background: #e8f7f2;
+  color: #0f7567;
+}
+
+.term-tags em.signal-scale_buy {
+  background: #eaf2ff;
+  color: #244b78;
+}
+
+.term-tags em.signal-take_profit_half {
+  background: #fff3d6;
+  color: #7a4a0f;
+}
+
+.term-tags em.signal-reduce {
+  background: #fff7ea;
+  color: #815117;
+}
+
+.term-tags em.signal-sell {
+  background: #fdeceb;
+  color: #96352f;
+}
+
 .term-score-grid span {
   display: inline-flex;
   gap: 5px;

@@ -950,36 +950,41 @@ function CandidateColumn({
         <span>{eyebrow}</span>
       </div>
       <div className="term-list">
-        {candidates.slice(0, 3).map((candidate, index) => (
-          <button
-            className="term-card"
-            key={candidate.ticker}
-            type="button"
-            onClick={() => onSelect(candidate.ticker)}
-          >
-            <span className="rank-number">{index + 1}</span>
-            <span className="term-main">
-              <strong>
-                {candidate.ticker} · {candidate.name}
-              </strong>
-              <small>{candidate.signalLabel}</small>
-            </span>
-            <strong className="rank-score">{formatScore(candidate.score)}</strong>
-            <span className="term-tags">
-              {candidate.setupLabel ? <em>{candidate.setupLabel}</em> : null}
-              {candidate.confidenceLabel ? <em>신뢰도 {candidate.confidenceLabel}</em> : null}
-            </span>
-            <span className="term-score-grid">
-              <ScoreMini label="차트" value={candidate.chartScore} />
-              {candidate.volumeScore === undefined ? null : (
-                <ScoreMini label="거래량" value={candidate.volumeScore} />
-              )}
-              <ScoreMini label="시장" value={candidate.marketScore} />
-              <ScoreMini label="뉴스" value={candidate.newsScore} />
-              <ScoreMini label="기업" value={candidate.companyScore} />
-            </span>
-          </button>
-        ))}
+        {candidates.slice(0, 3).map((candidate, index) => {
+          const tradeAction = candidate.tradeSignal?.action || "hold";
+          const tradeLabel = candidate.tradeSignal?.label ? `매매 ${candidate.tradeSignal.label}` : null;
+          return (
+            <button
+              className="term-card"
+              key={candidate.ticker}
+              type="button"
+              onClick={() => onSelect(candidate.ticker)}
+            >
+              <span className="rank-number">{index + 1}</span>
+              <span className="term-main">
+                <strong>
+                  {candidate.ticker} · {candidate.name}
+                </strong>
+                <small>{candidate.signalLabel}</small>
+              </span>
+              <strong className="rank-score">{formatScore(candidate.score)}</strong>
+              <span className="term-tags">
+                {tradeLabel ? <em className={`trade-tag signal-${tradeAction}`}>{tradeLabel}</em> : null}
+                {candidate.setupLabel ? <em>셋업 {candidate.setupLabel}</em> : null}
+                {candidate.confidenceLabel ? <em>신뢰도 {candidate.confidenceLabel}</em> : null}
+              </span>
+              <span className="term-score-grid">
+                <ScoreMini label="차트" value={candidate.chartScore} />
+                {candidate.volumeScore === undefined ? null : (
+                  <ScoreMini label="거래량" value={candidate.volumeScore} />
+                )}
+                <ScoreMini label="시장" value={candidate.marketScore} />
+                <ScoreMini label="뉴스" value={candidate.newsScore} />
+                <ScoreMini label="기업" value={candidate.companyScore} />
+              </span>
+            </button>
+          );
+        })}
       </div>
     </section>
   );
@@ -1218,7 +1223,8 @@ function StockDetail({ stock }: { stock: WeightedStock }) {
         <span>{stock.valuationLabel}</span>
         <span>{stock.analysisStyle}</span>
         <span>{stock.weightProfile || "기본형"}</span>
-        {stock.shortTerm?.setupLabel ? <span>{stock.shortTerm.setupLabel}</span> : null}
+        {stock.shortTerm?.tradeSignal?.label ? <span>단기 매매 {stock.shortTerm.tradeSignal.label}</span> : null}
+        {stock.shortTerm?.setupLabel ? <span>단기 셋업 {stock.shortTerm.setupLabel}</span> : null}
         {stock.shortTerm?.confidenceLabel ? <span>단기 신뢰도 {stock.shortTerm.confidenceLabel}</span> : null}
       </div>
 
