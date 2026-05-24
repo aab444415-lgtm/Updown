@@ -307,6 +307,16 @@ class Momentum:
 
 
 @dataclass(frozen=True)
+class MarketHistoryPoint:
+    date: str
+    open: float | None
+    high: float | None
+    low: float | None
+    close: float
+    volume: float | None
+
+
+@dataclass(frozen=True)
 class StockProfile:
     ticker: str
     name: str
@@ -444,6 +454,90 @@ class ValuationRange:
     upside_low_pct: float | None
     upside_high_pct: float | None
     note: str
+
+
+@dataclass(frozen=True)
+class LiquidityProfile:
+    ticker: str
+    score: float
+    grade: str
+    avg_daily_volume: float | None
+    avg_dollar_volume: float | None
+    volume_stability_score: float | None
+    amihud_illiquidity: float | None
+    market_impact_bps: float | None
+    observations: int
+    source: str
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CorrelationPair:
+    ticker_a: str
+    ticker_b: str
+    correlation: float
+    observations: int
+
+
+@dataclass(frozen=True)
+class CorrelationProfile:
+    label: str
+    average_correlation: float | None
+    max_correlation: float | None
+    max_pair: tuple[str, str] | None
+    coverage_pct: float
+    crowded_industries: tuple[str, ...]
+    diversification_hints: tuple[str, ...]
+    pairs: tuple[CorrelationPair, ...]
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class SepaProfile:
+    ticker: str
+    score: float
+    stage: str
+    stage_label: str
+    trend_template_passes: int
+    trend_template_total: int
+    trend_template_checks: tuple[str, ...]
+    ma_alignment: str
+    price_position_label: str
+    pivot_label: str
+    breakout_quality_label: str
+    reasons: tuple[str, ...]
+    cautions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class EarningsEstimateProfile:
+    ticker: str
+    score: float
+    event_risk_label: str
+    next_earnings_date: str | None
+    eps_consensus: float | None
+    revenue_consensus: float | None
+    eps_revision_label: str
+    beat_miss_summary: str
+    analyst_coverage: int | None
+    source: str
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class DetailedValuationProfile:
+    ticker: str
+    score: float
+    method: str
+    fair_market_cap_mid: float | None
+    upside_mid_pct: float | None
+    dcf_market_cap: float | None
+    relative_market_cap: float | None
+    bear_market_cap: float | None
+    bull_market_cap: float | None
+    sensitivity: tuple[dict, ...]
+    notes: tuple[str, ...]
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -606,6 +700,11 @@ class RecommendationReport:
     long_term_scores: tuple[LongTermScore, ...] = ()
     legend_strategy_scores: tuple[LegendStrategyScore, ...] = ()
     beneficiary_industry_scores: tuple[BeneficiaryIndustryScore, ...] = ()
+    liquidity_profiles: dict[str, LiquidityProfile] = field(default_factory=dict)
+    sepa_profiles: dict[str, SepaProfile] = field(default_factory=dict)
+    earnings_estimate_profiles: dict[str, EarningsEstimateProfile] = field(default_factory=dict)
+    detailed_valuation_profiles: dict[str, DetailedValuationProfile] = field(default_factory=dict)
+    correlation_profile: CorrelationProfile | None = None
     macro_snapshot: MacroSnapshot | None = None
     data_quality: DataQuality = field(default_factory=DataQuality)
     momentums: dict[str, Momentum] = field(default_factory=dict)

@@ -60,6 +60,78 @@ type Fundamentals = {
   quarterlyFinancials?: Array<Record<string, unknown>>;
 };
 
+type LiquidityProfile = {
+  score: number;
+  grade: string;
+  avgDailyVolume: number | null;
+  avgDollarVolume: number | null;
+  volumeStabilityScore: number | null;
+  amihudIlliquidity: number | null;
+  marketImpactBps: number | null;
+  observations: number;
+  source: string;
+  warnings: string[];
+};
+
+type SepaProfile = {
+  score: number;
+  stage: string | null;
+  stageLabel: string;
+  trendTemplatePasses: number;
+  trendTemplateTotal: number;
+  trendTemplateChecks: string[];
+  maAlignment: string;
+  pricePositionLabel: string;
+  pivotLabel: string;
+  breakoutQualityLabel: string;
+  reasons: string[];
+  cautions: string[];
+};
+
+type EarningsEstimateProfile = {
+  score: number;
+  eventRiskLabel: string;
+  nextEarningsDate: string | null;
+  epsConsensus: number | null;
+  revenueConsensus: number | null;
+  epsRevisionLabel: string;
+  beatMissSummary: string;
+  analystCoverage: number | null;
+  source: string;
+  warnings: string[];
+};
+
+type DetailedValuationProfile = {
+  score: number;
+  method: string;
+  fairMarketCapMid: number | null;
+  upsideMidPct: number | null;
+  dcfMarketCap: number | null;
+  relativeMarketCap: number | null;
+  bearMarketCap: number | null;
+  bullMarketCap: number | null;
+  sensitivity: Array<{ case: string; marketCap: number }>;
+  notes: string[];
+  warnings: string[];
+};
+
+type CorrelationProfile = {
+  label: string;
+  averageCorrelation: number | null;
+  maxCorrelation: number | null;
+  maxPair: string[] | null;
+  coveragePct: number;
+  crowdedIndustries: string[];
+  diversificationHints: string[];
+  pairs: Array<{
+    tickerA: string;
+    tickerB: string;
+    correlation: number;
+    observations: number;
+  }>;
+  warnings: string[];
+};
+
 type Stock = {
   ticker: string;
   name: string;
@@ -88,6 +160,10 @@ type Stock = {
   reasons?: string[];
   cautions?: string[];
   technical?: TechnicalSnapshot | null;
+  liquidity?: LiquidityProfile | null;
+  sepa?: SepaProfile | null;
+  earningsEstimate?: EarningsEstimateProfile | null;
+  detailedValuation?: DetailedValuationProfile | null;
   shortTerm?: TermCandidate | null;
   mediumTerm?: TermCandidate | null;
   longTerm?: TermCandidate | null;
@@ -273,6 +349,7 @@ type Report = {
   createdAtDisplay: string;
   macroContext: string;
   dataQuality: DataQuality;
+  correlation?: CorrelationProfile | null;
   industries: Industry[];
   beneficiaryIndustries: BeneficiaryIndustry[];
   stocks: Stock[];
@@ -464,6 +541,8 @@ export default function App() {
 
           {activeView === "stocks" ? (
             <>
+              <CorrelationStrip correlation={report.correlation ?? null} />
+
               <section className="summary-grid" aria-label="전략별 상위 후보">
                 <CombinedLeader stock={rankedStocks[0]} createdAt={report.createdAtDisplay} />
                 {STRATEGIES.map((strategy) => (
@@ -623,6 +702,38 @@ function UniverseStats({ dataQuality }: { dataQuality: DataQuality }) {
           ))}
         </div>
       ) : null}
+    </section>
+  );
+}
+
+function CorrelationStrip({ correlation }: { correlation: CorrelationProfile | null }) {
+  if (!correlation) return null;
+  const maxPair = correlation.maxPair?.length === 2 ? correlation.maxPair.join(" / ") : "-";
+  const hints = correlation.diversificationHints?.length
+    ? correlation.diversificationHints
+    : correlation.warnings?.length
+      ? correlation.warnings
+      : ["상위 추천군의 가격 데이터가 충분한 종목만 비교"];
+  return (
+    <section className="correlation-strip" aria-label="추천군 상관 상태">
+      <div className="correlation-main">
+        <div className="panel-title compact">
+          <Network size={18} aria-hidden="true" />
+          <h2>상관 과밀/분산 상태</h2>
+        </div>
+        <strong>{correlation.label}</strong>
+      </div>
+      <div className="correlation-metrics">
+        <Metric label="평균 상관" value={formatCorrelation(correlation.averageCorrelation)} icon="gauge" />
+        <Metric label="최대 상관" value={formatCorrelation(correlation.maxCorrelation)} icon="alert" />
+        <Metric label="최대 쌍" value={maxPair} icon="bar" />
+        <Metric label="커버리지" value={formatPct(correlation.coveragePct)} icon="shield" />
+      </div>
+      <div className="correlation-hints">
+        {hints.slice(0, 2).map((hint) => (
+          <span key={hint}>{hint}</span>
+        ))}
+      </div>
     </section>
   );
 }
@@ -1294,6 +1405,8 @@ function StockDetail({ stock }: { stock: WeightedStock }) {
         technical={stock.technical ?? null}
       />
 
+      <FinanceSkillPanels stock={stock} />
+
       <div className="strategy-score-grid">
         {STRATEGIES.map((strategy) => (
           <div className="strategy-tile" key={strategy.key}>
@@ -1369,6 +1482,74 @@ function StockDetail({ stock }: { stock: WeightedStock }) {
         </section>
       </div>
     </article>
+  );
+}
+
+function FinanceSkillPanels({ stock }: { stock: Stock }) {
+  const liquidity = stock.liquidity ?? null;
+  const sepa = stock.sepa ?? null;
+  const earnings = stock.earningsEstimate ?? null;
+  const valuation = stock.detailedValuation ?? null;
+  const currency = stock.fundamentals.marketCapCurrency || stock.currency;
+
+  return (
+    <section className="finance-skill-grid" aria-label="확장 분석">
+      <div className="finance-skill-card">
+        <div className="skill-card-head">
+          <span>유동성</span>
+          <strong>{liquidity?.grade || "-"}</strong>
+        </div>
+        <div className="skill-metric-row">
+          <Metric label="점수" value={formatScore(liquidity?.score)} icon="gauge" />
+          <Metric label="평균 거래대금" value={formatMoneyCompact(liquidity?.avgDollarVolume, currency)} icon="bar" />
+          <Metric label="시장충격" value={formatBps(liquidity?.marketImpactBps)} icon="alert" />
+        </div>
+        <p>{liquidity?.warnings?.[0] || `${formatInteger(liquidity?.observations)}개 가격 관측치 기준`}</p>
+      </div>
+
+      <div className="finance-skill-card">
+        <div className="skill-card-head">
+          <span>SEPA</span>
+          <strong>{sepa?.stageLabel || "-"}</strong>
+        </div>
+        <div className="skill-metric-row">
+          <Metric label="점수" value={formatScore(sepa?.score)} icon="trend" />
+          <Metric
+            label="템플릿"
+            value={sepa ? `${sepa.trendTemplatePasses}/${sepa.trendTemplateTotal}` : "-"}
+            icon="shield"
+          />
+          <Metric label="피벗" value={sepa?.pivotLabel || "-"} icon="bar" />
+        </div>
+        <p>{sepa?.breakoutQualityLabel || sepa?.pricePositionLabel || "차트 데이터 대기"}</p>
+      </div>
+
+      <div className="finance-skill-card">
+        <div className="skill-card-head">
+          <span>실적/추정치</span>
+          <strong>{earnings?.eventRiskLabel || "-"}</strong>
+        </div>
+        <div className="skill-metric-row">
+          <Metric label="점수" value={formatScore(earnings?.score)} icon="gauge" />
+          <Metric label="EPS" value={formatNumber(earnings?.epsConsensus ?? null)} icon="bar" />
+          <Metric label="커버리지" value={formatInteger(earnings?.analystCoverage)} icon="shield" />
+        </div>
+        <p>{earnings?.warnings?.[0] || earnings?.beatMissSummary || earnings?.epsRevisionLabel || "추정치 데이터 대기"}</p>
+      </div>
+
+      <div className="finance-skill-card">
+        <div className="skill-card-head">
+          <span>상세 밸류</span>
+          <strong>{formatScore(valuation?.score)}</strong>
+        </div>
+        <div className="skill-metric-row">
+          <Metric label="상승여력" value={formatPct(valuation?.upsideMidPct ?? null)} icon="trend" />
+          <Metric label="공정가치" value={formatMoneyCompact(valuation?.fairMarketCapMid, currency)} icon="gauge" />
+          <Metric label="DCF" value={formatMoneyCompact(valuation?.dcfMarketCap, currency)} icon="bar" />
+        </div>
+        <p>{valuation?.notes?.[0] || valuation?.warnings?.[0] || valuation?.method || "밸류 계산 대기"}</p>
+      </div>
+    </section>
   );
 }
 
@@ -1655,6 +1836,28 @@ function formatRatio(value: number | null) {
 
 function formatMultiple(value: number | null) {
   return value === null || Number.isNaN(value) ? "-" : `${value.toFixed(1)}배`;
+}
+
+function formatCorrelation(value: number | null | undefined) {
+  return value === null || value === undefined || Number.isNaN(value) ? "-" : value.toFixed(2);
+}
+
+function formatBps(value: number | null | undefined) {
+  return value === null || value === undefined || Number.isNaN(value) ? "-" : `${value.toFixed(0)}bp`;
+}
+
+function formatMoneyCompact(value: number | null | undefined, currency: string) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  if (currency === "KRW") {
+    if (value >= 1_000_000_000_000) return `${(value / 1_000_000_000_000).toFixed(1)}조원`;
+    if (value >= 100_000_000) return `${Math.round(value / 100_000_000).toLocaleString()}억원`;
+    return `${Math.round(value / 10_000).toLocaleString()}만원`;
+  }
+  if (value >= 1_000_000_000_000) return `$${(value / 1_000_000_000_000).toFixed(2)}T`;
+  if (value >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(1)}B`;
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+  return `$${Math.round(value)}`;
 }
 
 function formatMarketCap(value: number | null, currency: string) {

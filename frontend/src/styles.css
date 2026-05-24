@@ -154,6 +154,51 @@ h3 {
   font-weight: 800;
 }
 
+.correlation-strip {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.7fr) minmax(0, 2fr);
+  gap: 12px;
+  margin: 0 0 14px;
+  border: 1px solid #cbd7d2;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+  padding: 12px;
+}
+
+.correlation-main {
+  min-width: 0;
+}
+
+.correlation-main strong {
+  display: block;
+  color: #17211f;
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+
+.correlation-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.correlation-hints {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.correlation-hints span {
+  border-radius: 8px;
+  background: #edf7f4;
+  color: #0f5b50;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
 .status-pill,
 .icon-button,
 .tag-row span {
@@ -1119,6 +1164,70 @@ h3 {
   padding: 13px;
 }
 
+.finance-skill-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.finance-skill-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid #d7e0dc;
+  border-radius: 8px;
+  background: #fbfdfc;
+  padding: 12px;
+}
+
+.skill-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.skill-card-head span {
+  color: #60716a;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.skill-card-head strong {
+  color: #17211f;
+  font-size: 17px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.skill-metric-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.finance-skill-card .metric-tile {
+  gap: 5px;
+}
+
+.finance-skill-card .metric-tile span {
+  font-size: 11px;
+}
+
+.finance-skill-card .metric-tile strong {
+  font-size: 14px;
+}
+
+.finance-skill-card p {
+  margin: 0;
+  color: #42514c;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .panel-title.compact {
   margin-bottom: 2px;
 }
@@ -1497,9 +1606,14 @@ h3 {
   .metric-grid,
   .backtest-metrics,
   .portfolio-rule-grid,
+  .correlation-metrics,
   .universe-stat-grid,
   .flow-stat-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .correlation-strip {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1540,6 +1654,10 @@ h3 {
     .strategy-score-grid,
     .portfolio-rule-grid,
     .trade-signal-grid,
+    .finance-skill-grid,
+    .skill-metric-row,
+    .correlation-strip,
+    .correlation-metrics,
     .metric-grid,
     .backtest-metrics,
     .universe-stat-grid,

@@ -23,6 +23,8 @@ def main(argv: list[str] | None = None) -> int:
         ("ECOS", config.ecos_api_key, lambda: EcosClient(config, cache, args.timeout).fetch_statistic_table_list()),
         ("Polygon", config.polygon_api_key, lambda: _check_polygon(config.polygon_api_key, cache, args.timeout)),
         ("NewsAPI", config.news_api_key, None),
+        ("Adanos", config.adanos_api_key if config.enable_external_research else None, None),
+        ("Funda", config.funda_api_key if config.enable_external_research else None, None),
     ]
 
     failed = 0

@@ -11,6 +11,7 @@ from stock_recommender.backtest import PricePoint, SnapshotRecord, backtest_to_d
 from stock_recommender.config import AppConfig, configured_source_names, load_config, missing_optional_source_names
 import stock_recommender.data_sources as data_sources
 import stock_recommender.universe_loader as universe_loader
+from stock_recommender.finance_profiles import liquidity_profile_for_stock
 from stock_recommender.macro_data import industry_macro_data_score
 from stock_recommender.models import (
     BeneficiaryIndustryProfile,
@@ -20,6 +21,7 @@ from stock_recommender.models import (
     IndustryProfile,
     MacroIndicator,
     MacroSnapshot,
+    MarketHistoryPoint,
     Momentum,
     NewsItem,
     StockProfile,
@@ -264,6 +266,154 @@ class ScoringTests(unittest.TestCase):
         self.assertIn(item.portfolio_signal, {"편입 후보", "분할 관찰", "보유 점검"})
         self.assertEqual(api_payload["stocks"][0]["riskGate"], item.risk_gate)
         self.assertEqual(snapshot_payload["stocks"][0]["targetWeightPct"], item.target_weight_pct)
+
+    def test_liquidity_profile_rewards_deep_stable_trading(self):
+        stock = StockProfile(
+            ticker="DEEP",
+            name="Deep Market",
+            industry="테스트 산업",
+            role="core",
+            thesis="liquidity test",
+            risks=(),
+            fundamentals=Fundamentals(market_cap=5_000_000_000),
+        )
+        deep = liquidity_profile_for_stock(
+            stock,
+            _flat_price_history("DEEP", close=100.0, volume=6_000_000, days=70),
+        )
+        thin = liquidity_profile_for_stock(
+            stock,
+            _flat_price_history("DEEP", close=10.0, volume=8_000, days=70),
+        )
+
+        self.assertGreater(deep.score, thin.score + 35)
+        self.assertIn(deep.grade, {"매우 높음", "높음"})
+        self.assertIn(thin.grade, {"낮음", "매우 낮음"})
+
+    def test_correlation_profile_handles_same_and_inverse_direction(self):
+        industry = IndustryProfile("테스트 산업", "", (), (), (), ())
+        stocks = tuple(
+            StockProfile(
+                ticker=ticker,
+                name=ticker,
+                industry=industry.name,
+                role="core",
+                thesis="correlation test",
+                risks=(),
+                fundamentals=Fundamentals(25.0, 20.0, 18.0, 35.0, 28.0, 22.0, 3_000_000_000),
+            )
+            for ticker in ("AAA", "BBB", "CCC")
+        )
+        returns = tuple(0.012 if index % 3 == 0 else (-0.004 if index % 3 == 1 else 0.007) for index in range(65))
+        histories = {
+            "AAA": _history_from_returns("AAA", 100.0, returns),
+            "BBB": _history_from_returns("BBB", 80.0, tuple(value * 0.9 for value in returns)),
+            "CCC": _history_from_returns("CCC", 60.0, tuple(-value for value in returns)),
+        }
+
+        report = build_report(DEFAULT_MACRO_CONTEXT, (industry,), stocks, (), price_histories=histories)
+        profile = report.correlation_profile
+
+        self.assertIsNotNone(profile)
+        self.assertGreaterEqual(profile.coverage_pct, 99.0)
+        self.assertGreater(profile.max_correlation or 0, 0.95)
+        self.assertTrue(any(pair.correlation < -0.95 for pair in profile.pairs))
+
+    def test_sepa_profile_flags_stage_two_template(self):
+        industry = IndustryProfile("테스트 성장 산업", "", (), (), (), ())
+        stock = StockProfile(
+            ticker="SEPA",
+            name="SEPA Corp",
+            industry=industry.name,
+            role="core",
+            thesis="sepa test",
+            risks=(),
+            fundamentals=Fundamentals(35.0, 22.0, 18.0, 32.0, 28.0, 21.0, 3_000_000_000),
+        )
+        momentum = Momentum(
+            one_month_pct=24.0,
+            three_month_pct=38.0,
+            six_month_pct=56.0,
+            drawdown_from_high_pct=-7.0,
+            range_position_pct=92.0,
+            latest_close=105.0,
+            ma60=95.0,
+            ma150=86.0,
+            ma200=80.0,
+            ma200_slope_pct=2.4,
+            rsi14=64.0,
+            volume_ratio=1.7,
+            twenty_day_breakout_pct=2.0,
+            previous_swing_high_distance_pct=1.5,
+        )
+
+        report = build_report(
+            DEFAULT_MACRO_CONTEXT,
+            (industry,),
+            (stock,),
+            (),
+            momentums={"SEPA": momentum},
+        )
+        profile = report.sepa_profiles["SEPA"]
+
+        self.assertEqual(profile.stage, "Stage 2")
+        self.assertEqual(profile.trend_template_passes, 8)
+        self.assertEqual(profile.stage_label, "매수 가능 추세권")
+
+    def test_finance_skill_profiles_are_serialized_for_api_and_snapshot(self):
+        industry = IndustryProfile("테스트 산업", "", (), (), (), ())
+        stock = StockProfile(
+            ticker="FSK",
+            name="Finance Skill",
+            industry=industry.name,
+            role="core",
+            thesis="serialization test",
+            risks=(),
+            fundamentals=Fundamentals(
+                revenue_growth_pct=30.0,
+                operating_margin_pct=24.0,
+                roe_pct=18.0,
+                debt_to_equity_pct=28.0,
+                pe=24.0,
+                forward_pe=18.0,
+                market_cap=4_000_000_000,
+                free_cash_flow=220_000_000,
+                latest_quarter_revenue_yoy_pct=28.0,
+                latest_quarter_operating_income_yoy_pct=35.0,
+                quarterly_revenue_yoy_streak=4,
+            ),
+        )
+        momentum = Momentum(
+            one_month_pct=12.0,
+            three_month_pct=24.0,
+            six_month_pct=36.0,
+            drawdown_from_high_pct=-12.0,
+            range_position_pct=82.0,
+            latest_close=70.0,
+            ma60=64.0,
+            ma150=58.0,
+            ma200=54.0,
+            ma200_slope_pct=1.8,
+            volume_ratio=1.4,
+            twenty_day_breakout_pct=1.0,
+        )
+        report = build_report(
+            DEFAULT_MACRO_CONTEXT,
+            (industry,),
+            (stock,),
+            (),
+            momentums={"FSK": momentum},
+            price_histories={"FSK": _flat_price_history("FSK", close=70.0, volume=1_200_000, days=70)},
+        )
+
+        api_payload = report_to_dict(report)
+        snapshot_payload = report_to_snapshot_payload(report)
+
+        self.assertIn("correlation", api_payload)
+        self.assertIn("correlation", snapshot_payload)
+        for field in ("liquidity", "sepa", "earningsEstimate", "detailedValuation"):
+            self.assertIsNotNone(api_payload["stocks"][0][field])
+            self.assertIsNotNone(snapshot_payload["stocks"][0][field])
 
     def test_report_contains_data_quality(self):
         report = build_report(
@@ -1641,6 +1791,9 @@ class ConfigTests(unittest.TestCase):
                         "STOCK_RECOMMENDER_US_FUNDAMENTAL_LIMIT=9",
                         "STOCK_RECOMMENDER_KR_FUNDAMENTAL_LIMIT=3",
                         "STOCK_RECOMMENDER_POLYGON_FRESH_LIMIT=7",
+                        "STOCK_RECOMMENDER_ENABLE_EXTERNAL_RESEARCH=1",
+                        "ADANOS_API_KEY=adanos-key",
+                        "FUNDA_API_KEY=funda-key",
                     ]
                 ),
                 encoding="utf-8",
@@ -1660,6 +1813,9 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.us_fundamental_limit, 9)
         self.assertEqual(config.kr_fundamental_limit, 3)
         self.assertEqual(config.polygon_fresh_limit, 7)
+        self.assertTrue(config.enable_external_research)
+        self.assertIn("Adanos", configured_source_names(config))
+        self.assertIn("Funda", configured_source_names(config))
 
     def test_load_config_defaults_to_korea_timezone(self):
         with TemporaryDirectory() as tmpdir:
@@ -1673,6 +1829,9 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(config.persist_repo_ledger)
         self.assertIsNone(config.full_snapshot_dir)
         self.assertEqual(config.universe_limit, 800)
+        self.assertFalse(config.enable_external_research)
+        self.assertNotIn("Adanos", missing_optional_source_names(config))
+        self.assertNotIn("Funda", missing_optional_source_names(config))
         self.assertEqual(config.us_universe_limit, 600)
         self.assertEqual(config.kr_universe_limit, 200)
         self.assertEqual(config.us_fundamental_limit, 250)
@@ -3253,6 +3412,58 @@ def _history(start_price: float, daily_return: float) -> tuple[PricePoint, ...]:
             price *= 1 + daily_return
             points.append(PricePoint(current, price))
         current += timedelta(days=1)
+    return tuple(points)
+
+
+def _flat_price_history(
+    ticker: str,
+    close: float,
+    volume: float,
+    days: int,
+) -> tuple[MarketHistoryPoint, ...]:
+    start = date(2026, 1, 1)
+    return tuple(
+        MarketHistoryPoint(
+            date=(start + timedelta(days=index)).isoformat(),
+            open=close,
+            high=close * 1.01,
+            low=close * 0.99,
+            close=close,
+            volume=volume,
+        )
+        for index in range(days)
+    )
+
+
+def _history_from_returns(
+    ticker: str,
+    start_price: float,
+    returns: tuple[float, ...],
+) -> tuple[MarketHistoryPoint, ...]:
+    start = date(2026, 1, 1)
+    points = [
+        MarketHistoryPoint(
+            date=start.isoformat(),
+            open=start_price,
+            high=start_price * 1.01,
+            low=start_price * 0.99,
+            close=start_price,
+            volume=1_000_000,
+        )
+    ]
+    close = start_price
+    for index, daily_return in enumerate(returns, start=1):
+        close *= 1 + daily_return
+        points.append(
+            MarketHistoryPoint(
+                date=(start + timedelta(days=index)).isoformat(),
+                open=close / (1 + daily_return),
+                high=close * 1.01,
+                low=close * 0.99,
+                close=close,
+                volume=1_000_000,
+            )
+        )
     return tuple(points)
 
 

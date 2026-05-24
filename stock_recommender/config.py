@@ -27,6 +27,9 @@ class AppConfig:
     ecos_api_key: str | None = None
     polygon_api_key: str | None = None
     news_api_key: str | None = None
+    adanos_api_key: str | None = None
+    funda_api_key: str | None = None
+    enable_external_research: bool = False
     timezone_name: str = DEFAULT_TIMEZONE
     universe_mode: str = DEFAULT_UNIVERSE_MODE
     universe_limit: int = 800
@@ -55,6 +58,9 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         ecos_api_key=_clean(merged.get("ECOS_API_KEY")),
         polygon_api_key=_clean(merged.get("POLYGON_API_KEY")),
         news_api_key=_clean(merged.get("NEWS_API_KEY")),
+        adanos_api_key=_clean(merged.get("ADANOS_API_KEY")),
+        funda_api_key=_clean(merged.get("FUNDA_API_KEY")),
+        enable_external_research=_truthy(_clean(merged.get("STOCK_RECOMMENDER_ENABLE_EXTERNAL_RESEARCH"))),
         timezone_name=_timezone_name(_clean(merged.get("STOCK_RECOMMENDER_TIMEZONE"))),
         universe_mode=_universe_mode(_clean(merged.get("STOCK_RECOMMENDER_UNIVERSE_MODE"))),
         universe_limit=_positive_int(_clean(merged.get("STOCK_RECOMMENDER_UNIVERSE_LIMIT")), 800),
@@ -115,6 +121,10 @@ def configured_source_names(config: AppConfig) -> tuple[str, ...]:
         names.append("Polygon")
     if config.news_api_key:
         names.append("NewsAPI")
+    if config.enable_external_research and config.adanos_api_key:
+        names.append("Adanos")
+    if config.enable_external_research and config.funda_api_key:
+        names.append("Funda")
     return tuple(names)
 
 
@@ -130,6 +140,10 @@ def missing_optional_source_names(config: AppConfig) -> tuple[str, ...]:
         missing.append("Polygon")
     if not config.news_api_key:
         missing.append("NewsAPI")
+    if config.enable_external_research and not config.adanos_api_key:
+        missing.append("Adanos")
+    if config.enable_external_research and not config.funda_api_key:
+        missing.append("Funda")
     return tuple(missing)
 
 

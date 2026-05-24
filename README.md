@@ -28,7 +28,7 @@ npm run build
 
 Cloudflare Pages 자동 업데이트는 [docs/cloudflare-auto-update.md](docs/cloudflare-auto-update.md)를 참고하세요.
 
-기본 실행은 SEC/OpenDART 상장 목록과 Yahoo Finance 가격/시총으로 동적 유니버스를 만든 뒤 Google News/Yahoo Finance 공개 데이터, SEC EDGAR, OpenDART, FRED, ECOS 갱신을 시도합니다. 재무 지표는 실제 출처가 확인된 값만 추천 계산과 화면에 사용하며, 내장 유니버스 숫자나 출처 없는 값은 제외하고 경고에 남깁니다.
+기본 실행은 SEC/OpenDART 상장 목록과 Yahoo Finance 가격/시총으로 동적 유니버스를 만든 뒤 Google News/Yahoo Finance 공개 데이터, SEC EDGAR, OpenDART, FRED, ECOS 갱신을 시도합니다. 재무 지표는 실제 출처가 확인된 값만 추천 계산과 화면에 사용하며, 내장 유니버스 숫자나 출처 없는 값은 제외하고 경고에 남깁니다. 유동성, 상관관계, SEPA 셋업, 실적/추정치, 상세 밸류에이션 보조 패널은 기존 가격/재무 캐시를 우선 사용하며 외부 리서치 키가 없어도 리포트 생성을 막지 않습니다.
 
 기본 동적 유니버스 한도는 전체 800개, 미국 600개, 한국 200개이며 공식 재무 수집 대상은 미국 250개, 한국 40개입니다.
 
@@ -115,6 +115,9 @@ FRED_API_KEY=""
 ECOS_API_KEY=""
 POLYGON_API_KEY=""
 STOCK_RECOMMENDER_POLYGON_FRESH_LIMIT="4"
+STOCK_RECOMMENDER_ENABLE_EXTERNAL_RESEARCH=""
+ADANOS_API_KEY=""
+FUNDA_API_KEY=""
 ```
 
 - SEC EDGAR: 미국 재무제표용입니다. API 키는 필요 없지만, `SEC_USER_AGENT`에 연락 가능한 이메일을 넣는 것이 좋습니다.
@@ -122,6 +125,7 @@ STOCK_RECOMMENDER_POLYGON_FRESH_LIMIT="4"
 - FRED: 미국 거시경제 지표용입니다. 무료 계정/API 키가 필요합니다.
 - ECOS: 한국은행 거시경제 지표용입니다. 인증키가 필요합니다.
 - Polygon: 미국 가격/시총 확인용입니다. Yahoo보다 먼저 사용하며, 무료 플랜은 호출 제한 때문에 `STOCK_RECOMMENDER_POLYGON_FRESH_LIMIT` 기본값을 4로 둡니다.
+- Funda/Adanos: 선택형 외부 리서치 키입니다. `STOCK_RECOMMENDER_ENABLE_EXTERNAL_RESEARCH=1`일 때만 상태 진단에 포함하며, 실패하거나 비어 있어도 기존 추천 계산은 계속됩니다.
 
 현재 구현된 것:
 
@@ -222,6 +226,7 @@ STOCK_RECOMMENDER_POLYGON_FRESH_LIMIT="4"
 - 단기 매매 후보를 뉴스, 시장 모멘텀, 차트 위치, 기업 데이터 기준으로 따로 정렬합니다.
 - 중기 매매 후보를 기업 데이터, 3개월 가격 흐름, 차트 위치, 산업 이슈 기준으로 따로 정렬합니다.
 - 장기 투자 후보를 기업 가치, 산업/거시 환경, 장기 차트, 구조적 이슈 기준으로 따로 정렬합니다.
+- 종목별 유동성/SEPA/실적 추정치/상세 밸류와 추천 묶음의 상관 과밀도를 보조 신호로 표시합니다.
 - 매출 성장, 영업이익률, ROE, 부채비율, 밸류에이션, 가격 모멘텀, 최근 이슈를 점수화합니다.
 - 추천 이유, 투자 판단 등급, 주의할 리스크를 한국어 Markdown 리포트와 웹 화면으로 출력합니다.
 

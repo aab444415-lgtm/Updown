@@ -67,6 +67,7 @@ def report_to_dict(report: RecommendationReport) -> dict:
         "createdAtTimezone": _timezone_name(report.created_at),
         "snapshotDate": report.created_at.date().isoformat(),
         "macroContext": report.macro_context,
+        "correlation": _correlation_to_dict(report.correlation_profile),
         "dataQuality": {
             "liveNews": report.data_quality.live_news,
             "liveMarketData": report.data_quality.live_market_data,
@@ -174,6 +175,14 @@ def report_to_dict(report: RecommendationReport) -> dict:
                     "quarterlyFinancials": list(item.stock.fundamentals.quarterly_financials),
                 },
                 "technical": technical_by_ticker.get(item.stock.ticker.upper()),
+                "liquidity": _liquidity_to_dict(report.liquidity_profiles.get(item.stock.ticker.upper())),
+                "sepa": _sepa_to_dict(report.sepa_profiles.get(item.stock.ticker.upper())),
+                "earningsEstimate": _earnings_estimate_to_dict(
+                    report.earnings_estimate_profiles.get(item.stock.ticker.upper())
+                ),
+                "detailedValuation": _detailed_valuation_to_dict(
+                    report.detailed_valuation_profiles.get(item.stock.ticker.upper())
+                ),
                 "country": item.stock.country,
                 "currency": item.stock.currency,
                 "earlyGrowth": _early_growth_to_dict(
@@ -444,6 +453,101 @@ def _valuation_range_to_dict(item) -> dict:
         "upsideLowPct": valuation_range.upside_low_pct,
         "upsideHighPct": valuation_range.upside_high_pct,
         "note": valuation_range.note,
+    }
+
+
+def _liquidity_to_dict(item) -> dict | None:
+    if item is None:
+        return None
+    return {
+        "score": item.score,
+        "grade": item.grade,
+        "avgDailyVolume": item.avg_daily_volume,
+        "avgDollarVolume": item.avg_dollar_volume,
+        "volumeStabilityScore": item.volume_stability_score,
+        "amihudIlliquidity": item.amihud_illiquidity,
+        "marketImpactBps": item.market_impact_bps,
+        "observations": item.observations,
+        "source": item.source,
+        "warnings": list(item.warnings),
+    }
+
+
+def _sepa_to_dict(item) -> dict | None:
+    if item is None:
+        return None
+    return {
+        "score": item.score,
+        "stage": item.stage,
+        "stageLabel": item.stage_label,
+        "trendTemplatePasses": item.trend_template_passes,
+        "trendTemplateTotal": item.trend_template_total,
+        "trendTemplateChecks": list(item.trend_template_checks),
+        "maAlignment": item.ma_alignment,
+        "pricePositionLabel": item.price_position_label,
+        "pivotLabel": item.pivot_label,
+        "breakoutQualityLabel": item.breakout_quality_label,
+        "reasons": list(item.reasons),
+        "cautions": list(item.cautions),
+    }
+
+
+def _earnings_estimate_to_dict(item) -> dict | None:
+    if item is None:
+        return None
+    return {
+        "score": item.score,
+        "eventRiskLabel": item.event_risk_label,
+        "nextEarningsDate": item.next_earnings_date,
+        "epsConsensus": item.eps_consensus,
+        "revenueConsensus": item.revenue_consensus,
+        "epsRevisionLabel": item.eps_revision_label,
+        "beatMissSummary": item.beat_miss_summary,
+        "analystCoverage": item.analyst_coverage,
+        "source": item.source,
+        "warnings": list(item.warnings),
+    }
+
+
+def _detailed_valuation_to_dict(item) -> dict | None:
+    if item is None:
+        return None
+    return {
+        "score": item.score,
+        "method": item.method,
+        "fairMarketCapMid": item.fair_market_cap_mid,
+        "upsideMidPct": item.upside_mid_pct,
+        "dcfMarketCap": item.dcf_market_cap,
+        "relativeMarketCap": item.relative_market_cap,
+        "bearMarketCap": item.bear_market_cap,
+        "bullMarketCap": item.bull_market_cap,
+        "sensitivity": list(item.sensitivity),
+        "notes": list(item.notes),
+        "warnings": list(item.warnings),
+    }
+
+
+def _correlation_to_dict(item) -> dict | None:
+    if item is None:
+        return None
+    return {
+        "label": item.label,
+        "averageCorrelation": item.average_correlation,
+        "maxCorrelation": item.max_correlation,
+        "maxPair": list(item.max_pair) if item.max_pair else None,
+        "coveragePct": item.coverage_pct,
+        "crowdedIndustries": list(item.crowded_industries),
+        "diversificationHints": list(item.diversification_hints),
+        "pairs": [
+            {
+                "tickerA": pair.ticker_a,
+                "tickerB": pair.ticker_b,
+                "correlation": pair.correlation,
+                "observations": pair.observations,
+            }
+            for pair in item.pairs
+        ],
+        "warnings": list(item.warnings),
     }
 
 
