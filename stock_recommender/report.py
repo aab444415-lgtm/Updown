@@ -289,6 +289,8 @@ def _render_short_term_stock(rank: int, item: ShortTermScore) -> list[str]:
         f"- 세부 점수: 차트 {item.chart_score:.1f}, 거래량 {item.volume_score:.1f}, "
         f"시장 {item.market_score:.1f}, 뉴스 {item.news_score:.1f}, 기업 {item.company_score:.1f}"
     )
+    if item.trade_signal is not None:
+        lines.append(_trade_signal_line(item.trade_signal))
     lines.append(f"- 종합 판단 참고: {stock_score.decision_grade}, 리스크 {stock_score.risk_level}")
     lines.append("- 단기 근거:")
     for reason in item.reasons:
@@ -310,6 +312,8 @@ def _render_medium_term_stock(rank: int, item: MediumTermScore) -> list[str]:
         f"- 세부 점수: 기업 {item.company_score:.1f}, 차트 {item.chart_score:.1f}, "
         f"시장 {item.market_score:.1f}, 뉴스 {item.news_score:.1f}"
     )
+    if item.trade_signal is not None:
+        lines.append(_trade_signal_line(item.trade_signal))
     lines.append(f"- 종합 판단 참고: {stock_score.decision_grade}, 리스크 {stock_score.risk_level}")
     lines.append("- 중기 근거:")
     for reason in item.reasons:
@@ -384,8 +388,33 @@ def _format_valuation_range(item: StockScore) -> str:
     )
 
 
+def _trade_signal_line(signal) -> str:
+    price = _number(signal.reference_price)
+    ma200 = _number(signal.ma200)
+    zone = f"{_number(signal.volume_zone_lower)}~{_number(signal.volume_zone_upper)}"
+    zone_strength = _pct(signal.volume_zone_strength)
+    target = _number(signal.target_price)
+    target_label = _target_type_label(signal.target_type)
+    partial = _pct(signal.partial_take_profit_pct)
+    remaining = f" / 잔여: {signal.remaining_exit_rule}" if signal.remaining_exit_rule else ""
+    return (
+        f"- 차트 매매 신호: {signal.label} ({signal.setup}, 점수 {signal.score:.1f}, "
+        f"신뢰도 {signal.confidence:.1f}) / 현재가 {price}, 매물대 {zone}(강도 {zone_strength}), "
+        f"MA200 {ma200}, 목표 {target_label} {target}, 익절 {partial}{remaining} / "
+        f"무효화: {signal.invalidation_rule}"
+    )
+
+
+def _number(value: float | None) -> str:
+    return "N/A" if value is None else f"{value:.2f}"
+
+
 def _pct(value: float | None) -> str:
     return "N/A" if value is None else f"{value:.1f}%"
+
+
+def _target_type_label(value: str | None) -> str:
+    return {"ma200": "MA200", "previous_swing_high": "전 고점"}.get(value or "", "목표")
 
 
 def _count(value: int | None) -> str:

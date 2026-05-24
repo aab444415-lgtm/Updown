@@ -18,7 +18,7 @@ from .snapshot_store import list_snapshot_rows, save_persistent_snapshot
 from .storage import CacheStore
 
 
-SNAPSHOT_PAYLOAD_VERSION = 16
+SNAPSHOT_PAYLOAD_VERSION = 18
 BENCHMARK_TICKERS = ("SPY", "QQQ", "^KS11")
 FUNDAMENTAL_SOURCE_FIELDS = (
     "revenue",
@@ -132,6 +132,12 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
     legend_coverage = _legend_metric_coverage(report)
     legend_by_ticker = {
         item.stock_score.stock.ticker.upper(): item for item in report.legend_strategy_scores
+    }
+    short_term_by_ticker = {
+        item.stock_score.stock.ticker.upper(): item for item in report.short_term_scores
+    }
+    medium_term_by_ticker = {
+        item.stock_score.stock.ticker.upper(): item for item in report.medium_term_scores
     }
     payload = {
         "version": SNAPSHOT_PAYLOAD_VERSION,
@@ -252,6 +258,18 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                 },
                 "fundamentalSources": _fundamental_sources(item.stock.fundamentals.sources),
                 "momentumRaw": _momentum_payload(report.momentums.get(item.stock.ticker.upper())),
+                "tradeSignals": {
+                    "short": _trade_signal_payload(
+                        short_term_by_ticker.get(item.stock.ticker.upper()).trade_signal
+                        if short_term_by_ticker.get(item.stock.ticker.upper())
+                        else None
+                    ),
+                    "medium": _trade_signal_payload(
+                        medium_term_by_ticker.get(item.stock.ticker.upper()).trade_signal
+                        if medium_term_by_ticker.get(item.stock.ticker.upper())
+                        else None
+                    ),
+                },
                 "priceAnchor": _price_anchor_payload(
                     report.momentums.get(item.stock.ticker.upper()),
                     currency=item.stock.currency,
@@ -325,6 +343,7 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                 "confidenceScore": item.confidence_score,
                 "confidenceLabel": item.confidence_label,
                 "setupLabel": item.setup_label,
+                "tradeSignal": _trade_signal_payload(item.trade_signal),
                 "decisionGrade": item.stock_score.decision_grade,
                 "riskLevel": item.stock_score.risk_level,
                 **_portfolio_fields(item.stock_score),
@@ -349,6 +368,7 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                 "newsScore": item.news_score,
                 "confidenceScore": item.confidence_score,
                 "confidenceLabel": item.confidence_label,
+                "tradeSignal": _trade_signal_payload(item.trade_signal),
                 "decisionGrade": item.stock_score.decision_grade,
                 "riskLevel": item.stock_score.risk_level,
                 **_portfolio_fields(item.stock_score),
@@ -718,25 +738,76 @@ def _momentum_payload(momentum: Momentum | None) -> dict:
         "drawdownFromHighPct": momentum.drawdown_from_high_pct,
         "rangePositionPct": momentum.range_position_pct,
         "latestClose": momentum.latest_close,
+        "latestOpen": momentum.latest_open,
+        "latestHigh": momentum.latest_high,
+        "latestLow": momentum.latest_low,
+        "previousClose": momentum.previous_close,
         "latestCloseDate": momentum.latest_close_date,
         "sixMonthHigh": momentum.six_month_high,
         "sixMonthLow": momentum.six_month_low,
         "ma20": momentum.ma20,
         "ma60": momentum.ma60,
         "ma120": momentum.ma120,
+        "ma150": momentum.ma150,
+        "ma200": momentum.ma200,
         "rsi14": momentum.rsi14,
         "ma20DistancePct": momentum.ma20_distance_pct,
         "ma60DistancePct": momentum.ma60_distance_pct,
         "ma120DistancePct": momentum.ma120_distance_pct,
+        "ma150DistancePct": momentum.ma150_distance_pct,
+        "ma200DistancePct": momentum.ma200_distance_pct,
         "ma20SlopePct": momentum.ma20_slope_pct,
         "ma60SlopePct": momentum.ma60_slope_pct,
+        "ma150SlopePct": momentum.ma150_slope_pct,
+        "ma200SlopePct": momentum.ma200_slope_pct,
         "latestVolume": momentum.latest_volume,
         "avgVolume20": momentum.avg_volume_20,
         "volumeRatio": momentum.volume_ratio,
         "twentyDayBreakoutPct": momentum.twenty_day_breakout_pct,
         "sixtyDayBreakoutPct": momentum.sixty_day_breakout_pct,
+        "bollingerUpper": momentum.bollinger_upper,
+        "bollingerMiddle": momentum.bollinger_middle,
+        "bollingerLower": momentum.bollinger_lower,
+        "bollingerBandwidthPct": momentum.bollinger_bandwidth_pct,
+        "bollingerPercentB": momentum.bollinger_percent_b,
+        "volumeZoneLower": momentum.volume_zone_lower,
+        "volumeZoneUpper": momentum.volume_zone_upper,
+        "volumeZoneStrength": momentum.volume_zone_strength,
+        "volumeZoneContainsLatest": momentum.volume_zone_contains_latest,
+        "previousSwingHigh": momentum.previous_swing_high,
+        "previousSwingHighDistancePct": momentum.previous_swing_high_distance_pct,
+        "ohlcvCoveragePct": momentum.ohlcv_coverage_pct,
         "source": momentum.source,
         "stale": momentum.stale,
+    }
+
+
+def _trade_signal_payload(item) -> dict | None:
+    if item is None:
+        return None
+    return {
+        "horizon": item.horizon,
+        "action": item.action,
+        "label": _redact_text(item.label),
+        "score": item.score,
+        "confidence": item.confidence,
+        "setup": _redact_text(item.setup),
+        "reasons": [_redact_text(text) for text in item.reasons],
+        "cautions": [_redact_text(text) for text in item.cautions],
+        "referencePrice": item.reference_price,
+        "ma150": item.ma150,
+        "ma200": item.ma200,
+        "bollingerUpper": item.bollinger_upper,
+        "bollingerMiddle": item.bollinger_middle,
+        "bollingerLower": item.bollinger_lower,
+        "volumeZoneLower": item.volume_zone_lower,
+        "volumeZoneUpper": item.volume_zone_upper,
+        "volumeZoneStrength": item.volume_zone_strength,
+        "targetPrice": item.target_price,
+        "targetType": item.target_type,
+        "partialTakeProfitPct": item.partial_take_profit_pct,
+        "remainingExitRule": _redact_text(item.remaining_exit_rule),
+        "invalidationRule": _redact_text(item.invalidation_rule),
     }
 
 

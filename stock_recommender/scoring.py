@@ -29,6 +29,7 @@ from .models import (
     ShortTermScore,
     StockProfile,
     StockScore,
+    TradeTimingSignal,
     ValuationRange,
 )
 from .time_utils import now_in_app_timezone
@@ -503,6 +504,16 @@ def score_short_term_candidates(
                 time_horizon="당일~2주",
                 reasons=short_term_reasons(stock, momentum, news, market, chart, volume, company),
                 cautions=short_term_cautions(stock, momentum, news_tuple, market, chart, volume, company),
+                trade_signal=trade_timing_signal_for_stock(
+                    item,
+                    momentum,
+                    horizon="short",
+                    score=score,
+                    confidence=confidence,
+                    chart=chart,
+                    market=market,
+                    volume=volume,
+                ),
             )
         )
     return tuple(sorted(results, key=lambda item: item.score, reverse=True))
@@ -549,6 +560,15 @@ def score_medium_term_candidates(
                 time_horizon="2주~3개월",
                 reasons=medium_term_reasons(stock, momentum, company, market, chart, news),
                 cautions=medium_term_cautions(stock, momentum, news_tuple, company, market, chart),
+                trade_signal=trade_timing_signal_for_stock(
+                    item,
+                    momentum,
+                    horizon="medium",
+                    score=score,
+                    confidence=confidence,
+                    chart=chart,
+                    market=market,
+                ),
             )
         )
     return tuple(sorted(results, key=lambda item: item.score, reverse=True))
@@ -1266,6 +1286,374 @@ def short_term_cautions(
         cautions.append("단기 악재에 취약할 수 있어 실적과 재무 안정성 재확인 필요")
     cautions.extend(stock.risks[:1])
     return tuple(dict.fromkeys(cautions))
+
+
+def trade_timing_signal_for_stock(
+    item: StockScore,
+    momentum: Momentum,
+    horizon: str,
+    score: float,
+    confidence: float,
+    chart: float,
+    market: float,
+    volume: float | None = None,
+) -> TradeTimingSignal:
+    technical_ready = _trade_timing_data_ready(momentum)
+    signal_confidence = _trade_timing_confidence(momentum, confidence, horizon)
+    cautions: list[str] = []
+    if momentum.stale:
+        cautions.append("가격 데이터가 만료 캐시라 최신 차트로 재확인 필요")
+    if item.risk_gate != "Pass":
+        cautions.extend(item.risk_gate_reasons[:2])
+    if item.decision_grade == "제외":
+        cautions.append("종합 등급이 제외라 차트가 좋아도 강한 매수 신호를 차단")
+
+    if item.risk_gate == "Hard Fail":
+        return _trade_signal(
+            horizon,
+            "sell",
+            12,
+            min(signal_confidence, 40),
+            "리스크 게이트 매도",
+            ("리스크 게이트 Hard Fail로 차트 신호보다 위험 관리가 우선",),
+            tuple(dict.fromkeys(cautions or item.risk_gate_reasons)),
+            momentum,
+            invalidation_rule="Hard Fail 해소와 MA200 회복 전 재진입 보류",
+        )
+
+    if not technical_ready:
+        return _trade_signal(
+            horizon,
+            "hold",
+            min(score, 50),
+            min(signal_confidence, 44),
+            "매물대/MA200 데이터 부족",
+            ("1년 거래량 매물대 또는 MA200 계산에 필요한 가격 데이터가 부족",),
+            tuple(dict.fromkeys((*cautions, "OHLCV와 200일 이상 가격 데이터 확보 후 신호 재평가"))),
+            momentum,
+            invalidation_rule="거래량 매물대와 MA200이 모두 계산된 뒤 판단",
+        )
+
+    latest = momentum.latest_close or 0
+    ma200 = momentum.ma200 or 0
+    high = _latest_high(momentum)
+    low = _latest_low(momentum)
+    below_ma200 = latest < ma200
+    in_zone = bool(momentum.volume_zone_contains_latest)
+    excluded = item.decision_grade == "제외"
+
+    action = "hold"
+    setup = _hold_setup(momentum)
+    raw_score = 50.0
+    invalidation = "핵심 매물대 재진입 또는 MA200 위치 재확인"
+    target_price: float | None = None
+    target_type: str | None = None
+    partial_take_profit_pct: float | None = None
+    remaining_exit_rule = ""
+
+    if _target_reached(high, latest, momentum.previous_swing_high):
+        action = "take_profit_half"
+        setup = "전 고점 50% 익절"
+        raw_score = 78
+        target_price = momentum.previous_swing_high
+        target_type = "previous_swing_high"
+        partial_take_profit_pct = 50
+        remaining_exit_rule = "잔여 50%는 MA200 종가 이탈 시 정리"
+        invalidation = "익절 후 잔여 물량은 MA200 종가 이탈 전까지 추세 추적"
+    elif _ma200_take_profit_reached(momentum):
+        action = "take_profit_half"
+        setup = "MA200 1차 익절"
+        raw_score = 74
+        target_price = ma200
+        target_type = "ma200"
+        partial_take_profit_pct = 50
+        remaining_exit_rule = "잔여 50%는 MA200 종가 이탈 시 정리"
+        invalidation = "MA200 위 안착 실패 시 잔여 물량 축소"
+    elif _ma200_trailing_break(momentum):
+        action = "sell"
+        setup = "MA200 트레일링 이탈"
+        raw_score = 20
+        invalidation = "MA200 종가 회복 전 잔여 물량 재확대 보류"
+    elif _volume_zone_break(momentum):
+        action = "reduce"
+        setup = "핵심 매물대 이탈"
+        raw_score = 34
+        invalidation = "핵심 매물대 하단 회복 전 비중 확대 보류"
+    elif in_zone and not excluded:
+        if below_ma200:
+            target_price = ma200
+            target_type = "ma200"
+            upside = _target_upside_pct(latest, ma200)
+            if _finite(upside) and upside >= 4 and signal_confidence >= 55:
+                action = "buy"
+                setup = "매물대 진입 / MA200 1차 목표"
+                raw_score = 82
+                invalidation = "핵심 매물대 하단 이탈 시 매수 신호 무효"
+            elif _finite(upside) and upside > 0:
+                action = "scale_buy"
+                setup = "매물대 진입 / MA200 여력 제한"
+                raw_score = 64
+                invalidation = "MA200 목표 여력 축소 또는 매물대 하단 이탈 시 중단"
+            else:
+                setup = "매물대 진입 / 목표 여력 부족"
+                raw_score = 52
+                target_price = None
+                target_type = None
+                invalidation = "MA200까지 여력이 생길 때 재평가"
+        else:
+            target_price = _next_target_above(latest, momentum.previous_swing_high)
+            target_type = "previous_swing_high" if target_price else None
+            if _ma200_buy_support(momentum) and signal_confidence >= 55:
+                action = "buy"
+                setup = "MA200 위 매물대 매수"
+                raw_score = 80
+                invalidation = "MA200 종가 이탈 또는 핵심 매물대 하단 이탈 시 신호 무효"
+            else:
+                action = "scale_buy"
+                setup = "MA200 위 매물대 분할매수"
+                raw_score = 66
+                invalidation = "MA200 지지 확인 실패 시 분할매수 중단"
+
+    if action in {"buy", "scale_buy"} and signal_confidence < 50:
+        action = "hold"
+        setup = "데이터 확인"
+        raw_score = min(raw_score, 56)
+        cautions.append("차트/매물대 신뢰도가 낮아 매수 신호를 관망으로 제한")
+        target_price = None
+        target_type = None
+
+    reasons = _trade_timing_reasons(momentum, chart, market, volume, action, target_price, target_type)
+    return _trade_signal(
+        horizon,
+        action,
+        raw_score * 0.72 + score * 0.16 + signal_confidence * 0.12,
+        signal_confidence,
+        setup,
+        reasons,
+        tuple(dict.fromkeys(cautions)),
+        momentum,
+        invalidation_rule=invalidation,
+        target_price=target_price,
+        target_type=target_type,
+        partial_take_profit_pct=partial_take_profit_pct,
+        remaining_exit_rule=remaining_exit_rule,
+    )
+
+
+def _trade_signal(
+    horizon: str,
+    action: str,
+    score: float,
+    confidence: float,
+    setup: str,
+    reasons: tuple[str, ...],
+    cautions: tuple[str, ...],
+    momentum: Momentum,
+    invalidation_rule: str,
+    target_price: float | None = None,
+    target_type: str | None = None,
+    partial_take_profit_pct: float | None = None,
+    remaining_exit_rule: str = "",
+) -> TradeTimingSignal:
+    return TradeTimingSignal(
+        horizon=horizon,
+        action=action,
+        label=_trade_action_label(action),
+        score=round(_clamp(score, 0, 100), 1),
+        confidence=round(_clamp(confidence, 0, 100), 1),
+        setup=setup,
+        reasons=tuple(dict.fromkeys(reasons)),
+        cautions=tuple(dict.fromkeys(cautions)),
+        reference_price=momentum.latest_close,
+        ma150=momentum.ma150,
+        ma200=momentum.ma200,
+        bollinger_upper=momentum.bollinger_upper,
+        bollinger_middle=momentum.bollinger_middle,
+        bollinger_lower=momentum.bollinger_lower,
+        volume_zone_lower=momentum.volume_zone_lower,
+        volume_zone_upper=momentum.volume_zone_upper,
+        volume_zone_strength=momentum.volume_zone_strength,
+        target_price=target_price,
+        target_type=target_type,
+        partial_take_profit_pct=partial_take_profit_pct,
+        remaining_exit_rule=remaining_exit_rule,
+        invalidation_rule=invalidation_rule,
+    )
+
+
+def _trade_action_label(action: str) -> str:
+    return {
+        "buy": "매수",
+        "scale_buy": "분할매수",
+        "hold": "관망",
+        "reduce": "비중축소",
+        "sell": "매도",
+        "take_profit_half": "50% 익절",
+    }.get(action, "관망")
+
+
+def _trade_timing_data_ready(momentum: Momentum) -> bool:
+    return all(
+        _finite(value)
+        for value in (
+            momentum.latest_close,
+            momentum.ma200,
+            momentum.latest_high,
+            momentum.latest_low,
+            momentum.volume_zone_lower,
+            momentum.volume_zone_upper,
+            momentum.volume_zone_strength,
+        )
+    )
+
+
+def _trade_timing_confidence(momentum: Momentum, base_confidence: float, horizon: str) -> float:
+    score = base_confidence
+    if _finite(momentum.ma200):
+        score += 8
+    else:
+        score -= 22
+    if _finite(momentum.volume_zone_lower) and _finite(momentum.volume_zone_upper):
+        score += 12
+    else:
+        score -= 18
+    if momentum.volume_zone_contains_latest:
+        score += 6
+    if _finite(momentum.ohlcv_coverage_pct) and momentum.ohlcv_coverage_pct < 60:
+        score -= 8
+    if horizon == "short" and not _has_volume_data(momentum):
+        score -= 8
+    if momentum.stale:
+        score -= 10
+    return _clamp(score, 0, 100)
+
+
+def _hold_setup(momentum: Momentum) -> str:
+    if not momentum.volume_zone_contains_latest:
+        return "매물대 밖 관망"
+    if _finite(momentum.latest_close) and _finite(momentum.ma200):
+        if momentum.latest_close < momentum.ma200:
+            return "MA200 목표 여력 확인"
+        return "MA200 지지 확인"
+    return "확인 대기"
+
+
+def _trade_timing_reasons(
+    momentum: Momentum,
+    chart: float,
+    market: float,
+    volume: float | None,
+    action: str,
+    target_price: float | None,
+    target_type: str | None,
+) -> tuple[str, ...]:
+    parts = [
+        _volume_zone_reason(momentum),
+        _ma200_regime_reason(momentum),
+        _target_reason(target_price, target_type),
+        f"차트 점수 {chart:.1f}/100, 시장 모멘텀 {market:.1f}/100",
+    ]
+    if volume is not None:
+        parts.append(f"거래량 확인 점수 {volume:.1f}/100")
+    if _finite(momentum.rsi14):
+        parts.append(f"RSI {momentum.rsi14:.1f}")
+    if action == "take_profit_half":
+        parts.append("목표 도달 시 50% 익절, 잔여 물량은 MA200 기준으로 추적")
+    elif action in {"reduce", "sell"}:
+        parts.append("핵심 매물대 또는 MA200 이탈을 우선 반영")
+    parts.append(_bollinger_reference(momentum))
+    return tuple(part for part in parts if part)
+
+
+def _volume_zone_reason(momentum: Momentum) -> str:
+    if not (_finite(momentum.volume_zone_lower) and _finite(momentum.volume_zone_upper)):
+        return "거래량 매물대 데이터 부족"
+    status = "진입" if momentum.volume_zone_contains_latest else "밖"
+    strength = _pct_text(momentum.volume_zone_strength)
+    return (
+        f"핵심 매물대 {momentum.volume_zone_lower:.2f}~{momentum.volume_zone_upper:.2f}, "
+        f"현재 캔들 {status}, 강도 {strength}"
+    )
+
+
+def _ma200_regime_reason(momentum: Momentum) -> str:
+    if not (_finite(momentum.latest_close) and _finite(momentum.ma200)):
+        return "MA200 데이터 부족"
+    regime = "MA200 아래: MA200을 1차 익절 목표로 사용" if momentum.latest_close < momentum.ma200 else "MA200 위: MA200을 매수 지지선으로 사용"
+    return f"현재가 {momentum.latest_close:.2f}, MA200 {momentum.ma200:.2f}({_pct_text(momentum.ma200_distance_pct)}), {regime}"
+
+
+def _target_reason(target_price: float | None, target_type: str | None) -> str:
+    if not _finite(target_price):
+        return "목표가 미확정"
+    return f"목표가 {target_price:.2f} ({_target_type_label(target_type)})"
+
+
+def _bollinger_reference(momentum: Momentum) -> str:
+    if not _finite(momentum.bollinger_percent_b):
+        return ""
+    return f"볼린저는 참고값: %B {momentum.bollinger_percent_b:.1f}"
+
+
+def _target_type_label(target_type: str | None) -> str:
+    return {
+        "ma200": "MA200",
+        "previous_swing_high": "전 고점",
+    }.get(target_type or "", "참고 목표")
+
+
+def _latest_high(momentum: Momentum) -> float:
+    return momentum.latest_high if _finite(momentum.latest_high) else (momentum.latest_close or 0)
+
+
+def _latest_low(momentum: Momentum) -> float:
+    return momentum.latest_low if _finite(momentum.latest_low) else (momentum.latest_close or 0)
+
+
+def _target_reached(high: float, latest: float, target: float | None) -> bool:
+    return _finite(target) and (high >= target * 0.995 or latest >= target * 0.995)
+
+
+def _ma200_take_profit_reached(momentum: Momentum) -> bool:
+    if not (_finite(momentum.previous_close) and _finite(momentum.ma200)):
+        return False
+    return momentum.previous_close < momentum.ma200 <= _latest_high(momentum)
+
+
+def _ma200_trailing_break(momentum: Momentum) -> bool:
+    if not (_finite(momentum.previous_close) and _finite(momentum.latest_close) and _finite(momentum.ma200)):
+        return False
+    return momentum.previous_close >= momentum.ma200 and momentum.latest_close < momentum.ma200
+
+
+def _volume_zone_break(momentum: Momentum) -> bool:
+    if not (_finite(momentum.latest_close) and _finite(momentum.volume_zone_lower)):
+        return False
+    return momentum.latest_close < momentum.volume_zone_lower * 0.985
+
+
+def _target_upside_pct(latest: float, target: float | None) -> float | None:
+    if latest <= 0 or not _finite(target):
+        return None
+    return ((target / latest) - 1) * 100
+
+
+def _ma200_buy_support(momentum: Momentum) -> bool:
+    if not (_finite(momentum.latest_close) and _finite(momentum.ma200)):
+        return False
+    zone_above_ma200 = _finite(momentum.volume_zone_lower) and momentum.volume_zone_lower >= momentum.ma200 * 0.98
+    candle_tests_ma200 = _latest_low(momentum) <= momentum.ma200 * 1.03 <= momentum.latest_close * 1.03
+    return momentum.latest_close >= momentum.ma200 and (zone_above_ma200 or candle_tests_ma200)
+
+
+def _next_target_above(latest: float, target: float | None) -> float | None:
+    if _finite(target) and target > latest * 1.01:
+        return target
+    return None
+
+
+def _pct_text(value: float | None) -> str:
+    return f"{value:.1f}%" if _finite(value) else "N/A"
 
 
 def medium_term_company_score(

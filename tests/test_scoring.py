@@ -836,6 +836,144 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(short.volume_score, 50)
         self.assertIn("거래량", " ".join(short.cautions))
 
+    def test_trade_signal_buys_volume_zone_below_ma200_with_target_room(self):
+        signal = _single_short_trade_signal(
+            _trade_signal_momentum(
+                latest=95,
+                ma200=100,
+                volume_zone_lower=93,
+                volume_zone_upper=96,
+                latest_high=96,
+                latest_low=94,
+            )
+        )
+
+        self.assertEqual(signal.action, "buy")
+        self.assertEqual(signal.label, "매수")
+        self.assertEqual(signal.target_type, "ma200")
+        self.assertEqual(signal.target_price, 100)
+        self.assertIn("매물대", signal.setup)
+
+    def test_trade_signal_buys_volume_zone_above_ma200_support(self):
+        signal = _single_short_trade_signal(
+            _trade_signal_momentum(
+                latest=105,
+                ma200=100,
+                volume_zone_lower=101,
+                volume_zone_upper=106,
+                latest_high=106,
+                latest_low=101,
+            )
+        )
+
+        self.assertEqual(signal.action, "buy")
+        self.assertEqual(signal.label, "매수")
+        self.assertIn("MA200", signal.setup)
+
+    def test_trade_signal_scales_when_ma200_target_room_is_small(self):
+        signal = _single_short_trade_signal(
+            _trade_signal_momentum(
+                latest=98,
+                ma200=100,
+                volume_zone_lower=96,
+                volume_zone_upper=99,
+                latest_high=99,
+                latest_low=97,
+            )
+        )
+
+        self.assertIn(signal.action, {"scale_buy", "hold"})
+        if signal.action == "scale_buy":
+            self.assertEqual(signal.label, "분할매수")
+            self.assertEqual(signal.target_type, "ma200")
+
+    def test_trade_signal_takes_half_profit_at_previous_swing_high(self):
+        signal = _single_short_trade_signal(
+            _trade_signal_momentum(
+                latest=119.5,
+                ma200=100,
+                volume_zone_lower=110,
+                volume_zone_upper=120,
+                latest_high=120,
+                latest_low=118,
+                previous_swing_high=120,
+            )
+        )
+
+        self.assertEqual(signal.action, "take_profit_half")
+        self.assertEqual(signal.label, "50% 익절")
+        self.assertEqual(signal.target_type, "previous_swing_high")
+        self.assertEqual(signal.partial_take_profit_pct, 50)
+        self.assertIn("MA200", signal.remaining_exit_rule)
+
+    def test_trade_signal_takes_half_profit_when_below_ma200_trade_reaches_ma200(self):
+        signal = _single_short_trade_signal(
+            _trade_signal_momentum(
+                latest=100.2,
+                ma200=100,
+                volume_zone_lower=94,
+                volume_zone_upper=98,
+                latest_high=101,
+                latest_low=99,
+                previous_close=96,
+            )
+        )
+
+        self.assertEqual(signal.action, "take_profit_half")
+        self.assertEqual(signal.target_type, "ma200")
+        self.assertEqual(signal.partial_take_profit_pct, 50)
+
+    def test_trade_signal_reduces_or_sells_on_zone_and_ma200_breaks(self):
+        zone_signal = _single_short_trade_signal(
+            _trade_signal_momentum(
+                latest=90,
+                ma200=100,
+                volume_zone_lower=96,
+                volume_zone_upper=100,
+                latest_high=91,
+                latest_low=89,
+                volume_zone_contains_latest=False,
+            )
+        )
+        trailing_signal = _single_short_trade_signal(
+            _trade_signal_momentum(
+                latest=98,
+                ma200=100,
+                volume_zone_lower=95,
+                volume_zone_upper=99,
+                latest_high=99,
+                latest_low=97,
+                previous_close=102,
+            )
+        )
+
+        self.assertEqual(zone_signal.action, "reduce")
+        self.assertEqual(zone_signal.label, "비중축소")
+        self.assertEqual(trailing_signal.action, "sell")
+        self.assertEqual(trailing_signal.label, "매도")
+
+    def test_trade_signal_uses_low_confidence_hold_when_long_data_missing(self):
+        signal = _single_short_trade_signal(
+            Momentum(
+                one_month_pct=4,
+                three_month_pct=8,
+                six_month_pct=12,
+                drawdown_from_high_pct=-5,
+                range_position_pct=60,
+                latest_close=105,
+                ma20=103,
+                ma60=100,
+                ma120=98,
+                rsi14=55,
+                latest_volume=1_500_000,
+                avg_volume_20=1_000_000,
+                volume_ratio=1.5,
+            )
+        )
+
+        self.assertEqual(signal.action, "hold")
+        self.assertLessEqual(signal.confidence, 44)
+
     def test_medium_term_ranking_uses_company_market_chart_and_news(self):
         industry = INDUSTRIES[0]
         steady = StockProfile(
@@ -1197,8 +1335,7 @@ class ScoringTests(unittest.TestCase):
             beneficiary_industries=BENEFICIARY_INDUSTRIES[:1],
         )
 
-        with patch("stock_recommender.web._technical_by_ticker", return_value={}):
-            payload = report_to_dict(report)
+        payload = report_to_dict(report)
 
         self.assertIn("legendCandidates", payload)
         self.assertIn("beneficiaryIndustries", payload)
@@ -1225,6 +1362,23 @@ class ScoringTests(unittest.TestCase):
         self.assertIn("volumeScore", payload["shortTermCandidates"][0])
         self.assertIn("confidenceScore", payload["shortTermCandidates"][0])
         self.assertIn("setupLabel", payload["shortTermCandidates"][0])
+        self.assertIn("ma150", payload["stocks"][0]["technical"])
+        self.assertIn("ma200", payload["stocks"][0]["technical"])
+        self.assertIn("bollingerLower", payload["stocks"][0]["technical"])
+        self.assertIn("bollingerPercentB", payload["stocks"][0]["technical"])
+        self.assertIn("volumeZoneLower", payload["stocks"][0]["technical"])
+        self.assertIn("volumeZoneUpper", payload["stocks"][0]["technical"])
+        self.assertIn("previousSwingHigh", payload["stocks"][0]["technical"])
+        self.assertIn("tradeSignal", payload["shortTermCandidates"][0])
+        self.assertIn("tradeSignal", payload["mediumTermCandidates"][0])
+        self.assertIn("tradeSignal", payload["stocks"][0]["shortTerm"])
+        self.assertIn("tradeSignal", payload["stocks"][0]["mediumTerm"])
+        self.assertIn("volumeZoneLower", payload["stocks"][0]["shortTerm"]["tradeSignal"])
+        self.assertIn("targetPrice", payload["stocks"][0]["shortTerm"]["tradeSignal"])
+        self.assertIn(
+            payload["stocks"][0]["shortTerm"]["tradeSignal"]["action"],
+            {"buy", "scale_buy", "hold", "reduce", "sell", "take_profit_half"},
+        )
         self.assertIn("confidenceScore", payload["mediumTermCandidates"][0])
         self.assertIn("confidenceLabel", payload["longTermCandidates"][0])
 
@@ -2226,6 +2380,42 @@ class SnapshotTests(unittest.TestCase):
                     latest_close_date="2026-05-17",
                     six_month_high=130,
                     six_month_low=90,
+                    ma20=120,
+                    ma60=116,
+                    ma120=110,
+                    ma150=108,
+                    ma200=104,
+                    rsi14=55,
+                    latest_open=122,
+                    latest_high=126,
+                    latest_low=121,
+                    previous_close=122,
+                    ma20_distance_pct=2.8,
+                    ma60_distance_pct=6.4,
+                    ma120_distance_pct=12.2,
+                    ma150_distance_pct=14.3,
+                    ma200_distance_pct=18.7,
+                    ma20_slope_pct=1.0,
+                    ma60_slope_pct=0.7,
+                    ma150_slope_pct=0.4,
+                    ma200_slope_pct=0.2,
+                    latest_volume=1_500_000,
+                    avg_volume_20=1_000_000,
+                    volume_ratio=1.5,
+                    twenty_day_breakout_pct=4.0,
+                    sixty_day_breakout_pct=8.0,
+                    bollinger_upper=132,
+                    bollinger_middle=121,
+                    bollinger_lower=110,
+                    bollinger_bandwidth_pct=18.2,
+                    bollinger_percent_b=60.9,
+                    volume_zone_lower=120,
+                    volume_zone_upper=126,
+                    volume_zone_strength=88,
+                    volume_zone_contains_latest=True,
+                    previous_swing_high=135,
+                    previous_swing_high_distance_pct=9.4,
+                    ohlcv_coverage_pct=100,
                     source="Yahoo Finance",
                 ),
                 "SPY": Momentum(latest_close=500, latest_close_date="2026-05-17", source="Yahoo Finance"),
@@ -2248,7 +2438,7 @@ class SnapshotTests(unittest.TestCase):
 
         payload = report_to_snapshot_payload(report, mode="live")
 
-        self.assertEqual(payload["version"], 16)
+        self.assertEqual(payload["version"], 18)
         self.assertEqual(payload["snapshotDate"], "2026-05-18")
         self.assertEqual(payload["createdAtTimezone"], "Asia/Seoul")
         self.assertIn("gitCommit", payload["audit"])
@@ -2278,6 +2468,19 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn("legendScores", payload["stocks"][0])
         self.assertIn("legendCompositeScore", payload["stocks"][0])
         self.assertEqual(payload["stocks"][0]["momentumRaw"]["latestClose"], 123.4)
+        self.assertEqual(payload["stocks"][0]["momentumRaw"]["latestHigh"], 126)
+        self.assertEqual(payload["stocks"][0]["momentumRaw"]["ma150"], 108)
+        self.assertEqual(payload["stocks"][0]["momentumRaw"]["ma200"], 104)
+        self.assertEqual(payload["stocks"][0]["momentumRaw"]["bollingerLower"], 110)
+        self.assertEqual(payload["stocks"][0]["momentumRaw"]["bollingerPercentB"], 60.9)
+        self.assertEqual(payload["stocks"][0]["momentumRaw"]["volumeZoneLower"], 120)
+        self.assertEqual(payload["stocks"][0]["momentumRaw"]["previousSwingHigh"], 135)
+        self.assertIn("tradeSignals", payload["stocks"][0])
+        self.assertIn("short", payload["stocks"][0]["tradeSignals"])
+        self.assertIn("tradeSignal", payload["shortTermCandidates"][0])
+        self.assertIn("tradeSignal", payload["mediumTermCandidates"][0])
+        self.assertIn("volumeZoneLower", payload["shortTermCandidates"][0]["tradeSignal"])
+        self.assertIn("targetPrice", payload["shortTermCandidates"][0]["tradeSignal"])
         self.assertEqual(payload["stocks"][0]["priceAnchor"]["latestClose"], 123.4)
         self.assertEqual(payload["benchmarks"][0]["priceAnchor"]["latestClose"], 500)
         self.assertEqual(payload["priceAnchors"][0]["priceAnchor"]["latestClose"], 123.4)
@@ -2792,16 +2995,147 @@ def _strong_swing_momentum(with_volume: bool = True) -> Momentum:
         ma20=100.0,
         ma60=92.0,
         ma120=84.0,
+        ma150=82.0,
+        ma200=80.0,
         rsi14=58.0,
+        latest_open=103.5,
+        latest_high=106.0,
+        latest_low=102.0,
+        previous_close=103.0,
         ma20_distance_pct=5.0,
         ma60_distance_pct=14.1,
         ma120_distance_pct=25.0,
+        ma150_distance_pct=28.0,
+        ma200_distance_pct=31.2,
         ma20_slope_pct=2.2,
         ma60_slope_pct=1.1,
+        ma150_slope_pct=0.8,
+        ma200_slope_pct=0.6,
         twenty_day_breakout_pct=4.0,
         sixty_day_breakout_pct=9.0,
+        bollinger_upper=112.0,
+        bollinger_middle=103.0,
+        bollinger_lower=94.0,
+        bollinger_bandwidth_pct=17.5,
+        bollinger_percent_b=61.1,
+        volume_zone_lower=101.0,
+        volume_zone_upper=106.0,
+        volume_zone_strength=82.0,
+        volume_zone_contains_latest=True,
+        previous_swing_high=118.0,
+        previous_swing_high_distance_pct=12.4,
+        ohlcv_coverage_pct=100.0,
         source="Yahoo Finance",
         **volume_fields,
+    )
+
+
+def _single_short_trade_signal(momentum: Momentum):
+    industry = INDUSTRIES[0]
+    stock = StockProfile(
+        ticker="SIGNAL",
+        name="Signal Test",
+        industry=industry.name,
+        role="adjacent",
+        thesis="매물대와 MA200 신호 테스트 후보입니다.",
+        risks=("단기 변동성",),
+        fundamentals=Fundamentals(
+            revenue_growth_pct=30.0,
+            operating_margin_pct=22.0,
+            roe_pct=18.0,
+            debt_to_equity_pct=35.0,
+            pe=28.0,
+            forward_pe=21.0,
+            market_cap=3_000_000_000,
+            free_cash_flow=220_000_000,
+            revenue=2_000_000_000,
+        ),
+    )
+    report = build_report(
+        macro_context=DEFAULT_MACRO_CONTEXT,
+        industries=(industry,),
+        stocks=(stock,),
+        news_items=(),
+        momentums={"SIGNAL": momentum},
+    )
+    signal = report.short_term_scores[0].trade_signal
+    assert signal is not None
+    return signal
+
+
+def _trade_signal_momentum(
+    *,
+    latest: float,
+    ma200: float,
+    volume_zone_lower: float,
+    volume_zone_upper: float,
+    latest_high: float | None = None,
+    latest_low: float | None = None,
+    previous_close: float | None = None,
+    previous_swing_high: float | None = None,
+    volume_zone_contains_latest: bool = True,
+    ma150: float | None = None,
+    bollinger_lower: float | None = None,
+    bollinger_middle: float | None = None,
+    bollinger_upper: float | None = None,
+    one_month: float = 5.0,
+    volume_ratio: float = 1.5,
+) -> Momentum:
+    ma150 = ma150 if ma150 is not None else ma200 * 1.02
+    latest_high = latest_high if latest_high is not None else latest * 1.01
+    latest_low = latest_low if latest_low is not None else latest * 0.99
+    previous_close = previous_close if previous_close is not None else latest * 0.99
+    previous_swing_high = previous_swing_high if previous_swing_high is not None else latest * 1.18
+    bollinger_middle = bollinger_middle if bollinger_middle is not None else latest
+    bollinger_lower = bollinger_lower if bollinger_lower is not None else latest * 0.94
+    bollinger_upper = bollinger_upper if bollinger_upper is not None else latest * 1.06
+    return Momentum(
+        one_month_pct=one_month,
+        three_month_pct=12.0,
+        six_month_pct=24.0,
+        drawdown_from_high_pct=-8.0,
+        range_position_pct=64.0,
+        latest_close=latest,
+        latest_close_date="2026-05-22",
+        latest_open=previous_close,
+        latest_high=latest_high,
+        latest_low=latest_low,
+        previous_close=previous_close,
+        six_month_high=max(latest * 1.08, latest_high, previous_swing_high),
+        six_month_low=latest * 0.72,
+        ma20=bollinger_middle,
+        ma60=(ma150 + ma200) / 2,
+        ma120=(ma150 + ma200) / 2,
+        ma150=ma150,
+        ma200=ma200,
+        rsi14=56.0,
+        ma20_distance_pct=(latest - bollinger_middle) / bollinger_middle * 100,
+        ma60_distance_pct=(latest - ((ma150 + ma200) / 2)) / ((ma150 + ma200) / 2) * 100,
+        ma120_distance_pct=(latest - ((ma150 + ma200) / 2)) / ((ma150 + ma200) / 2) * 100,
+        ma150_distance_pct=(latest - ma150) / ma150 * 100,
+        ma200_distance_pct=(latest - ma200) / ma200 * 100,
+        ma20_slope_pct=1.2,
+        ma60_slope_pct=0.8,
+        ma150_slope_pct=0.4,
+        ma200_slope_pct=0.3,
+        latest_volume=volume_ratio * 1_000_000,
+        avg_volume_20=1_000_000,
+        volume_ratio=volume_ratio,
+        twenty_day_breakout_pct=5.0,
+        sixty_day_breakout_pct=9.0,
+        bollinger_upper=bollinger_upper,
+        bollinger_middle=bollinger_middle,
+        bollinger_lower=bollinger_lower,
+        bollinger_bandwidth_pct=(bollinger_upper - bollinger_lower) / bollinger_middle * 100,
+        bollinger_percent_b=(latest - bollinger_lower) / (bollinger_upper - bollinger_lower) * 100,
+        volume_zone_lower=volume_zone_lower,
+        volume_zone_upper=volume_zone_upper,
+        volume_zone_strength=86.0,
+        volume_zone_contains_latest=volume_zone_contains_latest,
+        previous_swing_high=previous_swing_high,
+        previous_swing_high_distance_pct=(previous_swing_high - latest) / latest * 100,
+        ohlcv_coverage_pct=100.0,
+        source="Yahoo Finance",
     )
 
 

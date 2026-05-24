@@ -253,24 +253,46 @@ class Momentum:
     six_month_pct: float | None = None
     drawdown_from_high_pct: float | None = None
     range_position_pct: float | None = None
+    latest_open: float | None = None
+    latest_high: float | None = None
+    latest_low: float | None = None
     latest_close: float | None = None
+    previous_close: float | None = None
     latest_close_date: str | None = None
     six_month_high: float | None = None
     six_month_low: float | None = None
     ma20: float | None = None
     ma60: float | None = None
     ma120: float | None = None
+    ma150: float | None = None
+    ma200: float | None = None
     rsi14: float | None = None
     ma20_distance_pct: float | None = None
     ma60_distance_pct: float | None = None
     ma120_distance_pct: float | None = None
+    ma150_distance_pct: float | None = None
+    ma200_distance_pct: float | None = None
     ma20_slope_pct: float | None = None
     ma60_slope_pct: float | None = None
+    ma150_slope_pct: float | None = None
+    ma200_slope_pct: float | None = None
     latest_volume: float | None = None
     avg_volume_20: float | None = None
     volume_ratio: float | None = None
     twenty_day_breakout_pct: float | None = None
     sixty_day_breakout_pct: float | None = None
+    bollinger_upper: float | None = None
+    bollinger_middle: float | None = None
+    bollinger_lower: float | None = None
+    bollinger_bandwidth_pct: float | None = None
+    bollinger_percent_b: float | None = None
+    volume_zone_lower: float | None = None
+    volume_zone_upper: float | None = None
+    volume_zone_strength: float | None = None
+    volume_zone_contains_latest: bool = False
+    previous_swing_high: float | None = None
+    previous_swing_high_distance_pct: float | None = None
+    ohlcv_coverage_pct: float | None = None
     source: str | None = None
     stale: bool = False
 
@@ -445,6 +467,32 @@ class StockScore:
 
 
 @dataclass(frozen=True)
+class TradeTimingSignal:
+    horizon: str
+    action: str
+    label: str
+    score: float
+    confidence: float
+    setup: str
+    reasons: tuple[str, ...]
+    cautions: tuple[str, ...]
+    reference_price: float | None = None
+    ma150: float | None = None
+    ma200: float | None = None
+    bollinger_upper: float | None = None
+    bollinger_middle: float | None = None
+    bollinger_lower: float | None = None
+    volume_zone_lower: float | None = None
+    volume_zone_upper: float | None = None
+    volume_zone_strength: float | None = None
+    target_price: float | None = None
+    target_type: str | None = None
+    partial_take_profit_pct: float | None = None
+    remaining_exit_rule: str = ""
+    invalidation_rule: str = ""
+
+
+@dataclass(frozen=True)
 class EarlyGrowthScore:
     stock_score: StockScore
     score: float
@@ -474,6 +522,7 @@ class ShortTermScore:
     time_horizon: str
     reasons: tuple[str, ...]
     cautions: tuple[str, ...]
+    trade_signal: TradeTimingSignal | None = None
 
 
 @dataclass(frozen=True)
@@ -490,6 +539,7 @@ class MediumTermScore:
     time_horizon: str
     reasons: tuple[str, ...]
     cautions: tuple[str, ...]
+    trade_signal: TradeTimingSignal | None = None
 
 
 @dataclass(frozen=True)

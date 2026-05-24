@@ -329,12 +329,32 @@ def _technical_by_ticker(report: RecommendationReport) -> dict[str, dict]:
 def _momentum_technical_to_dict(momentum) -> dict:
     return {
         "rsi14": _round_or_none(getattr(momentum, "rsi14", None)),
+        "latestOpen": _round_or_none(getattr(momentum, "latest_open", None)),
+        "latestHigh": _round_or_none(getattr(momentum, "latest_high", None)),
+        "latestLow": _round_or_none(getattr(momentum, "latest_low", None)),
+        "previousClose": _round_or_none(getattr(momentum, "previous_close", None)),
         "ma20DistancePct": _round_or_none(getattr(momentum, "ma20_distance_pct", None)),
         "ma60DistancePct": _round_or_none(getattr(momentum, "ma60_distance_pct", None)),
         "ma120DistancePct": _round_or_none(getattr(momentum, "ma120_distance_pct", None)),
+        "ma150": _round_or_none(getattr(momentum, "ma150", None)),
+        "ma200": _round_or_none(getattr(momentum, "ma200", None)),
+        "ma150DistancePct": _round_or_none(getattr(momentum, "ma150_distance_pct", None)),
+        "ma200DistancePct": _round_or_none(getattr(momentum, "ma200_distance_pct", None)),
         "volumeRatio": _round_or_none(getattr(momentum, "volume_ratio", None)),
         "twentyDayBreakoutPct": _round_or_none(getattr(momentum, "twenty_day_breakout_pct", None)),
         "sixtyDayBreakoutPct": _round_or_none(getattr(momentum, "sixty_day_breakout_pct", None)),
+        "bollingerUpper": _round_or_none(getattr(momentum, "bollinger_upper", None)),
+        "bollingerMiddle": _round_or_none(getattr(momentum, "bollinger_middle", None)),
+        "bollingerLower": _round_or_none(getattr(momentum, "bollinger_lower", None)),
+        "bollingerBandwidthPct": _round_or_none(getattr(momentum, "bollinger_bandwidth_pct", None)),
+        "bollingerPercentB": _round_or_none(getattr(momentum, "bollinger_percent_b", None)),
+        "volumeZoneLower": _round_or_none(getattr(momentum, "volume_zone_lower", None)),
+        "volumeZoneUpper": _round_or_none(getattr(momentum, "volume_zone_upper", None)),
+        "volumeZoneStrength": _round_or_none(getattr(momentum, "volume_zone_strength", None)),
+        "volumeZoneContainsLatest": bool(getattr(momentum, "volume_zone_contains_latest", False)),
+        "previousSwingHigh": _round_or_none(getattr(momentum, "previous_swing_high", None)),
+        "previousSwingHighDistancePct": _round_or_none(getattr(momentum, "previous_swing_high_distance_pct", None)),
+        "ohlcvCoveragePct": _round_or_none(getattr(momentum, "ohlcv_coverage_pct", None)),
         "trendLabel": _momentum_trend_label(momentum),
     }
 
@@ -448,6 +468,7 @@ def _short_term_to_dict(item) -> dict | None:
         "timeHorizon": item.time_horizon,
         "reasons": list(item.reasons),
         "cautions": list(item.cautions),
+        "tradeSignal": _trade_signal_to_dict(item.trade_signal),
     }
 
 
@@ -466,6 +487,36 @@ def _medium_term_to_dict(item) -> dict | None:
         "timeHorizon": item.time_horizon,
         "reasons": list(item.reasons),
         "cautions": list(item.cautions),
+        "tradeSignal": _trade_signal_to_dict(item.trade_signal),
+    }
+
+
+def _trade_signal_to_dict(item) -> dict | None:
+    if item is None:
+        return None
+    return {
+        "horizon": item.horizon,
+        "action": item.action,
+        "label": item.label,
+        "score": item.score,
+        "confidence": item.confidence,
+        "setup": item.setup,
+        "reasons": list(item.reasons),
+        "cautions": list(item.cautions),
+        "referencePrice": item.reference_price,
+        "ma150": item.ma150,
+        "ma200": item.ma200,
+        "bollingerUpper": item.bollinger_upper,
+        "bollingerMiddle": item.bollinger_middle,
+        "bollingerLower": item.bollinger_lower,
+        "volumeZoneLower": item.volume_zone_lower,
+        "volumeZoneUpper": item.volume_zone_upper,
+        "volumeZoneStrength": item.volume_zone_strength,
+        "targetPrice": item.target_price,
+        "targetType": item.target_type,
+        "partialTakeProfitPct": item.partial_take_profit_pct,
+        "remainingExitRule": item.remaining_exit_rule,
+        "invalidationRule": item.invalidation_rule,
     }
 
 

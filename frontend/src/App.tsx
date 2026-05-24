@@ -96,10 +96,57 @@ type Stock = {
 type TechnicalSnapshot = {
   trendLabel?: string;
   rsi14: number | null;
+  latestOpen?: number | null;
+  latestHigh?: number | null;
+  latestLow?: number | null;
+  previousClose?: number | null;
   ma20DistancePct: number | null;
   ma60DistancePct: number | null;
+  ma120DistancePct?: number | null;
+  ma150?: number | null;
+  ma200?: number | null;
+  ma150DistancePct?: number | null;
+  ma200DistancePct?: number | null;
   volumeRatio: number | null;
   twentyDayBreakoutPct: number | null;
+  sixtyDayBreakoutPct?: number | null;
+  bollingerUpper?: number | null;
+  bollingerMiddle?: number | null;
+  bollingerLower?: number | null;
+  bollingerBandwidthPct?: number | null;
+  bollingerPercentB?: number | null;
+  volumeZoneLower?: number | null;
+  volumeZoneUpper?: number | null;
+  volumeZoneStrength?: number | null;
+  volumeZoneContainsLatest?: boolean;
+  previousSwingHigh?: number | null;
+  previousSwingHighDistancePct?: number | null;
+  ohlcvCoveragePct?: number | null;
+};
+
+type TradeSignal = {
+  horizon: string;
+  action: "buy" | "scale_buy" | "hold" | "reduce" | "sell" | "take_profit_half" | string;
+  label: string;
+  score: number;
+  confidence: number;
+  setup: string;
+  reasons: string[];
+  cautions: string[];
+  referencePrice: number | null;
+  ma150: number | null;
+  ma200: number | null;
+  bollingerUpper: number | null;
+  bollingerMiddle: number | null;
+  bollingerLower: number | null;
+  volumeZoneLower?: number | null;
+  volumeZoneUpper?: number | null;
+  volumeZoneStrength?: number | null;
+  targetPrice?: number | null;
+  targetType?: string | null;
+  partialTakeProfitPct?: number | null;
+  remainingExitRule?: string;
+  invalidationRule: string;
 };
 
 type TermCandidate = {
@@ -122,6 +169,7 @@ type TermCandidate = {
   riskLevel: string;
   reasons: string[];
   cautions: string[];
+  tradeSignal?: TradeSignal | null;
 };
 
 type DataQuality = {
@@ -1180,6 +1228,12 @@ function StockDetail({ stock }: { stock: WeightedStock }) {
         <Metric label="최대 비중" value={formatPct(stock.maxWeightPct ?? null)} icon="alert" />
       </div>
 
+      <TradeSignalPanel
+        shortSignal={stock.shortTerm?.tradeSignal ?? null}
+        mediumSignal={stock.mediumTerm?.tradeSignal ?? null}
+        technical={stock.technical ?? null}
+      />
+
       <div className="strategy-score-grid">
         {STRATEGIES.map((strategy) => (
           <div className="strategy-tile" key={strategy.key}>
@@ -1209,7 +1263,13 @@ function StockDetail({ stock }: { stock: WeightedStock }) {
         <Metric label="시가총액" value={formatMarketCap(stock.fundamentals.marketCap, stock.fundamentals.marketCapCurrency)} icon="bar" />
         <Metric label="RSI 14" value={formatNumber(stock.technical?.rsi14 ?? null)} icon="gauge" />
         <Metric label="거래량" value={formatRatio(stock.technical?.volumeRatio ?? null)} icon="bar" />
+        <Metric label="매물대 강도" value={formatPct(stock.technical?.volumeZoneStrength ?? null)} icon="bar" />
+        <Metric label="전 고점 거리" value={formatPct(stock.technical?.previousSwingHighDistancePct ?? null)} icon="trend" />
         <Metric label="MA20 이격" value={formatPct(stock.technical?.ma20DistancePct ?? null)} icon="trend" />
+        <Metric label="MA150 이격" value={formatPct(stock.technical?.ma150DistancePct ?? null)} icon="trend" />
+        <Metric label="MA200 이격" value={formatPct(stock.technical?.ma200DistancePct ?? null)} icon="shield" />
+        <Metric label="볼린저 %B" value={formatNumber(stock.technical?.bollingerPercentB ?? null)} icon="gauge" />
+        <Metric label="볼린저 폭" value={formatPct(stock.technical?.bollingerBandwidthPct ?? null)} icon="bar" />
         <Metric label="20일 돌파" value={formatPct(stock.technical?.twentyDayBreakoutPct ?? null)} icon="trend" />
       </div>
 
@@ -1248,6 +1308,104 @@ function StockDetail({ stock }: { stock: WeightedStock }) {
         </section>
       </div>
     </article>
+  );
+}
+
+function TradeSignalPanel({
+  shortSignal,
+  mediumSignal,
+  technical,
+}: {
+  shortSignal: TradeSignal | null;
+  mediumSignal: TradeSignal | null;
+  technical: TechnicalSnapshot | null;
+}) {
+  const primarySignal = shortSignal ?? mediumSignal;
+  const zoneLower = primarySignal?.volumeZoneLower ?? technical?.volumeZoneLower ?? null;
+  const zoneUpper = primarySignal?.volumeZoneUpper ?? technical?.volumeZoneUpper ?? null;
+  const zoneStrength = primarySignal?.volumeZoneStrength ?? technical?.volumeZoneStrength ?? null;
+  const targetPrice = primarySignal?.targetPrice ?? mediumSignal?.targetPrice ?? null;
+  const targetType = primarySignal?.targetType ?? mediumSignal?.targetType ?? null;
+  return (
+    <section className="trade-signal-panel" aria-label="차트 매매 신호">
+      <div className="panel-title compact">
+        <BarChart3 size={18} aria-hidden="true" />
+        <h3>차트 매매 신호</h3>
+        <span>{technical?.trendLabel || "차트 기준"}</span>
+      </div>
+      <div className="trade-signal-grid">
+        <TradeSignalCard title="단기" signal={shortSignal} />
+        <TradeSignalCard title="중기" signal={mediumSignal} />
+      </div>
+      <div className="trade-reference-grid">
+        <ReferenceStat label="매물대 하단" value={formatPrice(zoneLower)} />
+        <ReferenceStat label="매물대 상단" value={formatPrice(zoneUpper)} />
+        <ReferenceStat label="매물대 강도" value={formatPct(zoneStrength)} />
+        <ReferenceStat label="MA200" value={formatPrice(primarySignal?.ma200 ?? mediumSignal?.ma200 ?? technical?.ma200 ?? null)} />
+        <ReferenceStat label="전 고점" value={formatPrice(technical?.previousSwingHigh ?? null)} />
+        <ReferenceStat label={formatTargetType(targetType)} value={formatPrice(targetPrice)} />
+      </div>
+    </section>
+  );
+}
+
+function TradeSignalCard({ title, signal }: { title: string; signal: TradeSignal | null }) {
+  const action = signal?.action || "hold";
+  return (
+    <article className={`trade-signal-card signal-${action}`}>
+      <div className="trade-signal-head">
+        <span>{title}</span>
+        <strong>{signal?.label || "관망"}</strong>
+      </div>
+      <p>{signal?.setup || "매물대와 MA200 데이터 확인 대기"}</p>
+      <div className="trade-score-row">
+        <span>
+          점수 <strong>{formatScore(signal?.score)}</strong>
+        </span>
+        <span>
+          신뢰도 <strong>{formatScore(signal?.confidence)}</strong>
+        </span>
+        <span>
+          기준가 <strong>{formatPrice(signal?.referencePrice ?? null)}</strong>
+        </span>
+        <span>
+          매물대 <strong>{formatPrice(signal?.volumeZoneLower ?? null)}~{formatPrice(signal?.volumeZoneUpper ?? null)}</strong>
+        </span>
+        <span>
+          목표 <strong>{formatTargetType(signal?.targetType)} {formatPrice(signal?.targetPrice ?? null)}</strong>
+        </span>
+        {signal?.partialTakeProfitPct ? (
+          <span>
+            익절 <strong>{formatPct(signal.partialTakeProfitPct)}</strong>
+          </span>
+        ) : null}
+      </div>
+      {signal?.remainingExitRule ? <div className="remaining-rule">{signal.remainingExitRule}</div> : null}
+      {signal?.invalidationRule ? <div className="invalidation-rule">{signal.invalidationRule}</div> : null}
+      {signal?.reasons?.length ? (
+        <ul className="signal-list">
+          {signal.reasons.slice(0, 3).map((reason) => (
+            <li key={`${title}-${reason}`}>{reason}</li>
+          ))}
+        </ul>
+      ) : null}
+      {signal?.cautions?.length ? (
+        <div className="signal-caution-row">
+          {signal.cautions.slice(0, 2).map((caution) => (
+            <span key={`${title}-${caution}`}>{caution}</span>
+          ))}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function ReferenceStat({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="reference-stat">
+      {label}
+      <strong>{value}</strong>
+    </span>
   );
 }
 
@@ -1405,6 +1563,18 @@ function formatInteger(value: number | null | undefined) {
 
 function formatNumber(value: number | null) {
   return value === null || Number.isNaN(value) ? "-" : value.toFixed(1);
+}
+
+function formatPrice(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  if (Math.abs(value) >= 1000) return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  return value.toFixed(2);
+}
+
+function formatTargetType(value: string | null | undefined) {
+  if (value === "ma200") return "MA200";
+  if (value === "previous_swing_high") return "전 고점";
+  return "목표";
 }
 
 function formatRatio(value: number | null) {

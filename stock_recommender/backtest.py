@@ -25,11 +25,17 @@ from .storage import CacheStore
 from .technical import (
     _last_finite,
     average_recent_volume,
+    bollinger_bandwidth_pct,
+    bollinger_bands,
+    bollinger_percent_b,
     breakout_pct,
     distance_from_average,
     moving_average,
     moving_average_slope,
+    ohlcv_coverage_pct,
+    previous_swing_high,
     rsi,
+    volume_profile_zone,
     volume_ratio,
 )
 from .time_utils import now_in_app_timezone
@@ -46,6 +52,9 @@ class PricePoint:
     date: date
     close: float
     volume: float | None = None
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
 
 
 @dataclass(frozen=True)
@@ -670,6 +679,9 @@ def parse_yahoo_history(payload: dict) -> tuple[PricePoint, ...]:
         result = payload["chart"]["result"][0]
         timestamps = result.get("timestamp") or []
         quote = result["indicators"]["quote"][0]
+        opens = quote.get("open") or []
+        highs = quote.get("high") or []
+        lows = quote.get("low") or []
         closes = quote.get("close") or []
         volumes = quote.get("volume") or []
         adjcloses = (result.get("indicators", {}).get("adjclose") or [{}])[0].get("adjclose") or []
@@ -690,6 +702,9 @@ def parse_yahoo_history(payload: dict) -> tuple[PricePoint, ...]:
                 date=datetime.fromtimestamp(timestamp, tz=timezone.utc).date(),
                 close=float(close),
                 volume=_list_value(volumes, index),
+                open=_list_value(opens, index),
+                high=_list_value(highs, index),
+                low=_list_value(lows, index),
             )
         )
     return tuple(sorted(points, key=lambda item: item.date))
@@ -849,40 +864,81 @@ def _price_on_or_before(points: tuple[PricePoint, ...], target: date) -> float |
 def _momentum_until(points: tuple[PricePoint, ...], target: date) -> Momentum:
     selected_points = [point for point in points if point.date <= target]
     closes = [point.close for point in selected_points]
+    highs = [_price_or_close(point.high, point.close) for point in selected_points]
+    lows = [_price_or_close(point.low, point.close) for point in selected_points]
+    opens = [_price_or_close(point.open, point.close) for point in selected_points]
     volumes = [point.volume for point in selected_points]
     recent = closes[-126:] if len(closes) > 126 else closes
     latest = recent[-1] if recent else None
-    high = max(recent) if recent else None
-    low = min(recent) if recent else None
+    recent_highs = highs[-126:] if len(highs) > 126 else highs
+    recent_lows = lows[-126:] if len(lows) > 126 else lows
+    high = max(recent_highs) if recent_highs else None
+    low = min(recent_lows) if recent_lows else None
     ma20_values = moving_average(closes, 20)
     ma60_values = moving_average(closes, 60)
     ma120_values = moving_average(closes, 120)
+    ma150_values = moving_average(closes, 150)
+    ma200_values = moving_average(closes, 200)
+    bollinger_upper_values, bollinger_middle_values, bollinger_lower_values = bollinger_bands(
+        closes, 20, 2.0
+    )
+    latest_bollinger_upper = _last_finite(bollinger_upper_values)
+    latest_bollinger_middle = _last_finite(bollinger_middle_values)
+    latest_bollinger_lower = _last_finite(bollinger_lower_values)
     latest_volume = volumes[-1] if volumes else None
     avg_volume_20 = average_recent_volume(volumes, 20)
+    volume_zone = volume_profile_zone(highs, lows, closes, volumes)
+    swing_high = previous_swing_high(highs)
     return Momentum(
         one_month_pct=_lookback_return(closes, 21),
         three_month_pct=_lookback_return(closes, 63),
         six_month_pct=_lookback_return(closes, 126),
         drawdown_from_high_pct=_pct_from_high(latest, high),
         range_position_pct=_range_position(latest, low, high),
+        latest_open=opens[-1] if opens else None,
+        latest_high=highs[-1] if highs else None,
+        latest_low=lows[-1] if lows else None,
         latest_close=latest,
+        previous_close=closes[-2] if len(closes) >= 2 else None,
         latest_close_date=selected_points[-1].date.isoformat() if selected_points else None,
         six_month_high=high,
         six_month_low=low,
         ma20=_last_finite(ma20_values),
         ma60=_last_finite(ma60_values),
         ma120=_last_finite(ma120_values),
+        ma150=_last_finite(ma150_values),
+        ma200=_last_finite(ma200_values),
         rsi14=rsi(closes, 14),
         ma20_distance_pct=distance_from_average(latest, _last_finite(ma20_values)),
         ma60_distance_pct=distance_from_average(latest, _last_finite(ma60_values)),
         ma120_distance_pct=distance_from_average(latest, _last_finite(ma120_values)),
+        ma150_distance_pct=distance_from_average(latest, _last_finite(ma150_values)),
+        ma200_distance_pct=distance_from_average(latest, _last_finite(ma200_values)),
         ma20_slope_pct=moving_average_slope(ma20_values),
         ma60_slope_pct=moving_average_slope(ma60_values),
+        ma150_slope_pct=moving_average_slope(ma150_values),
+        ma200_slope_pct=moving_average_slope(ma200_values),
         latest_volume=latest_volume,
         avg_volume_20=avg_volume_20,
         volume_ratio=volume_ratio(latest_volume, avg_volume_20),
         twenty_day_breakout_pct=breakout_pct(closes, 20),
         sixty_day_breakout_pct=breakout_pct(closes, 60),
+        bollinger_upper=latest_bollinger_upper,
+        bollinger_middle=latest_bollinger_middle,
+        bollinger_lower=latest_bollinger_lower,
+        bollinger_bandwidth_pct=bollinger_bandwidth_pct(
+            latest_bollinger_upper, latest_bollinger_middle, latest_bollinger_lower
+        ),
+        bollinger_percent_b=bollinger_percent_b(
+            latest, latest_bollinger_upper, latest_bollinger_lower
+        ),
+        volume_zone_lower=volume_zone.lower if volume_zone else None,
+        volume_zone_upper=volume_zone.upper if volume_zone else None,
+        volume_zone_strength=volume_zone.strength if volume_zone else None,
+        volume_zone_contains_latest=volume_zone.contains_latest if volume_zone else False,
+        previous_swing_high=swing_high,
+        previous_swing_high_distance_pct=distance_from_average(latest, swing_high),
+        ohlcv_coverage_pct=ohlcv_coverage_pct(selected_points),
     )
 
 
@@ -1342,6 +1398,10 @@ def _list_value(values: list, index: int) -> float | None:
         return None
     value = values[index]
     return float(value) if isinstance(value, (int, float)) and math.isfinite(value) else None
+
+
+def _price_or_close(value: float | None, close: float) -> float:
+    return float(value) if value is not None and math.isfinite(value) and value > 0 else float(close)
 
 
 def _clamp_int(value: int, low: int, high: int) -> int:
