@@ -836,114 +836,158 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(short.volume_score, 50)
         self.assertIn("거래량", " ".join(short.cautions))
 
-    def test_trade_signal_buys_volume_zone_below_ma200_with_target_room(self):
+    def test_trade_signal_buys_structure_support_retest(self):
         signal = _single_short_trade_signal(
             _trade_signal_momentum(
-                latest=95,
-                ma200=100,
-                volume_zone_lower=93,
-                volume_zone_upper=96,
-                latest_high=96,
-                latest_low=94,
+                latest=960,
+                ma200=900,
+                volume_zone_lower=990,
+                volume_zone_upper=1120,
+                latest_high=965,
+                latest_low=955,
+                structure_zone_lower=990,
+                structure_zone_upper=1120,
+                support_retest_lower=950,
+                support_retest_upper=970,
+                nearest_resistance=990,
+                major_resistance=1089,
             )
         )
 
         self.assertEqual(signal.action, "buy")
         self.assertEqual(signal.label, "매수")
-        self.assertEqual(signal.target_type, "ma200")
-        self.assertEqual(signal.target_price, 100)
-        self.assertIn("매물대", signal.setup)
+        self.assertEqual(signal.target1_price, 990)
+        self.assertEqual(signal.target2_price, 1089)
+        self.assertEqual(signal.partial_take_profit_pct, 50)
+        self.assertEqual(signal.final_take_profit_pct, 50)
+        self.assertIn("지지 재진입", signal.setup)
 
-    def test_trade_signal_buys_volume_zone_above_ma200_support(self):
+    def test_trade_signal_holds_when_rejection_has_not_retested_support(self):
         signal = _single_short_trade_signal(
             _trade_signal_momentum(
-                latest=105,
-                ma200=100,
-                volume_zone_lower=101,
-                volume_zone_upper=106,
-                latest_high=106,
-                latest_low=101,
+                latest=980,
+                ma200=900,
+                volume_zone_lower=990,
+                volume_zone_upper=1120,
+                latest_high=985,
+                latest_low=976,
+                structure_zone_lower=990,
+                structure_zone_upper=1120,
+                support_retest_lower=950,
+                support_retest_upper=970,
+                nearest_resistance=990,
+                major_resistance=1089,
+                support_retest_active=False,
             )
         )
 
-        self.assertEqual(signal.action, "buy")
-        self.assertEqual(signal.label, "매수")
-        self.assertIn("MA200", signal.setup)
+        self.assertEqual(signal.action, "hold")
+        self.assertIn("대기", signal.setup)
 
-    def test_trade_signal_scales_when_ma200_target_room_is_small(self):
+    def test_trade_signal_scales_when_support_retest_has_weak_rejection(self):
         signal = _single_short_trade_signal(
             _trade_signal_momentum(
-                latest=98,
-                ma200=100,
-                volume_zone_lower=96,
-                volume_zone_upper=99,
-                latest_high=99,
-                latest_low=97,
+                latest=960,
+                ma200=900,
+                volume_zone_lower=990,
+                volume_zone_upper=1120,
+                latest_high=965,
+                latest_low=955,
+                structure_zone_lower=990,
+                structure_zone_upper=1120,
+                support_retest_lower=950,
+                support_retest_upper=970,
+                nearest_resistance=990,
+                major_resistance=1089,
+                rejection_from_structure_zone=False,
             )
         )
 
-        self.assertIn(signal.action, {"scale_buy", "hold"})
-        if signal.action == "scale_buy":
-            self.assertEqual(signal.label, "분할매수")
-            self.assertEqual(signal.target_type, "ma200")
+        self.assertEqual(signal.action, "scale_buy")
+        self.assertEqual(signal.label, "분할매수")
 
-    def test_trade_signal_takes_half_profit_at_previous_swing_high(self):
+    def test_trade_signal_takes_half_profit_at_first_resistance(self):
         signal = _single_short_trade_signal(
             _trade_signal_momentum(
-                latest=119.5,
-                ma200=100,
-                volume_zone_lower=110,
-                volume_zone_upper=120,
-                latest_high=120,
-                latest_low=118,
-                previous_swing_high=120,
+                latest=990,
+                ma200=900,
+                volume_zone_lower=990,
+                volume_zone_upper=1120,
+                latest_high=992,
+                latest_low=984,
+                structure_zone_lower=990,
+                structure_zone_upper=1120,
+                support_retest_lower=950,
+                support_retest_upper=970,
+                nearest_resistance=990,
+                major_resistance=1089,
             )
         )
 
         self.assertEqual(signal.action, "take_profit_half")
         self.assertEqual(signal.label, "50% 익절")
-        self.assertEqual(signal.target_type, "previous_swing_high")
+        self.assertEqual(signal.target_type, "target1")
         self.assertEqual(signal.partial_take_profit_pct, 50)
-        self.assertIn("MA200", signal.remaining_exit_rule)
+        self.assertEqual(signal.final_take_profit_pct, 50)
+        self.assertIn("2차", signal.remaining_exit_rule)
 
-    def test_trade_signal_takes_half_profit_when_below_ma200_trade_reaches_ma200(self):
+    def test_trade_signal_takes_full_profit_at_second_resistance(self):
         signal = _single_short_trade_signal(
             _trade_signal_momentum(
-                latest=100.2,
-                ma200=100,
-                volume_zone_lower=94,
-                volume_zone_upper=98,
-                latest_high=101,
-                latest_low=99,
-                previous_close=96,
+                latest=1090,
+                ma200=900,
+                volume_zone_lower=990,
+                volume_zone_upper=1120,
+                latest_high=1092,
+                latest_low=1080,
+                structure_zone_lower=990,
+                structure_zone_upper=1120,
+                support_retest_lower=950,
+                support_retest_upper=970,
+                nearest_resistance=990,
+                major_resistance=1089,
+                support_retest_active=False,
             )
         )
 
-        self.assertEqual(signal.action, "take_profit_half")
-        self.assertEqual(signal.target_type, "ma200")
-        self.assertEqual(signal.partial_take_profit_pct, 50)
+        self.assertEqual(signal.action, "take_profit_full")
+        self.assertEqual(signal.label, "완전 익절")
+        self.assertEqual(signal.target_type, "target2")
+        self.assertEqual(signal.final_take_profit_pct, 50)
 
-    def test_trade_signal_reduces_or_sells_on_zone_and_ma200_breaks(self):
+    def test_trade_signal_reduces_or_sells_on_support_and_ma200_breaks(self):
         zone_signal = _single_short_trade_signal(
             _trade_signal_momentum(
-                latest=90,
-                ma200=100,
-                volume_zone_lower=96,
-                volume_zone_upper=100,
-                latest_high=91,
-                latest_low=89,
-                volume_zone_contains_latest=False,
+                latest=930,
+                ma200=900,
+                volume_zone_lower=990,
+                volume_zone_upper=1120,
+                latest_high=940,
+                latest_low=928,
+                structure_zone_lower=990,
+                structure_zone_upper=1120,
+                support_retest_lower=950,
+                support_retest_upper=970,
+                nearest_resistance=990,
+                major_resistance=1089,
+                support_retest_active=False,
             )
         )
         trailing_signal = _single_short_trade_signal(
             _trade_signal_momentum(
-                latest=98,
-                ma200=100,
-                volume_zone_lower=95,
-                volume_zone_upper=99,
-                latest_high=99,
-                latest_low=97,
-                previous_close=102,
+                latest=880,
+                ma200=900,
+                volume_zone_lower=990,
+                volume_zone_upper=1120,
+                latest_high=890,
+                latest_low=875,
+                structure_zone_lower=990,
+                structure_zone_upper=1120,
+                support_retest_lower=950,
+                support_retest_upper=970,
+                nearest_resistance=990,
+                major_resistance=1089,
+                support_retest_active=False,
             )
         )
 
@@ -1369,15 +1413,21 @@ class ScoringTests(unittest.TestCase):
         self.assertIn("volumeZoneLower", payload["stocks"][0]["technical"])
         self.assertIn("volumeZoneUpper", payload["stocks"][0]["technical"])
         self.assertIn("previousSwingHigh", payload["stocks"][0]["technical"])
+        self.assertIn("structureZoneLower", payload["stocks"][0]["technical"])
+        self.assertIn("supportRetestLower", payload["stocks"][0]["technical"])
+        self.assertIn("nearestResistance", payload["stocks"][0]["technical"])
         self.assertIn("tradeSignal", payload["shortTermCandidates"][0])
         self.assertIn("tradeSignal", payload["mediumTermCandidates"][0])
         self.assertIn("tradeSignal", payload["stocks"][0]["shortTerm"])
         self.assertIn("tradeSignal", payload["stocks"][0]["mediumTerm"])
         self.assertIn("volumeZoneLower", payload["stocks"][0]["shortTerm"]["tradeSignal"])
         self.assertIn("targetPrice", payload["stocks"][0]["shortTerm"]["tradeSignal"])
+        self.assertIn("entryZoneLower", payload["stocks"][0]["shortTerm"]["tradeSignal"])
+        self.assertIn("target1Price", payload["stocks"][0]["shortTerm"]["tradeSignal"])
+        self.assertIn("target2Price", payload["stocks"][0]["shortTerm"]["tradeSignal"])
         self.assertIn(
             payload["stocks"][0]["shortTerm"]["tradeSignal"]["action"],
-            {"buy", "scale_buy", "hold", "reduce", "sell", "take_profit_half"},
+            {"buy", "scale_buy", "hold", "reduce", "sell", "take_profit_half", "take_profit_full"},
         )
         self.assertIn("confidenceScore", payload["mediumTermCandidates"][0])
         self.assertIn("confidenceLabel", payload["longTermCandidates"][0])
@@ -2415,6 +2465,15 @@ class SnapshotTests(unittest.TestCase):
                     volume_zone_contains_latest=True,
                     previous_swing_high=135,
                     previous_swing_high_distance_pct=9.4,
+                    structure_zone_lower=120,
+                    structure_zone_upper=135,
+                    structure_zone_strength=91,
+                    support_retest_lower=118,
+                    support_retest_upper=124,
+                    nearest_resistance=130,
+                    major_resistance=135,
+                    rejection_from_structure_zone=True,
+                    support_retest_active=True,
                     ohlcv_coverage_pct=100,
                     source="Yahoo Finance",
                 ),
@@ -2438,7 +2497,7 @@ class SnapshotTests(unittest.TestCase):
 
         payload = report_to_snapshot_payload(report, mode="live")
 
-        self.assertEqual(payload["version"], 18)
+        self.assertEqual(payload["version"], 19)
         self.assertEqual(payload["snapshotDate"], "2026-05-18")
         self.assertEqual(payload["createdAtTimezone"], "Asia/Seoul")
         self.assertIn("gitCommit", payload["audit"])
@@ -2475,12 +2534,17 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(payload["stocks"][0]["momentumRaw"]["bollingerPercentB"], 60.9)
         self.assertEqual(payload["stocks"][0]["momentumRaw"]["volumeZoneLower"], 120)
         self.assertEqual(payload["stocks"][0]["momentumRaw"]["previousSwingHigh"], 135)
+        self.assertEqual(payload["stocks"][0]["momentumRaw"]["structureZoneLower"], 120)
+        self.assertEqual(payload["stocks"][0]["momentumRaw"]["supportRetestLower"], 118)
         self.assertIn("tradeSignals", payload["stocks"][0])
         self.assertIn("short", payload["stocks"][0]["tradeSignals"])
         self.assertIn("tradeSignal", payload["shortTermCandidates"][0])
         self.assertIn("tradeSignal", payload["mediumTermCandidates"][0])
         self.assertIn("volumeZoneLower", payload["shortTermCandidates"][0]["tradeSignal"])
         self.assertIn("targetPrice", payload["shortTermCandidates"][0]["tradeSignal"])
+        self.assertIn("entryZoneLower", payload["shortTermCandidates"][0]["tradeSignal"])
+        self.assertIn("target1Price", payload["shortTermCandidates"][0]["tradeSignal"])
+        self.assertIn("target2Price", payload["shortTermCandidates"][0]["tradeSignal"])
         self.assertEqual(payload["stocks"][0]["priceAnchor"]["latestClose"], 123.4)
         self.assertEqual(payload["benchmarks"][0]["priceAnchor"]["latestClose"], 500)
         self.assertEqual(payload["priceAnchors"][0]["priceAnchor"]["latestClose"], 123.4)
@@ -3024,6 +3088,15 @@ def _strong_swing_momentum(with_volume: bool = True) -> Momentum:
         volume_zone_contains_latest=True,
         previous_swing_high=118.0,
         previous_swing_high_distance_pct=12.4,
+        structure_zone_lower=101.0,
+        structure_zone_upper=118.0,
+        structure_zone_strength=88.0,
+        support_retest_lower=101.0,
+        support_retest_upper=106.0,
+        nearest_resistance=112.0,
+        major_resistance=118.0,
+        rejection_from_structure_zone=True,
+        support_retest_active=True,
         ohlcv_coverage_pct=100.0,
         source="Yahoo Finance",
         **volume_fields,
@@ -3074,6 +3147,14 @@ def _trade_signal_momentum(
     previous_close: float | None = None,
     previous_swing_high: float | None = None,
     volume_zone_contains_latest: bool = True,
+    structure_zone_lower: float | None = None,
+    structure_zone_upper: float | None = None,
+    support_retest_lower: float | None = None,
+    support_retest_upper: float | None = None,
+    nearest_resistance: float | None = None,
+    major_resistance: float | None = None,
+    rejection_from_structure_zone: bool = True,
+    support_retest_active: bool | None = None,
     ma150: float | None = None,
     bollinger_lower: float | None = None,
     bollinger_middle: float | None = None,
@@ -3086,6 +3167,14 @@ def _trade_signal_momentum(
     latest_low = latest_low if latest_low is not None else latest * 0.99
     previous_close = previous_close if previous_close is not None else latest * 0.99
     previous_swing_high = previous_swing_high if previous_swing_high is not None else latest * 1.18
+    structure_zone_lower = structure_zone_lower if structure_zone_lower is not None else volume_zone_lower
+    structure_zone_upper = structure_zone_upper if structure_zone_upper is not None else volume_zone_upper
+    support_retest_lower = support_retest_lower if support_retest_lower is not None else volume_zone_lower * 0.96
+    support_retest_upper = support_retest_upper if support_retest_upper is not None else volume_zone_lower * 0.99
+    nearest_resistance = nearest_resistance if nearest_resistance is not None else structure_zone_lower
+    major_resistance = major_resistance if major_resistance is not None else structure_zone_upper
+    if support_retest_active is None:
+        support_retest_active = latest_high >= support_retest_lower and latest_low <= support_retest_upper
     bollinger_middle = bollinger_middle if bollinger_middle is not None else latest
     bollinger_lower = bollinger_lower if bollinger_lower is not None else latest * 0.94
     bollinger_upper = bollinger_upper if bollinger_upper is not None else latest * 1.06
@@ -3134,6 +3223,15 @@ def _trade_signal_momentum(
         volume_zone_contains_latest=volume_zone_contains_latest,
         previous_swing_high=previous_swing_high,
         previous_swing_high_distance_pct=(previous_swing_high - latest) / latest * 100,
+        structure_zone_lower=structure_zone_lower,
+        structure_zone_upper=structure_zone_upper,
+        structure_zone_strength=88.0,
+        support_retest_lower=support_retest_lower,
+        support_retest_upper=support_retest_upper,
+        nearest_resistance=nearest_resistance,
+        major_resistance=major_resistance,
+        rejection_from_structure_zone=rejection_from_structure_zone,
+        support_retest_active=support_retest_active,
         ohlcv_coverage_pct=100.0,
         source="Yahoo Finance",
     )

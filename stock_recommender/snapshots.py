@@ -18,7 +18,7 @@ from .snapshot_store import list_snapshot_rows, save_persistent_snapshot
 from .storage import CacheStore
 
 
-SNAPSHOT_PAYLOAD_VERSION = 18
+SNAPSHOT_PAYLOAD_VERSION = 19
 BENCHMARK_TICKERS = ("SPY", "QQQ", "^KS11")
 FUNDAMENTAL_SOURCE_FIELDS = (
     "revenue",
@@ -776,6 +776,15 @@ def _momentum_payload(momentum: Momentum | None) -> dict:
         "volumeZoneContainsLatest": momentum.volume_zone_contains_latest,
         "previousSwingHigh": momentum.previous_swing_high,
         "previousSwingHighDistancePct": momentum.previous_swing_high_distance_pct,
+        "structureZoneLower": momentum.structure_zone_lower,
+        "structureZoneUpper": momentum.structure_zone_upper,
+        "structureZoneStrength": momentum.structure_zone_strength,
+        "supportRetestLower": momentum.support_retest_lower,
+        "supportRetestUpper": momentum.support_retest_upper,
+        "nearestResistance": momentum.nearest_resistance,
+        "majorResistance": momentum.major_resistance,
+        "rejectionFromStructureZone": momentum.rejection_from_structure_zone,
+        "supportRetestActive": momentum.support_retest_active,
         "ohlcvCoveragePct": momentum.ohlcv_coverage_pct,
         "source": momentum.source,
         "stale": momentum.stale,
@@ -806,6 +815,15 @@ def _trade_signal_payload(item) -> dict | None:
         "targetPrice": item.target_price,
         "targetType": item.target_type,
         "partialTakeProfitPct": item.partial_take_profit_pct,
+        "finalTakeProfitPct": item.final_take_profit_pct,
+        "entryZoneLower": item.entry_zone_lower,
+        "entryZoneUpper": item.entry_zone_upper,
+        "target1Price": item.target1_price,
+        "target1Type": item.target1_type,
+        "target2Price": item.target2_price,
+        "target2Type": item.target2_type,
+        "positionPlan": _redact_text(item.position_plan),
+        "structureSetup": _redact_text(item.structure_setup),
         "remainingExitRule": _redact_text(item.remaining_exit_rule),
         "invalidationRule": _redact_text(item.invalidation_rule),
     }

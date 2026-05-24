@@ -1327,102 +1327,97 @@ def trade_timing_signal_for_stock(
             "hold",
             min(score, 50),
             min(signal_confidence, 44),
-            "매물대/MA200 데이터 부족",
-            ("1년 거래량 매물대 또는 MA200 계산에 필요한 가격 데이터가 부족",),
+            "구조 매물대 데이터 부족",
+            ("구조 매물대, 지지 재진입 구간 또는 MA200 계산에 필요한 가격 데이터가 부족",),
             tuple(dict.fromkeys((*cautions, "OHLCV와 200일 이상 가격 데이터 확보 후 신호 재평가"))),
             momentum,
-            invalidation_rule="거래량 매물대와 MA200이 모두 계산된 뒤 판단",
+            invalidation_rule="구조 매물대와 지지 재진입 구간이 계산된 뒤 판단",
         )
 
     latest = momentum.latest_close or 0
     ma200 = momentum.ma200 or 0
     high = _latest_high(momentum)
-    low = _latest_low(momentum)
-    below_ma200 = latest < ma200
-    in_zone = bool(momentum.volume_zone_contains_latest)
+    support_active = bool(momentum.support_retest_active)
+    rejection = bool(momentum.rejection_from_structure_zone)
     excluded = item.decision_grade == "제외"
+    target1 = momentum.nearest_resistance
+    target2 = momentum.major_resistance
+    entry_lower = momentum.support_retest_lower
+    entry_upper = momentum.support_retest_upper
 
     action = "hold"
     setup = _hold_setup(momentum)
     raw_score = 50.0
-    invalidation = "핵심 매물대 재진입 또는 MA200 위치 재확인"
+    invalidation = "지지 재진입 구간 또는 구조 매물대 위치 재확인"
     target_price: float | None = None
     target_type: str | None = None
     partial_take_profit_pct: float | None = None
+    final_take_profit_pct: float | None = None
     remaining_exit_rule = ""
+    position_plan = ""
+    structure_setup = _structure_setup(momentum)
 
-    if _target_reached(high, latest, momentum.previous_swing_high):
+    if _target_reached(high, latest, target2):
+        action = "take_profit_full"
+        setup = "2차 완전 익절"
+        raw_score = 84
+        target_price = target2
+        target_type = "target2"
+        final_take_profit_pct = 50
+        position_plan = "2차 목표 도달, 잔여 50% 완전 익절"
+        invalidation = "완전 익절 후 새 지지 재진입 구간 대기"
+    elif _target_reached(high, latest, target1):
         action = "take_profit_half"
-        setup = "전 고점 50% 익절"
+        setup = "1차 50% 익절"
         raw_score = 78
-        target_price = momentum.previous_swing_high
-        target_type = "previous_swing_high"
+        target_price = target1
+        target_type = "target1"
         partial_take_profit_pct = 50
-        remaining_exit_rule = "잔여 50%는 MA200 종가 이탈 시 정리"
-        invalidation = "익절 후 잔여 물량은 MA200 종가 이탈 전까지 추세 추적"
-    elif _ma200_take_profit_reached(momentum):
-        action = "take_profit_half"
-        setup = "MA200 1차 익절"
-        raw_score = 74
-        target_price = ma200
-        target_type = "ma200"
-        partial_take_profit_pct = 50
-        remaining_exit_rule = "잔여 50%는 MA200 종가 이탈 시 정리"
-        invalidation = "MA200 위 안착 실패 시 잔여 물량 축소"
+        final_take_profit_pct = 50
+        remaining_exit_rule = "잔여 50%는 2차 목표 도달 전 구조 지지 이탈 시 정리"
+        position_plan = "1차 저항 도달, 50% 익절 후 잔여 50%는 2차 목표까지 관리"
+        invalidation = "1차 익절 후 지지 재진입 구간 이탈 시 잔여 물량 축소"
+    elif _structure_support_break(momentum):
+        action = "sell" if latest < ma200 else "reduce"
+        setup = "구조 지지 이탈"
+        raw_score = 18 if action == "sell" else 32
+        invalidation = "지지 재진입 구간 회복 전 비중 확대 보류"
+        position_plan = "구조 지지 이탈로 포지션 방어 우선"
     elif _ma200_trailing_break(momentum):
         action = "sell"
         setup = "MA200 트레일링 이탈"
         raw_score = 20
         invalidation = "MA200 종가 회복 전 잔여 물량 재확대 보류"
-    elif _volume_zone_break(momentum):
-        action = "reduce"
-        setup = "핵심 매물대 이탈"
-        raw_score = 34
-        invalidation = "핵심 매물대 하단 회복 전 비중 확대 보류"
-    elif in_zone and not excluded:
-        if below_ma200:
-            target_price = ma200
-            target_type = "ma200"
-            upside = _target_upside_pct(latest, ma200)
-            if _finite(upside) and upside >= 4 and signal_confidence >= 55:
-                action = "buy"
-                setup = "매물대 진입 / MA200 1차 목표"
-                raw_score = 82
-                invalidation = "핵심 매물대 하단 이탈 시 매수 신호 무효"
-            elif _finite(upside) and upside > 0:
-                action = "scale_buy"
-                setup = "매물대 진입 / MA200 여력 제한"
-                raw_score = 64
-                invalidation = "MA200 목표 여력 축소 또는 매물대 하단 이탈 시 중단"
-            else:
-                setup = "매물대 진입 / 목표 여력 부족"
-                raw_score = 52
-                target_price = None
-                target_type = None
-                invalidation = "MA200까지 여력이 생길 때 재평가"
+        position_plan = "MA200 이탈로 잔여 물량 방어 우선"
+    elif support_active and not excluded:
+        target_price = target1
+        target_type = "target1" if _finite(target1) else None
+        partial_take_profit_pct = 50 if _finite(target1) else None
+        final_take_profit_pct = 50 if _finite(target2) else None
+        remaining_exit_rule = "2차 목표 도달 전 구조 지지 이탈 시 정리"
+        position_plan = "지지 재진입 매수 후 1차 50%, 2차 잔여 50% 익절"
+        if rejection and signal_confidence >= 55:
+            action = "buy"
+            setup = "저항 후 지지 재진입"
+            raw_score = 84
+            invalidation = "지지 재진입 구간 하단 이탈 시 매수 신호 무효"
         else:
-            target_price = _next_target_above(latest, momentum.previous_swing_high)
-            target_type = "previous_swing_high" if target_price else None
-            if _ma200_buy_support(momentum) and signal_confidence >= 55:
-                action = "buy"
-                setup = "MA200 위 매물대 매수"
-                raw_score = 80
-                invalidation = "MA200 종가 이탈 또는 핵심 매물대 하단 이탈 시 신호 무효"
-            else:
-                action = "scale_buy"
-                setup = "MA200 위 매물대 분할매수"
-                raw_score = 66
-                invalidation = "MA200 지지 확인 실패 시 분할매수 중단"
+            action = "scale_buy"
+            setup = "지지 재진입 분할매수"
+            raw_score = 66
+            invalidation = "저항 확인 부족 또는 지지 구간 하단 이탈 시 중단"
 
     if action in {"buy", "scale_buy"} and signal_confidence < 50:
         action = "hold"
         setup = "데이터 확인"
         raw_score = min(raw_score, 56)
-        cautions.append("차트/매물대 신뢰도가 낮아 매수 신호를 관망으로 제한")
+        cautions.append("차트/구조 매물대 신뢰도가 낮아 매수 신호를 관망으로 제한")
         target_price = None
         target_type = None
+        partial_take_profit_pct = None
+        final_take_profit_pct = None
 
-    reasons = _trade_timing_reasons(momentum, chart, market, volume, action, target_price, target_type)
+    reasons = _trade_timing_reasons(momentum, chart, market, volume, action, target1, target2)
     return _trade_signal(
         horizon,
         action,
@@ -1436,6 +1431,15 @@ def trade_timing_signal_for_stock(
         target_price=target_price,
         target_type=target_type,
         partial_take_profit_pct=partial_take_profit_pct,
+        final_take_profit_pct=final_take_profit_pct,
+        entry_zone_lower=entry_lower,
+        entry_zone_upper=entry_upper,
+        target1_price=target1,
+        target1_type="near_resistance" if _finite(target1) else None,
+        target2_price=target2,
+        target2_type="major_resistance" if _finite(target2) else None,
+        position_plan=position_plan,
+        structure_setup=structure_setup,
         remaining_exit_rule=remaining_exit_rule,
     )
 
@@ -1453,6 +1457,15 @@ def _trade_signal(
     target_price: float | None = None,
     target_type: str | None = None,
     partial_take_profit_pct: float | None = None,
+    final_take_profit_pct: float | None = None,
+    entry_zone_lower: float | None = None,
+    entry_zone_upper: float | None = None,
+    target1_price: float | None = None,
+    target1_type: str | None = None,
+    target2_price: float | None = None,
+    target2_type: str | None = None,
+    position_plan: str = "",
+    structure_setup: str = "",
     remaining_exit_rule: str = "",
 ) -> TradeTimingSignal:
     return TradeTimingSignal(
@@ -1476,6 +1489,15 @@ def _trade_signal(
         target_price=target_price,
         target_type=target_type,
         partial_take_profit_pct=partial_take_profit_pct,
+        final_take_profit_pct=final_take_profit_pct,
+        entry_zone_lower=entry_zone_lower,
+        entry_zone_upper=entry_zone_upper,
+        target1_price=target1_price,
+        target1_type=target1_type,
+        target2_price=target2_price,
+        target2_type=target2_type,
+        position_plan=position_plan,
+        structure_setup=structure_setup,
         remaining_exit_rule=remaining_exit_rule,
         invalidation_rule=invalidation_rule,
     )
@@ -1489,6 +1511,7 @@ def _trade_action_label(action: str) -> str:
         "reduce": "비중축소",
         "sell": "매도",
         "take_profit_half": "50% 익절",
+        "take_profit_full": "완전 익절",
     }.get(action, "관망")
 
 
@@ -1500,9 +1523,11 @@ def _trade_timing_data_ready(momentum: Momentum) -> bool:
             momentum.ma200,
             momentum.latest_high,
             momentum.latest_low,
-            momentum.volume_zone_lower,
-            momentum.volume_zone_upper,
-            momentum.volume_zone_strength,
+            momentum.structure_zone_lower,
+            momentum.structure_zone_upper,
+            momentum.structure_zone_strength,
+            momentum.support_retest_lower,
+            momentum.support_retest_upper,
         )
     )
 
@@ -1513,11 +1538,13 @@ def _trade_timing_confidence(momentum: Momentum, base_confidence: float, horizon
         score += 8
     else:
         score -= 22
-    if _finite(momentum.volume_zone_lower) and _finite(momentum.volume_zone_upper):
+    if _finite(momentum.structure_zone_lower) and _finite(momentum.structure_zone_upper):
         score += 12
     else:
         score -= 18
-    if momentum.volume_zone_contains_latest:
+    if momentum.support_retest_active:
+        score += 8
+    if momentum.rejection_from_structure_zone:
         score += 6
     if _finite(momentum.ohlcv_coverage_pct) and momentum.ohlcv_coverage_pct < 60:
         score -= 8
@@ -1529,12 +1556,14 @@ def _trade_timing_confidence(momentum: Momentum, base_confidence: float, horizon
 
 
 def _hold_setup(momentum: Momentum) -> str:
-    if not momentum.volume_zone_contains_latest:
-        return "매물대 밖 관망"
-    if _finite(momentum.latest_close) and _finite(momentum.ma200):
-        if momentum.latest_close < momentum.ma200:
-            return "MA200 목표 여력 확인"
-        return "MA200 지지 확인"
+    if momentum.support_retest_active:
+        return "지지 재진입 확인"
+    if _structure_zone_contains_latest(momentum):
+        return "구조 매물대 내부 관망"
+    if _finite(momentum.latest_close) and _finite(momentum.support_retest_upper):
+        if momentum.latest_close > momentum.support_retest_upper:
+            return "지지 재진입 대기"
+        return "구조 지지 회복 대기"
     return "확인 대기"
 
 
@@ -1544,13 +1573,14 @@ def _trade_timing_reasons(
     market: float,
     volume: float | None,
     action: str,
-    target_price: float | None,
-    target_type: str | None,
+    target1_price: float | None,
+    target2_price: float | None,
 ) -> tuple[str, ...]:
     parts = [
-        _volume_zone_reason(momentum),
+        _structure_zone_reason(momentum),
+        _entry_zone_reason(momentum),
+        _two_step_target_reason(target1_price, target2_price),
         _ma200_regime_reason(momentum),
-        _target_reason(target_price, target_type),
         f"차트 점수 {chart:.1f}/100, 시장 모멘텀 {market:.1f}/100",
     ]
     if volume is not None:
@@ -1558,22 +1588,38 @@ def _trade_timing_reasons(
     if _finite(momentum.rsi14):
         parts.append(f"RSI {momentum.rsi14:.1f}")
     if action == "take_profit_half":
-        parts.append("목표 도달 시 50% 익절, 잔여 물량은 MA200 기준으로 추적")
+        parts.append("1차 목표 도달 시 50% 익절, 잔여 물량은 2차 목표까지 관리")
+    elif action == "take_profit_full":
+        parts.append("2차 목표 도달로 잔여 물량 완전 익절")
     elif action in {"reduce", "sell"}:
-        parts.append("핵심 매물대 또는 MA200 이탈을 우선 반영")
+        parts.append("구조 지지 또는 MA200 이탈을 우선 반영")
+    parts.append(_volume_zone_reference(momentum))
     parts.append(_bollinger_reference(momentum))
     return tuple(part for part in parts if part)
 
 
-def _volume_zone_reason(momentum: Momentum) -> str:
-    if not (_finite(momentum.volume_zone_lower) and _finite(momentum.volume_zone_upper)):
-        return "거래량 매물대 데이터 부족"
-    status = "진입" if momentum.volume_zone_contains_latest else "밖"
-    strength = _pct_text(momentum.volume_zone_strength)
+def _structure_zone_reason(momentum: Momentum) -> str:
+    if not (_finite(momentum.structure_zone_lower) and _finite(momentum.structure_zone_upper)):
+        return "구조 매물대 데이터 부족"
+    status = "저항 확인" if momentum.rejection_from_structure_zone else "저항 미확인"
+    strength = _pct_text(momentum.structure_zone_strength)
     return (
-        f"핵심 매물대 {momentum.volume_zone_lower:.2f}~{momentum.volume_zone_upper:.2f}, "
-        f"현재 캔들 {status}, 강도 {strength}"
+        f"구조 매물대 {momentum.structure_zone_lower:.2f}~{momentum.structure_zone_upper:.2f}, "
+        f"{status}, 강도 {strength}"
     )
+
+
+def _entry_zone_reason(momentum: Momentum) -> str:
+    if not (_finite(momentum.support_retest_lower) and _finite(momentum.support_retest_upper)):
+        return "지지 재진입 구간 데이터 부족"
+    status = "진입" if momentum.support_retest_active else "대기"
+    return f"지지 재진입 구간 {momentum.support_retest_lower:.2f}~{momentum.support_retest_upper:.2f}, 현재 {status}"
+
+
+def _two_step_target_reason(target1_price: float | None, target2_price: float | None) -> str:
+    target1 = _price_text(target1_price)
+    target2 = _price_text(target2_price)
+    return f"익절 계획: 1차 50% {target1}, 2차 잔여 50% {target2}"
 
 
 def _ma200_regime_reason(momentum: Momentum) -> str:
@@ -1583,23 +1629,16 @@ def _ma200_regime_reason(momentum: Momentum) -> str:
     return f"현재가 {momentum.latest_close:.2f}, MA200 {momentum.ma200:.2f}({_pct_text(momentum.ma200_distance_pct)}), {regime}"
 
 
-def _target_reason(target_price: float | None, target_type: str | None) -> str:
-    if not _finite(target_price):
-        return "목표가 미확정"
-    return f"목표가 {target_price:.2f} ({_target_type_label(target_type)})"
-
-
 def _bollinger_reference(momentum: Momentum) -> str:
     if not _finite(momentum.bollinger_percent_b):
         return ""
     return f"볼린저는 참고값: %B {momentum.bollinger_percent_b:.1f}"
 
 
-def _target_type_label(target_type: str | None) -> str:
-    return {
-        "ma200": "MA200",
-        "previous_swing_high": "전 고점",
-    }.get(target_type or "", "참고 목표")
+def _volume_zone_reference(momentum: Momentum) -> str:
+    if not (_finite(momentum.volume_zone_lower) and _finite(momentum.volume_zone_upper)):
+        return ""
+    return f"거래량 매물대 참고 {momentum.volume_zone_lower:.2f}~{momentum.volume_zone_upper:.2f}"
 
 
 def _latest_high(momentum: Momentum) -> float:
@@ -1608,6 +1647,28 @@ def _latest_high(momentum: Momentum) -> float:
 
 def _latest_low(momentum: Momentum) -> float:
     return momentum.latest_low if _finite(momentum.latest_low) else (momentum.latest_close or 0)
+
+
+def _structure_setup(momentum: Momentum) -> str:
+    if momentum.support_retest_active and momentum.rejection_from_structure_zone:
+        return "저항 확인 후 지지 재진입"
+    if momentum.support_retest_active:
+        return "지지 재진입 구간 진입"
+    if _structure_zone_contains_latest(momentum):
+        return "구조 매물대 내부"
+    return "지지 재진입 대기"
+
+
+def _structure_zone_contains_latest(momentum: Momentum) -> bool:
+    if not (
+        _finite(momentum.latest_close)
+        and _finite(momentum.structure_zone_lower)
+        and _finite(momentum.structure_zone_upper)
+    ):
+        return False
+    high = _latest_high(momentum)
+    low = _latest_low(momentum)
+    return high >= momentum.structure_zone_lower and low <= momentum.structure_zone_upper
 
 
 def _target_reached(high: float, latest: float, target: float | None) -> bool:
@@ -1624,6 +1685,12 @@ def _ma200_trailing_break(momentum: Momentum) -> bool:
     if not (_finite(momentum.previous_close) and _finite(momentum.latest_close) and _finite(momentum.ma200)):
         return False
     return momentum.previous_close >= momentum.ma200 and momentum.latest_close < momentum.ma200
+
+
+def _structure_support_break(momentum: Momentum) -> bool:
+    if not (_finite(momentum.latest_close) and _finite(momentum.support_retest_lower)):
+        return False
+    return momentum.latest_close < momentum.support_retest_lower * 0.985
 
 
 def _volume_zone_break(momentum: Momentum) -> bool:
@@ -1654,6 +1721,10 @@ def _next_target_above(latest: float, target: float | None) -> float | None:
 
 def _pct_text(value: float | None) -> str:
     return f"{value:.1f}%" if _finite(value) else "N/A"
+
+
+def _price_text(value: float | None) -> str:
+    return f"{value:.2f}" if _finite(value) else "미정"
 
 
 def medium_term_company_score(

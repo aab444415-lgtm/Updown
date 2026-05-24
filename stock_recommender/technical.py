@@ -20,6 +20,27 @@ class VolumeProfileZone:
 
 
 @dataclass(frozen=True)
+class PriceLevelCluster:
+    lower: float
+    upper: float
+    center: float
+    count: int
+
+
+@dataclass(frozen=True)
+class StructureZone:
+    lower: float
+    upper: float
+    strength: float
+    support_lower: float | None
+    support_upper: float | None
+    nearest_resistance: float | None
+    major_resistance: float | None
+    rejection_from_zone: bool
+    support_retest_active: bool
+
+
+@dataclass(frozen=True)
 class TechnicalSnapshot:
     prices: tuple[TechnicalPoint, ...]
     ma20: tuple[TechnicalPoint, ...]
@@ -59,6 +80,15 @@ class TechnicalSnapshot:
     volume_zone_contains_latest: bool
     previous_swing_high: float | None
     previous_swing_high_distance_pct: float | None
+    structure_zone_lower: float | None
+    structure_zone_upper: float | None
+    structure_zone_strength: float | None
+    support_retest_lower: float | None
+    support_retest_upper: float | None
+    nearest_resistance: float | None
+    major_resistance: float | None
+    rejection_from_structure_zone: bool
+    support_retest_active: bool
     ohlcv_coverage_pct: float | None
     trend_label: str
 
@@ -93,6 +123,7 @@ def build_technical_snapshot(points: Iterable[object], max_points: int = 252) ->
     latest_volume = volumes[-1] if volumes else None
     avg_volume_20 = average_recent_volume(volumes, 20)
     volume_zone = volume_profile_zone(highs, lows, closes, volumes)
+    structure = structure_zone(highs, lows, closes, volumes, volume_zone=volume_zone)
     swing_high = previous_swing_high(highs)
 
     return TechnicalSnapshot(
@@ -138,6 +169,15 @@ def build_technical_snapshot(points: Iterable[object], max_points: int = 252) ->
         volume_zone_contains_latest=volume_zone.contains_latest if volume_zone else False,
         previous_swing_high=swing_high,
         previous_swing_high_distance_pct=distance_from_average(latest, swing_high),
+        structure_zone_lower=structure.lower if structure else None,
+        structure_zone_upper=structure.upper if structure else None,
+        structure_zone_strength=structure.strength if structure else None,
+        support_retest_lower=structure.support_lower if structure else None,
+        support_retest_upper=structure.support_upper if structure else None,
+        nearest_resistance=structure.nearest_resistance if structure else None,
+        major_resistance=structure.major_resistance if structure else None,
+        rejection_from_structure_zone=structure.rejection_from_zone if structure else False,
+        support_retest_active=structure.support_retest_active if structure else False,
         ohlcv_coverage_pct=ohlcv_coverage_pct(ordered),
         trend_label=trend_label(closes, ma20_values, ma60_values, ma120_values),
     )
@@ -183,6 +223,15 @@ def technical_snapshot_to_dict(snapshot: TechnicalSnapshot) -> dict:
         "volumeZoneContainsLatest": snapshot.volume_zone_contains_latest,
         "previousSwingHigh": _round_or_none(snapshot.previous_swing_high),
         "previousSwingHighDistancePct": _round_or_none(snapshot.previous_swing_high_distance_pct),
+        "structureZoneLower": _round_or_none(snapshot.structure_zone_lower),
+        "structureZoneUpper": _round_or_none(snapshot.structure_zone_upper),
+        "structureZoneStrength": _round_or_none(snapshot.structure_zone_strength),
+        "supportRetestLower": _round_or_none(snapshot.support_retest_lower),
+        "supportRetestUpper": _round_or_none(snapshot.support_retest_upper),
+        "nearestResistance": _round_or_none(snapshot.nearest_resistance),
+        "majorResistance": _round_or_none(snapshot.major_resistance),
+        "rejectionFromStructureZone": snapshot.rejection_from_structure_zone,
+        "supportRetestActive": snapshot.support_retest_active,
         "ohlcvCoveragePct": _round_or_none(snapshot.ohlcv_coverage_pct),
         "trendLabel": snapshot.trend_label,
     }
@@ -340,6 +389,180 @@ def volume_profile_zone(
     )
 
 
+def structure_zone(
+    highs: list[float] | tuple[float, ...],
+    lows: list[float] | tuple[float, ...],
+    closes: list[float] | tuple[float, ...],
+    volumes: list[float | None] | tuple[float | None, ...],
+    volume_zone: VolumeProfileZone | None = None,
+    lookback: int = 252,
+) -> StructureZone | None:
+    bars = [
+        (
+            _valid_price_or_close(high, close),
+            _valid_price_or_close(low, close),
+            float(close),
+            _profile_volume(volume),
+        )
+        for high, low, close, volume in zip(highs[-lookback:], lows[-lookback:], closes[-lookback:], volumes[-lookback:])
+        if _valid_close(close)
+    ]
+    if len(bars) < 20:
+        return None
+    local_highs = [bar[0] for bar in bars]
+    local_lows = [bar[1] for bar in bars]
+    local_closes = [bar[2] for bar in bars]
+    local_volumes = [bar[3] for bar in bars]
+    volume_zone = volume_zone or volume_profile_zone(local_highs, local_lows, local_closes, local_volumes)
+
+    resistance_clusters = price_level_clusters(_pivot_levels(local_highs, "high") + _upper_wick_levels(bars))
+    low_clusters = price_level_clusters(_pivot_levels(local_lows, "low"))
+    clusters = tuple(resistance_clusters + low_clusters)
+    if volume_zone is None and not clusters:
+        return None
+
+    latest_high, latest_low, latest_close, _ = bars[-1]
+    candle_low = min(latest_high, latest_low, latest_close)
+    candle_high = max(latest_high, latest_low, latest_close)
+
+    if volume_zone is not None:
+        lower = volume_zone.lower
+        upper = volume_zone.upper
+        base_strength = volume_zone.strength
+    else:
+        selected = min(resistance_clusters or clusters, key=lambda item: abs(item.center - latest_close))
+        lower = selected.lower
+        upper = selected.upper
+        base_strength = min(100.0, 45.0 + selected.count * 12.0)
+
+    base_lower = lower
+    base_upper = upper
+    merge_low = base_lower * 0.975
+    merge_high = base_upper * 1.055
+    relevant = [
+        cluster
+        for cluster in resistance_clusters
+        if cluster.count >= 1 and cluster.center >= merge_low and cluster.center <= merge_high
+    ]
+    if relevant:
+        lower_candidates = [base_lower, *(cluster.center for cluster in relevant if cluster.center < base_lower)]
+        upper_candidates = [
+            base_upper,
+            *(
+                _resistance_zone_upper(cluster)
+                for cluster in relevant
+                if cluster.center > base_upper or cluster.upper > base_upper
+            ),
+        ]
+        lower = min(lower_candidates)
+        upper = max(upper_candidates)
+
+    if upper <= lower:
+        return None
+
+    support_cluster = _support_cluster_below_zone(resistance_clusters, lower, latest_close)
+    if support_cluster is None:
+        support_cluster = _support_cluster_below_zone(low_clusters, lower, latest_close)
+    if support_cluster is None:
+        support_lower = lower * 0.960
+        support_upper = lower * 0.985
+    else:
+        support_lower, support_upper = _cluster_zone_bounds(support_cluster)
+
+    target1_candidates = [lower]
+    target1_candidates.extend(
+        cluster.center
+        for cluster in resistance_clusters
+        if cluster.center >= support_upper * 1.005 and cluster.center <= upper * 1.02
+    )
+    nearest_resistance = min(target1_candidates)
+    major_resistance = _select_major_resistance(resistance_clusters, nearest_resistance, upper, volume_zone)
+
+    support_active = candle_high >= support_lower and candle_low <= support_upper
+    rejection = _rejection_from_structure(bars, lower, upper)
+    pivot_strength = min(35.0, sum(cluster.count for cluster in relevant) * 4.0)
+    strength = _clamp_float(base_strength * 0.75 + pivot_strength, 0.0, 100.0)
+
+    return StructureZone(
+        lower=lower,
+        upper=upper,
+        strength=strength,
+        support_lower=support_lower,
+        support_upper=support_upper,
+        nearest_resistance=nearest_resistance,
+        major_resistance=major_resistance,
+        rejection_from_zone=rejection,
+        support_retest_active=support_active,
+    )
+
+
+def _resistance_zone_upper(cluster: PriceLevelCluster) -> float:
+    if cluster.upper <= cluster.lower:
+        return cluster.center * 1.008
+    return cluster.upper * 1.005
+
+
+def _cluster_zone_bounds(cluster: PriceLevelCluster, min_width_pct: float = 0.012) -> tuple[float, float]:
+    lower = cluster.lower
+    upper = cluster.upper
+    min_width = cluster.center * min_width_pct
+    if upper - lower < min_width:
+        midpoint = cluster.center
+        half_width = min_width / 2
+        lower = midpoint - half_width
+        upper = midpoint + half_width
+    return lower, upper
+
+
+def _select_major_resistance(
+    clusters: list[PriceLevelCluster],
+    nearest_resistance: float,
+    zone_upper: float,
+    volume_zone: VolumeProfileZone | None,
+) -> float:
+    target_floor = nearest_resistance * 1.04
+    if volume_zone is not None:
+        target_floor = max(target_floor, volume_zone.upper * 1.005)
+    candidates = [
+        cluster
+        for cluster in clusters
+        if cluster.center > target_floor and cluster.center <= zone_upper * 1.01
+    ]
+    reliable = [cluster for cluster in candidates if cluster.count >= 2]
+    selected_from = reliable or candidates
+    if selected_from:
+        return min(selected_from, key=lambda cluster: cluster.center).center
+    return zone_upper
+
+
+def price_level_clusters(
+    levels: list[float] | tuple[float, ...],
+    tolerance_pct: float = 0.018,
+) -> list[PriceLevelCluster]:
+    values = sorted(float(value) for value in levels if _valid_close(value))
+    if not values:
+        return []
+    clusters: list[list[float]] = []
+    current = [values[0]]
+    for value in values[1:]:
+        center = sum(current) / len(current)
+        if abs(value - center) / center <= tolerance_pct:
+            current.append(value)
+        else:
+            clusters.append(current)
+            current = [value]
+    clusters.append(current)
+    return [
+        PriceLevelCluster(
+            lower=min(cluster),
+            upper=max(cluster),
+            center=sum(cluster) / len(cluster),
+            count=len(cluster),
+        )
+        for cluster in clusters
+    ]
+
+
 def previous_swing_high(
     highs: list[float] | tuple[float, ...],
     lookback: int = 126,
@@ -356,6 +579,78 @@ def previous_swing_high(
         if all(value > item for item in left) and all(value >= item for item in right):
             pivots.append(value)
     return pivots[-1] if pivots else None
+
+
+def _pivot_levels(
+    values: list[float] | tuple[float, ...],
+    kind: str,
+    pivot_window: int = 3,
+) -> list[float]:
+    valid = [float(value) for value in values if _valid_close(value)]
+    if len(valid) < pivot_window * 2 + 2:
+        return []
+    levels: list[float] = []
+    for index in range(pivot_window, len(valid) - pivot_window):
+        value = valid[index]
+        left = valid[index - pivot_window : index]
+        right = valid[index + 1 : index + 1 + pivot_window]
+        if kind == "high" and all(value > item for item in left) and all(value >= item for item in right):
+            levels.append(value)
+        elif kind == "low" and all(value < item for item in left) and all(value <= item for item in right):
+            levels.append(value)
+    return levels
+
+
+def _upper_wick_levels(bars: list[tuple[float, float, float, float]]) -> list[float]:
+    levels: list[float] = []
+    for high, low, close, _ in bars:
+        width = high - low
+        if width <= 0:
+            continue
+        if (high - close) / width >= 0.35:
+            levels.append(high)
+    return levels
+
+
+def _support_cluster_below_zone(
+    clusters: list[PriceLevelCluster],
+    zone_lower: float,
+    latest_close: float,
+) -> PriceLevelCluster | None:
+    candidates = [
+        cluster
+        for cluster in clusters
+        if cluster.center < zone_lower * 0.998 and cluster.center >= zone_lower * 0.88
+    ]
+    if not candidates:
+        return None
+    if latest_close < zone_lower:
+        return min(candidates, key=lambda cluster: abs(cluster.center - latest_close))
+    return max(candidates, key=lambda cluster: cluster.center)
+
+
+def _rejection_from_structure(
+    bars: list[tuple[float, float, float, float]],
+    zone_lower: float,
+    zone_upper: float,
+    lookback: int = 30,
+) -> bool:
+    if len(bars) < 2:
+        return False
+    recent = bars[-(lookback + 1) : -1]
+    if not recent:
+        return False
+    latest_close = bars[-1][2]
+    for high, low, close, _ in recent:
+        width = high - low
+        touched_zone = high >= zone_lower * 0.995 and low <= zone_upper * 1.02
+        upper_rejection = width > 0 and high >= zone_lower * 0.995 and (high - close) / width >= 0.28
+        pulled_back = latest_close <= high * 0.975
+        if touched_zone and pulled_back:
+            return True
+        if upper_rejection and latest_close <= zone_upper:
+            return True
+    return False
 
 
 def ohlcv_coverage_pct(points: Iterable[object]) -> float | None:
@@ -471,6 +766,10 @@ def _range_position(latest: float | None, low: float | None, high: float | None)
     if high <= low:
         return 50.0
     return max(0.0, min(100.0, (latest - low) / (high - low) * 100))
+
+
+def _clamp_float(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
 
 
 def _series(dates: list[str], values: tuple[float | None, ...]) -> tuple[TechnicalPoint, ...]:

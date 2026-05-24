@@ -292,6 +292,15 @@ class Momentum:
     volume_zone_contains_latest: bool = False
     previous_swing_high: float | None = None
     previous_swing_high_distance_pct: float | None = None
+    structure_zone_lower: float | None = None
+    structure_zone_upper: float | None = None
+    structure_zone_strength: float | None = None
+    support_retest_lower: float | None = None
+    support_retest_upper: float | None = None
+    nearest_resistance: float | None = None
+    major_resistance: float | None = None
+    rejection_from_structure_zone: bool = False
+    support_retest_active: bool = False
     ohlcv_coverage_pct: float | None = None
     source: str | None = None
     stale: bool = False
@@ -488,6 +497,15 @@ class TradeTimingSignal:
     target_price: float | None = None
     target_type: str | None = None
     partial_take_profit_pct: float | None = None
+    final_take_profit_pct: float | None = None
+    entry_zone_lower: float | None = None
+    entry_zone_upper: float | None = None
+    target1_price: float | None = None
+    target1_type: str | None = None
+    target2_price: float | None = None
+    target2_type: str | None = None
+    position_plan: str = ""
+    structure_setup: str = ""
     remaining_exit_rule: str = ""
     invalidation_rule: str = ""
 

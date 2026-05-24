@@ -121,12 +121,21 @@ type TechnicalSnapshot = {
   volumeZoneContainsLatest?: boolean;
   previousSwingHigh?: number | null;
   previousSwingHighDistancePct?: number | null;
+  structureZoneLower?: number | null;
+  structureZoneUpper?: number | null;
+  structureZoneStrength?: number | null;
+  supportRetestLower?: number | null;
+  supportRetestUpper?: number | null;
+  nearestResistance?: number | null;
+  majorResistance?: number | null;
+  rejectionFromStructureZone?: boolean;
+  supportRetestActive?: boolean;
   ohlcvCoveragePct?: number | null;
 };
 
 type TradeSignal = {
   horizon: string;
-  action: "buy" | "scale_buy" | "hold" | "reduce" | "sell" | "take_profit_half" | string;
+  action: "buy" | "scale_buy" | "hold" | "reduce" | "sell" | "take_profit_half" | "take_profit_full" | string;
   label: string;
   score: number;
   confidence: number;
@@ -145,6 +154,15 @@ type TradeSignal = {
   targetPrice?: number | null;
   targetType?: string | null;
   partialTakeProfitPct?: number | null;
+  finalTakeProfitPct?: number | null;
+  entryZoneLower?: number | null;
+  entryZoneUpper?: number | null;
+  target1Price?: number | null;
+  target1Type?: string | null;
+  target2Price?: number | null;
+  target2Type?: string | null;
+  positionPlan?: string;
+  structureSetup?: string;
   remainingExitRule?: string;
   invalidationRule: string;
 };
@@ -1269,7 +1287,8 @@ function StockDetail({ stock }: { stock: WeightedStock }) {
         <Metric label="시가총액" value={formatMarketCap(stock.fundamentals.marketCap, stock.fundamentals.marketCapCurrency)} icon="bar" />
         <Metric label="RSI 14" value={formatNumber(stock.technical?.rsi14 ?? null)} icon="gauge" />
         <Metric label="거래량" value={formatRatio(stock.technical?.volumeRatio ?? null)} icon="bar" />
-        <Metric label="매물대 강도" value={formatPct(stock.technical?.volumeZoneStrength ?? null)} icon="bar" />
+        <Metric label="구조 강도" value={formatPct(stock.technical?.structureZoneStrength ?? null)} icon="bar" />
+        <Metric label="지지 재진입" value={formatPrice(stock.technical?.supportRetestLower ?? null)} icon="shield" />
         <Metric label="전 고점 거리" value={formatPct(stock.technical?.previousSwingHighDistancePct ?? null)} icon="trend" />
         <Metric label="MA20 이격" value={formatPct(stock.technical?.ma20DistancePct ?? null)} icon="trend" />
         <Metric label="MA150 이격" value={formatPct(stock.technical?.ma150DistancePct ?? null)} icon="trend" />
@@ -1327,11 +1346,13 @@ function TradeSignalPanel({
   technical: TechnicalSnapshot | null;
 }) {
   const primarySignal = shortSignal ?? mediumSignal;
-  const zoneLower = primarySignal?.volumeZoneLower ?? technical?.volumeZoneLower ?? null;
-  const zoneUpper = primarySignal?.volumeZoneUpper ?? technical?.volumeZoneUpper ?? null;
-  const zoneStrength = primarySignal?.volumeZoneStrength ?? technical?.volumeZoneStrength ?? null;
-  const targetPrice = primarySignal?.targetPrice ?? mediumSignal?.targetPrice ?? null;
-  const targetType = primarySignal?.targetType ?? mediumSignal?.targetType ?? null;
+  const structureLower = technical?.structureZoneLower ?? primarySignal?.volumeZoneLower ?? null;
+  const structureUpper = technical?.structureZoneUpper ?? primarySignal?.volumeZoneUpper ?? null;
+  const structureStrength = technical?.structureZoneStrength ?? primarySignal?.volumeZoneStrength ?? null;
+  const entryLower = primarySignal?.entryZoneLower ?? mediumSignal?.entryZoneLower ?? technical?.supportRetestLower ?? null;
+  const entryUpper = primarySignal?.entryZoneUpper ?? mediumSignal?.entryZoneUpper ?? technical?.supportRetestUpper ?? null;
+  const target1 = primarySignal?.target1Price ?? mediumSignal?.target1Price ?? technical?.nearestResistance ?? null;
+  const target2 = primarySignal?.target2Price ?? mediumSignal?.target2Price ?? technical?.majorResistance ?? null;
   return (
     <section className="trade-signal-panel" aria-label="차트 매매 신호">
       <div className="panel-title compact">
@@ -1344,12 +1365,12 @@ function TradeSignalPanel({
         <TradeSignalCard title="중기" signal={mediumSignal} />
       </div>
       <div className="trade-reference-grid">
-        <ReferenceStat label="매물대 하단" value={formatPrice(zoneLower)} />
-        <ReferenceStat label="매물대 상단" value={formatPrice(zoneUpper)} />
-        <ReferenceStat label="매물대 강도" value={formatPct(zoneStrength)} />
+        <ReferenceStat label="구조 매물대" value={`${formatPrice(structureLower)}~${formatPrice(structureUpper)}`} />
+        <ReferenceStat label="구조 강도" value={formatPct(structureStrength)} />
+        <ReferenceStat label="지지 재진입" value={`${formatPrice(entryLower)}~${formatPrice(entryUpper)}`} />
+        <ReferenceStat label="1차 50%" value={formatPrice(target1)} />
+        <ReferenceStat label="2차 완전익절" value={formatPrice(target2)} />
         <ReferenceStat label="MA200" value={formatPrice(primarySignal?.ma200 ?? mediumSignal?.ma200 ?? technical?.ma200 ?? null)} />
-        <ReferenceStat label="전 고점" value={formatPrice(technical?.previousSwingHigh ?? null)} />
-        <ReferenceStat label={formatTargetType(targetType)} value={formatPrice(targetPrice)} />
       </div>
     </section>
   );
@@ -1375,17 +1396,26 @@ function TradeSignalCard({ title, signal }: { title: string; signal: TradeSignal
           기준가 <strong>{formatPrice(signal?.referencePrice ?? null)}</strong>
         </span>
         <span>
-          매물대 <strong>{formatPrice(signal?.volumeZoneLower ?? null)}~{formatPrice(signal?.volumeZoneUpper ?? null)}</strong>
+          지지 재진입 <strong>{formatPrice(signal?.entryZoneLower ?? null)}~{formatPrice(signal?.entryZoneUpper ?? null)}</strong>
         </span>
         <span>
-          목표 <strong>{formatTargetType(signal?.targetType)} {formatPrice(signal?.targetPrice ?? null)}</strong>
+          1차 <strong>{formatPrice(signal?.target1Price ?? null)}</strong>
+        </span>
+        <span>
+          2차 <strong>{formatPrice(signal?.target2Price ?? null)}</strong>
         </span>
         {signal?.partialTakeProfitPct ? (
           <span>
-            익절 <strong>{formatPct(signal.partialTakeProfitPct)}</strong>
+            1차 익절 <strong>{formatPct(signal.partialTakeProfitPct)}</strong>
+          </span>
+        ) : null}
+        {signal?.finalTakeProfitPct ? (
+          <span>
+            2차 익절 <strong>{formatPct(signal.finalTakeProfitPct)}</strong>
           </span>
         ) : null}
       </div>
+      {signal?.positionPlan ? <div className="remaining-rule">{signal.positionPlan}</div> : null}
       {signal?.remainingExitRule ? <div className="remaining-rule">{signal.remainingExitRule}</div> : null}
       {signal?.invalidationRule ? <div className="invalidation-rule">{signal.invalidationRule}</div> : null}
       {signal?.reasons?.length ? (

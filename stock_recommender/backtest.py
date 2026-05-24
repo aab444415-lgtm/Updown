@@ -35,6 +35,7 @@ from .technical import (
     ohlcv_coverage_pct,
     previous_swing_high,
     rsi,
+    structure_zone,
     volume_profile_zone,
     volume_ratio,
 )
@@ -888,6 +889,7 @@ def _momentum_until(points: tuple[PricePoint, ...], target: date) -> Momentum:
     latest_volume = volumes[-1] if volumes else None
     avg_volume_20 = average_recent_volume(volumes, 20)
     volume_zone = volume_profile_zone(highs, lows, closes, volumes)
+    structure = structure_zone(highs, lows, closes, volumes, volume_zone=volume_zone)
     swing_high = previous_swing_high(highs)
     return Momentum(
         one_month_pct=_lookback_return(closes, 21),
@@ -938,6 +940,15 @@ def _momentum_until(points: tuple[PricePoint, ...], target: date) -> Momentum:
         volume_zone_contains_latest=volume_zone.contains_latest if volume_zone else False,
         previous_swing_high=swing_high,
         previous_swing_high_distance_pct=distance_from_average(latest, swing_high),
+        structure_zone_lower=structure.lower if structure else None,
+        structure_zone_upper=structure.upper if structure else None,
+        structure_zone_strength=structure.strength if structure else None,
+        support_retest_lower=structure.support_lower if structure else None,
+        support_retest_upper=structure.support_upper if structure else None,
+        nearest_resistance=structure.nearest_resistance if structure else None,
+        major_resistance=structure.major_resistance if structure else None,
+        rejection_from_structure_zone=structure.rejection_from_zone if structure else False,
+        support_retest_active=structure.support_retest_active if structure else False,
         ohlcv_coverage_pct=ohlcv_coverage_pct(selected_points),
     )
 

@@ -391,16 +391,17 @@ def _format_valuation_range(item: StockScore) -> str:
 def _trade_signal_line(signal) -> str:
     price = _number(signal.reference_price)
     ma200 = _number(signal.ma200)
-    zone = f"{_number(signal.volume_zone_lower)}~{_number(signal.volume_zone_upper)}"
-    zone_strength = _pct(signal.volume_zone_strength)
-    target = _number(signal.target_price)
-    target_label = _target_type_label(signal.target_type)
+    entry = f"{_number(signal.entry_zone_lower)}~{_number(signal.entry_zone_upper)}"
+    target1 = _number(signal.target1_price)
+    target2 = _number(signal.target2_price)
     partial = _pct(signal.partial_take_profit_pct)
-    remaining = f" / 잔여: {signal.remaining_exit_rule}" if signal.remaining_exit_rule else ""
+    final = _pct(signal.final_take_profit_pct)
+    plan = f" / 계획: {signal.position_plan}" if signal.position_plan else ""
     return (
         f"- 차트 매매 신호: {signal.label} ({signal.setup}, 점수 {signal.score:.1f}, "
-        f"신뢰도 {signal.confidence:.1f}) / 현재가 {price}, 매물대 {zone}(강도 {zone_strength}), "
-        f"MA200 {ma200}, 목표 {target_label} {target}, 익절 {partial}{remaining} / "
+        f"신뢰도 {signal.confidence:.1f}) / 현재가 {price}, 지지 재진입 {entry}, "
+        f"1차 50% {target1}, 2차 완전익절 {target2}, MA200 {ma200}, "
+        f"익절 {partial}/{final}{plan} / "
         f"무효화: {signal.invalidation_rule}"
     )
 
@@ -411,10 +412,6 @@ def _number(value: float | None) -> str:
 
 def _pct(value: float | None) -> str:
     return "N/A" if value is None else f"{value:.1f}%"
-
-
-def _target_type_label(value: str | None) -> str:
-    return {"ma200": "MA200", "previous_swing_high": "전 고점"}.get(value or "", "목표")
 
 
 def _count(value: int | None) -> str:

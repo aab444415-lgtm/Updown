@@ -795,6 +795,11 @@ h3 {
   color: #7a4a0f;
 }
 
+.term-tags em.signal-take_profit_full {
+  background: #ffe7d8;
+  color: #843b18;
+}
+
 .term-tags em.signal-reduce {
   background: #fff7ea;
   color: #815117;
@@ -1135,6 +1140,10 @@ h3 {
   border-left-color: #b87a18;
 }
 
+.trade-signal-card.signal-take_profit_full {
+  border-left-color: #c45f24;
+}
+
 .trade-signal-card.signal-sell {
   border-left-color: #c8534b;
 }
@@ -1178,6 +1187,11 @@ h3 {
 .signal-take_profit_half .trade-signal-head strong {
   background: #fff3d6;
   color: #7a4a0f;
+}
+
+.signal-take_profit_full .trade-signal-head strong {
+  background: #ffe7d8;
+  color: #843b18;
 }
 
 .signal-sell .trade-signal-head strong {

@@ -5,12 +5,14 @@ from datetime import date, datetime, timedelta, timezone
 import stock_recommender.data_sources as data_sources
 from stock_recommender.backtest import PricePoint, parse_yahoo_history
 from stock_recommender.technical import (
+    VolumeProfileZone,
     bollinger_bands,
     build_technical_snapshot,
     lookback_return,
     moving_average,
     previous_swing_high,
     rsi,
+    structure_zone,
     trend_label,
     volume_profile_zone,
 )
@@ -139,12 +141,63 @@ class TechnicalAnalysisTests(unittest.TestCase):
         volumes = [100_000] * 18 + [900_000, 950_000, 980_000, 1_000_000]
 
         zone = volume_profile_zone(highs, lows, closes, volumes, bins=12, lookback=22)
+        structure = structure_zone(highs, lows, closes, volumes, volume_zone=zone, lookback=22)
 
         self.assertIsNotNone(zone)
         assert zone is not None
+        self.assertIsNotNone(structure)
+        assert structure is not None
         self.assertGreaterEqual(zone.strength, 90)
         self.assertTrue(zone.contains_latest)
+        self.assertIsNotNone(structure.support_lower)
+        self.assertIsNotNone(structure.nearest_resistance)
+        self.assertIsNotNone(structure.major_resistance)
         self.assertEqual(previous_swing_high(highs, lookback=22, pivot_window=2), 111)
+
+    def test_structure_zone_splits_overhead_resistance_from_support_retest(self):
+        resistance_levels = [
+            930,
+            956,
+            963,
+            992,
+            1000,
+            1026,
+            1062,
+            1089,
+            1095,
+            1112,
+            1114,
+            1058,
+            1065,
+            956,
+            963,
+            992,
+            1000,
+            1089,
+            1095,
+            1112,
+            1065,
+            1070,
+        ]
+        highs = [float(value) for value in resistance_levels]
+        lows = [value - 18 for value in highs]
+        closes = [value - 8 for value in highs]
+        volumes = [100_000] * len(highs)
+        zone = VolumeProfileZone(lower=1006.4, upper=1070.2, strength=95.0, contains_latest=True)
+
+        structure = structure_zone(highs, lows, closes, volumes, volume_zone=zone, lookback=len(highs))
+
+        self.assertIsNotNone(structure)
+        assert structure is not None
+        self.assertGreaterEqual(structure.lower, 985)
+        self.assertLessEqual(structure.lower, 1000)
+        self.assertGreaterEqual(structure.upper, 1110)
+        self.assertLessEqual(structure.upper, 1125)
+        self.assertGreaterEqual(structure.support_lower, 940)
+        self.assertLessEqual(structure.support_upper, 980)
+        self.assertGreater(structure.lower, structure.support_upper)
+        self.assertAlmostEqual(structure.nearest_resistance or 0, structure.lower, delta=1.0)
+        self.assertAlmostEqual(structure.major_resistance or 0, 1092, delta=5.0)
 
     def test_fetch_momentum_uses_one_year_chart_and_calculates_indicators(self):
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
@@ -200,6 +253,9 @@ class TechnicalAnalysisTests(unittest.TestCase):
         self.assertIsNotNone(momentum.volume_zone_lower)
         self.assertIsNotNone(momentum.volume_zone_upper)
         self.assertIsNotNone(momentum.volume_zone_strength)
+        self.assertIsNotNone(momentum.structure_zone_lower)
+        self.assertIsNotNone(momentum.structure_zone_upper)
+        self.assertIsNotNone(momentum.support_retest_lower)
         self.assertGreater(momentum.ohlcv_coverage_pct or 0, 90)
 
     def test_data_shortage_returns_safe_defaults(self):
