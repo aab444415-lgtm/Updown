@@ -18,7 +18,7 @@ from .snapshot_store import list_snapshot_rows, save_persistent_snapshot
 from .storage import CacheStore
 
 
-SNAPSHOT_PAYLOAD_VERSION = 19
+SNAPSHOT_PAYLOAD_VERSION = 20
 BENCHMARK_TICKERS = ("SPY", "QQQ", "^KS11")
 FUNDAMENTAL_SOURCE_FIELDS = (
     "revenue",
@@ -325,6 +325,38 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
             }
             for item in report.early_growth_scores
         ],
+        "shortSwingCandidates": [
+            {
+                "ticker": item.stock_score.stock.ticker,
+                "name": item.stock_score.stock.name,
+                "country": item.stock_score.stock.country,
+                "industry": item.stock_score.stock.industry,
+                "score": item.score,
+                "baseScore": item.stock_score.score,
+                "signalLabel": item.signal_label,
+                "timeHorizon": item.time_horizon,
+                "newsScore": item.news_score,
+                "marketScore": item.market_score,
+                "chartScore": item.chart_score,
+                "volumeScore": item.volume_score,
+                "companyScore": item.company_score,
+                "themeNewsScore": item.theme_news_score,
+                "currentIndustryScore": item.current_industry_score,
+                "beneficiaryThemeScore": item.beneficiary_theme_score,
+                "themeLabel": item.theme_label,
+                "matchedBeneficiaryThemes": list(item.matched_beneficiary_themes),
+                "confidenceScore": item.confidence_score,
+                "confidenceLabel": item.confidence_label,
+                "setupLabel": item.setup_label,
+                "tradeSignal": _trade_signal_payload(item.trade_signal),
+                "decisionGrade": item.stock_score.decision_grade,
+                "riskLevel": item.stock_score.risk_level,
+                **_portfolio_fields(item.stock_score),
+                "reasons": list(item.reasons),
+                "cautions": list(item.cautions),
+            }
+            for item in _short_term_entry_candidates(report.short_term_scores)
+        ],
         "shortTermCandidates": [
             {
                 "ticker": item.stock_score.stock.ticker,
@@ -340,6 +372,11 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                 "chartScore": item.chart_score,
                 "volumeScore": item.volume_score,
                 "companyScore": item.company_score,
+                "themeNewsScore": item.theme_news_score,
+                "currentIndustryScore": item.current_industry_score,
+                "beneficiaryThemeScore": item.beneficiary_theme_score,
+                "themeLabel": item.theme_label,
+                "matchedBeneficiaryThemes": list(item.matched_beneficiary_themes),
                 "confidenceScore": item.confidence_score,
                 "confidenceLabel": item.confidence_label,
                 "setupLabel": item.setup_label,
@@ -833,7 +870,9 @@ def _short_term_entry_candidates(items) -> tuple:
     return tuple(
         item
         for item in items
-        if item.trade_signal is not None and item.trade_signal.action in {"buy", "scale_buy"}
+        if item.trade_signal is not None
+        and item.trade_signal.action in {"buy", "scale_buy"}
+        and item.theme_label != "테마 제외"
     )
 
 

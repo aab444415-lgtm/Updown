@@ -415,9 +415,17 @@ h3 {
 
 .term-dashboard {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 14px;
+}
+
+.short-swing-panel {
+  margin-bottom: 14px;
+}
+
+.short-swing-panel .term-list {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .industry-flow-panel {
@@ -1466,6 +1474,10 @@ h3 {
   }
 
   .term-dashboard {
+    grid-template-columns: 1fr;
+  }
+
+  .short-swing-panel .term-list {
     grid-template-columns: 1fr;
   }
 

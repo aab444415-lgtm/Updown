@@ -541,6 +541,11 @@ class ShortTermScore:
     reasons: tuple[str, ...]
     cautions: tuple[str, ...]
     trade_signal: TradeTimingSignal | None = None
+    theme_news_score: float = 0
+    current_industry_score: float = 0
+    beneficiary_theme_score: float = 0
+    theme_label: str = ""
+    matched_beneficiary_themes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

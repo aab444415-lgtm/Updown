@@ -415,7 +415,9 @@ def _short_term_entry_candidates(items: tuple[ShortTermScore, ...]) -> tuple[Sho
     return tuple(
         item
         for item in items
-        if item.trade_signal is not None and item.trade_signal.action in {"buy", "scale_buy"}
+        if item.trade_signal is not None
+        and item.trade_signal.action in {"buy", "scale_buy"}
+        and item.theme_label != "테마 제외"
     )
 
 

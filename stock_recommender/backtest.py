@@ -1280,7 +1280,7 @@ def _legacy_selected_stocks(
     if horizon == "short":
         return tuple(
             item.stock_score.stock
-            for item in score_short_term_candidates(scores, industry_scores, (), momentums)[:top_n]
+            for item in score_short_term_candidates(scores, industry_scores, (), (), momentums)[:top_n]
         )
     if horizon == "medium":
         return tuple(

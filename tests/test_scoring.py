@@ -803,7 +803,7 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(short.setup_label, "차트 데이터 부족")
         self.assertIn(short.confidence_label, {"낮음", "확인 필요"})
 
-    def test_short_term_caps_missing_volume_data(self):
+    def test_short_term_ignores_missing_volume_for_score(self):
         industry = INDUSTRIES[0]
         candidate = StockProfile(
             ticker="NOVOL",
@@ -832,9 +832,9 @@ class ScoringTests(unittest.TestCase):
 
         short = report.short_term_scores[0]
 
-        self.assertLessEqual(short.score, 72)
+        self.assertGreater(short.score, 78)
         self.assertEqual(short.volume_score, 50)
-        self.assertIn("거래량", " ".join(short.cautions))
+        self.assertNotIn("거래량", " ".join(short.reasons))
 
     def test_trade_signal_buys_structure_support_retest(self):
         signal = _single_short_trade_signal(
@@ -1023,9 +1023,98 @@ class ScoringTests(unittest.TestCase):
         self.assertLessEqual(by_ticker["DONE"].score, 28)
 
         payload = report_to_dict(report)
-        self.assertEqual([item["ticker"] for item in payload["shortTermCandidates"]], ["ENTRY"])
+        self.assertEqual([item["ticker"] for item in payload["shortSwingCandidates"]], ["ENTRY"])
+        self.assertEqual(payload["shortSwingCandidates"], payload["shortTermCandidates"])
         done_detail = next(item for item in payload["stocks"] if item["ticker"] == "DONE")
         self.assertEqual(done_detail["shortTerm"]["tradeSignal"]["action"], "take_profit_full")
+
+    def test_short_swing_requires_current_or_beneficiary_theme(self):
+        stock = StockProfile(
+            ticker="NOTHEME",
+            name="No Theme Entry",
+            industry=INDUSTRIES[2].name,
+            role="adjacent",
+            thesis="차트는 좋지만 현재 유망 산업이나 수혜 테마 매칭이 없는 후보입니다.",
+            risks=("테마 부재",),
+            fundamentals=Fundamentals(35.0, 20.0, 18.0, 32.0, 28.0, 21.0, 3_000_000_000),
+        )
+
+        report = build_report(
+            macro_context=DEFAULT_MACRO_CONTEXT,
+            industries=INDUSTRIES[:3],
+            stocks=(stock,),
+            news_items=(),
+            momentums={
+                "NOTHEME": _trade_signal_momentum(
+                    latest=960,
+                    ma200=900,
+                    volume_zone_lower=990,
+                    volume_zone_upper=1120,
+                    latest_high=965,
+                    latest_low=955,
+                    structure_zone_lower=990,
+                    structure_zone_upper=1120,
+                    support_retest_lower=950,
+                    support_retest_upper=970,
+                    nearest_resistance=990,
+                    major_resistance=1089,
+                )
+            },
+        )
+
+        self.assertEqual(report.short_term_scores[0].theme_label, "테마 제외")
+        payload = report_to_dict(report)
+        self.assertEqual(payload["shortSwingCandidates"], [])
+
+    def test_short_swing_includes_beneficiary_theme_keyword_match(self):
+        stock = StockProfile(
+            ticker="FUTURE",
+            name="Future Theme",
+            industry=INDUSTRIES[2].name,
+            role="adjacent",
+            thesis="quantum widget 수요가 데이터센터 증설과 함께 늘어나는 후보입니다.",
+            risks=("초기 시장",),
+            fundamentals=Fundamentals(35.0, 20.0, 18.0, 32.0, 28.0, 21.0, 3_000_000_000),
+        )
+        beneficiary = BeneficiaryIndustryProfile(
+            name="Quantum Widgets",
+            description="데이터센터 확산의 미래 수혜 테마입니다.",
+            source_industry=INDUSTRIES[0].name,
+            mechanism="AI 데이터센터 증설이 quantum widget 부품 수요로 이어집니다.",
+            time_horizon="3~12개월",
+            keywords=("quantum widget",),
+            risks=("수요 검증 필요",),
+            connection_strength=85,
+        )
+
+        report = build_report(
+            macro_context=DEFAULT_MACRO_CONTEXT,
+            industries=INDUSTRIES[:3],
+            stocks=(stock,),
+            news_items=(),
+            momentums={
+                "FUTURE": _trade_signal_momentum(
+                    latest=960,
+                    ma200=900,
+                    volume_zone_lower=990,
+                    volume_zone_upper=1120,
+                    latest_high=965,
+                    latest_low=955,
+                    structure_zone_lower=990,
+                    structure_zone_upper=1120,
+                    support_retest_lower=950,
+                    support_retest_upper=970,
+                    nearest_resistance=990,
+                    major_resistance=1089,
+                )
+            },
+            beneficiary_industries=(beneficiary,),
+        )
+
+        payload = report_to_dict(report)
+        self.assertEqual(payload["shortSwingCandidates"][0]["ticker"], "FUTURE")
+        self.assertEqual(payload["shortSwingCandidates"][0]["themeLabel"], "미래 수혜 산업")
+        self.assertEqual(payload["shortSwingCandidates"][0]["matchedBeneficiaryThemes"], ["Quantum Widgets"])
 
     def test_trade_signal_reduces_or_sells_on_support_and_ma200_breaks(self):
         zone_signal = _single_short_trade_signal(
@@ -1498,7 +1587,14 @@ class ScoringTests(unittest.TestCase):
         self.assertIn("evToEbit", payload["stocks"][0]["fundamentals"])
         self.assertIn("earningsYieldPct", payload["stocks"][0]["fundamentals"])
         self.assertIn("rdToRevenuePct", payload["stocks"][0]["fundamentals"])
+        self.assertIn("shortSwingCandidates", payload)
         self.assertIn("shortTermCandidates", payload)
+        self.assertEqual(payload["shortSwingCandidates"], payload["shortTermCandidates"])
+        self.assertIn("themeNewsScore", payload["shortSwingCandidates"][0])
+        self.assertIn("currentIndustryScore", payload["shortSwingCandidates"][0])
+        self.assertIn("beneficiaryThemeScore", payload["shortSwingCandidates"][0])
+        self.assertIn("themeLabel", payload["shortSwingCandidates"][0])
+        self.assertIn("matchedBeneficiaryThemes", payload["shortSwingCandidates"][0])
         self.assertIn("volumeScore", payload["shortTermCandidates"][0])
         self.assertIn("confidenceScore", payload["shortTermCandidates"][0])
         self.assertIn("setupLabel", payload["shortTermCandidates"][0])
@@ -2617,7 +2713,7 @@ class SnapshotTests(unittest.TestCase):
 
         payload = report_to_snapshot_payload(report, mode="live")
 
-        self.assertEqual(payload["version"], 19)
+        self.assertEqual(payload["version"], 20)
         self.assertEqual(payload["snapshotDate"], "2026-05-18")
         self.assertEqual(payload["createdAtTimezone"], "Asia/Seoul")
         self.assertIn("gitCommit", payload["audit"])
@@ -2658,8 +2754,14 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(payload["stocks"][0]["momentumRaw"]["supportRetestLower"], 118)
         self.assertIn("tradeSignals", payload["stocks"][0])
         self.assertIn("short", payload["stocks"][0]["tradeSignals"])
+        self.assertIn("shortSwingCandidates", payload)
+        self.assertEqual(payload["shortSwingCandidates"], payload["shortTermCandidates"])
         self.assertIn("tradeSignal", payload["shortTermCandidates"][0])
         self.assertIn("tradeSignal", payload["mediumTermCandidates"][0])
+        self.assertIn("themeNewsScore", payload["shortSwingCandidates"][0])
+        self.assertIn("currentIndustryScore", payload["shortSwingCandidates"][0])
+        self.assertIn("beneficiaryThemeScore", payload["shortSwingCandidates"][0])
+        self.assertIn("themeLabel", payload["shortSwingCandidates"][0])
         self.assertIn("volumeZoneLower", payload["shortTermCandidates"][0]["tradeSignal"])
         self.assertIn("targetPrice", payload["shortTermCandidates"][0]["tradeSignal"])
         self.assertIn("entryZoneLower", payload["shortTermCandidates"][0]["tradeSignal"])

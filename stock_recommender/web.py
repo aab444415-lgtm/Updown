@@ -209,6 +209,21 @@ def report_to_dict(report: RecommendationReport) -> dict:
             }
             for item in report.legend_strategy_scores
         ],
+        "shortSwingCandidates": [
+            {
+                "ticker": item.stock_score.stock.ticker,
+                "name": item.stock_score.stock.name,
+                "industry": item.stock_score.stock.industry,
+                "country": item.stock_score.stock.country,
+                "currency": item.stock_score.stock.currency,
+                "baseScore": item.stock_score.score,
+                "decisionGrade": item.stock_score.decision_grade,
+                "riskLevel": item.stock_score.risk_level,
+                **_portfolio_fields(item.stock_score),
+                **_short_term_to_dict(item),
+            }
+            for item in _short_term_entry_candidates(report.short_term_scores)
+        ],
         "shortTermCandidates": [
             {
                 "ticker": item.stock_score.stock.ticker,
@@ -470,6 +485,11 @@ def _short_term_to_dict(item) -> dict | None:
         "chartScore": item.chart_score,
         "volumeScore": item.volume_score,
         "companyScore": item.company_score,
+        "themeNewsScore": item.theme_news_score,
+        "currentIndustryScore": item.current_industry_score,
+        "beneficiaryThemeScore": item.beneficiary_theme_score,
+        "themeLabel": item.theme_label,
+        "matchedBeneficiaryThemes": list(item.matched_beneficiary_themes),
         "confidenceScore": item.confidence_score,
         "confidenceLabel": item.confidence_label,
         "signalLabel": item.signal_label,
@@ -485,7 +505,9 @@ def _short_term_entry_candidates(items) -> tuple:
     return tuple(
         item
         for item in items
-        if item.trade_signal is not None and item.trade_signal.action in {"buy", "scale_buy"}
+        if item.trade_signal is not None
+        and item.trade_signal.action in {"buy", "scale_buy"}
+        and item.theme_label != "테마 제외"
     )
 
 

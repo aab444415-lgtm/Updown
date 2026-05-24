@@ -181,6 +181,11 @@ type TermCandidate = {
   chartScore: number;
   volumeScore?: number;
   companyScore: number;
+  themeNewsScore?: number;
+  currentIndustryScore?: number;
+  beneficiaryThemeScore?: number;
+  themeLabel?: string;
+  matchedBeneficiaryThemes?: string[];
   confidenceScore?: number;
   confidenceLabel?: string;
   decisionGrade: string;
@@ -271,6 +276,7 @@ type Report = {
   industries: Industry[];
   beneficiaryIndustries: BeneficiaryIndustry[];
   stocks: Stock[];
+  shortSwingCandidates: TermCandidate[];
   shortTermCandidates: TermCandidate[];
   mediumTermCandidates: TermCandidate[];
   longTermCandidates: TermCandidate[];
@@ -469,6 +475,7 @@ export default function App() {
                 ))}
               </section>
 
+              <ShortSwingPanel report={report} onSelect={setSelectedTicker} />
               <TermDashboard report={report} onSelect={setSelectedTicker} />
 
               <BacktestPanel
@@ -924,15 +931,24 @@ function FlowStat({ label, value }: { label: string; value: string }) {
   );
 }
 
+function ShortSwingPanel({ report, onSelect }: { report: Report; onSelect: (ticker: string) => void }) {
+  const candidates = report.shortSwingCandidates || report.shortTermCandidates || [];
+  return (
+    <CandidateColumn
+      title="단기 스윙 매수 후보"
+      eyebrow="Swing"
+      candidates={candidates}
+      onSelect={onSelect}
+      scoreMode="swing"
+      emptyText="현재 매수 구간 후보 없음"
+      className="short-swing-panel"
+    />
+  );
+}
+
 function TermDashboard({ report, onSelect }: { report: Report; onSelect: (ticker: string) => void }) {
   return (
     <section className="term-dashboard" aria-label="기간별 추천 후보">
-      <CandidateColumn
-        title="단기 스윙 후보"
-        eyebrow="Short"
-        candidates={report.shortTermCandidates || []}
-        onSelect={onSelect}
-      />
       <CandidateColumn
         title="중기 추세 후보"
         eyebrow="Medium"
@@ -954,14 +970,20 @@ function CandidateColumn({
   eyebrow,
   candidates,
   onSelect,
+  scoreMode = "default",
+  emptyText = "후보 없음",
+  className = "",
 }: {
   title: string;
   eyebrow: string;
   candidates: TermCandidate[];
   onSelect: (ticker: string) => void;
+  scoreMode?: "default" | "swing";
+  emptyText?: string;
+  className?: string;
 }) {
   return (
-    <section className="panel term-panel">
+    <section className={`panel term-panel ${className}`.trim()}>
       <div className="panel-title">
         <TrendingUp size={18} aria-hidden="true" />
         <h2>{title}</h2>
@@ -969,7 +991,7 @@ function CandidateColumn({
       </div>
       <div className="term-list">
         {candidates.length === 0 ? (
-          <div className="term-empty">현재 매수 구간 후보 없음</div>
+          <div className="term-empty">{emptyText}</div>
         ) : null}
         {candidates.slice(0, 3).map((candidate, index) => {
           const tradeAction = candidate.tradeSignal?.action || "hold";
@@ -991,17 +1013,28 @@ function CandidateColumn({
               <strong className="rank-score">{formatScore(candidate.score)}</strong>
               <span className="term-tags">
                 {tradeLabel ? <em className={`trade-tag signal-${tradeAction}`}>{tradeLabel}</em> : null}
+                {scoreMode === "swing" && candidate.themeLabel ? <em>테마 {candidate.themeLabel}</em> : null}
                 {candidate.setupLabel ? <em>셋업 {candidate.setupLabel}</em> : null}
                 {candidate.confidenceLabel ? <em>신뢰도 {candidate.confidenceLabel}</em> : null}
               </span>
               <span className="term-score-grid">
                 <ScoreMini label="차트" value={candidate.chartScore} />
-                {candidate.volumeScore === undefined ? null : (
-                  <ScoreMini label="거래량" value={candidate.volumeScore} />
+                {scoreMode === "swing" ? (
+                  <>
+                    <ScoreMini label="뉴스" value={candidate.themeNewsScore ?? candidate.newsScore} />
+                    <ScoreMini label="현재 산업" value={candidate.currentIndustryScore} />
+                    <ScoreMini label="미래 수혜" value={candidate.beneficiaryThemeScore} />
+                  </>
+                ) : (
+                  <>
+                    {candidate.volumeScore === undefined ? null : (
+                      <ScoreMini label="거래량" value={candidate.volumeScore} />
+                    )}
+                    <ScoreMini label="시장" value={candidate.marketScore} />
+                    <ScoreMini label="뉴스" value={candidate.newsScore} />
+                    <ScoreMini label="기업" value={candidate.companyScore} />
+                  </>
                 )}
-                <ScoreMini label="시장" value={candidate.marketScore} />
-                <ScoreMini label="뉴스" value={candidate.newsScore} />
-                <ScoreMini label="기업" value={candidate.companyScore} />
               </span>
             </button>
           );
@@ -1011,7 +1044,7 @@ function CandidateColumn({
   );
 }
 
-function ScoreMini({ label, value }: { label: string; value: number }) {
+function ScoreMini({ label, value }: { label: string; value: number | null | undefined }) {
   return (
     <span>
       {label}

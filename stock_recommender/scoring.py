@@ -125,6 +125,16 @@ class _BeneficiaryNewsSignal:
     top_sources: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class _ShortTermThemeSignal:
+    score: float
+    current_industry_score: float
+    beneficiary_theme_score: float
+    label: str
+    matched_beneficiary_themes: tuple[str, ...]
+    eligible: bool
+
+
 def build_report(
     macro_context: str,
     industries: Iterable[IndustryProfile],
@@ -164,7 +174,7 @@ def build_report(
     stock_scores = score_stocks(stocks_tuple, industry_scores, momentums)
     early_growth_scores = score_early_growth_candidates(stock_scores, momentums)
     short_term_scores = score_short_term_candidates(
-        stock_scores, industry_scores, news_tuple, momentums
+        stock_scores, industry_scores, beneficiary_scores, news_tuple, momentums
     )
     medium_term_scores = score_medium_term_candidates(
         stock_scores, industry_scores, news_tuple, momentums
@@ -463,10 +473,14 @@ def score_early_growth_candidates(
 def score_short_term_candidates(
     stock_scores: Iterable[StockScore],
     industry_scores: Iterable[IndustryScore],
+    beneficiary_industry_scores: Iterable[BeneficiaryIndustryScore],
     news_items: Iterable[NewsItem],
     momentums: dict[str, Momentum],
 ) -> tuple[ShortTermScore, ...]:
     industry_score_by_name = {item.industry.name: item for item in industry_scores}
+    beneficiary_tuple = tuple(beneficiary_industry_scores)
+    current_promising = _promising_current_industry_names(industry_scores)
+    promising_beneficiaries = _promising_beneficiary_scores(beneficiary_tuple)
     news_tuple = tuple(news_items)
     news_counter = _counter(
         " ".join(
@@ -485,8 +499,11 @@ def score_short_term_candidates(
         volume = short_term_volume_score(momentum)
         company = short_term_company_score(stock, item.quality_score)
         confidence = candidate_confidence_score(stock, momentum, bool(news_tuple), "short")
-        total = chart * 0.45 + volume * 0.20 + market * 0.20 + news * 0.10 + company * 0.05
+        theme = _short_term_theme_signal(stock, industry_score, current_promising, promising_beneficiaries)
+        total = chart * 0.70 + theme.score * 0.30
         total -= short_term_penalty(stock, momentum, news_tuple, market, chart, volume, company)
+        if not theme.eligible:
+            total = min(total, 45)
         score = _apply_short_term_caps(_clamp(total, 0, 100), momentum)
         trade_signal = trade_timing_signal_for_stock(
             item,
@@ -509,17 +526,105 @@ def score_short_term_candidates(
                 chart_score=round(chart, 1),
                 volume_score=round(volume, 1),
                 company_score=round(company, 1),
+                theme_news_score=round(theme.score, 1),
+                current_industry_score=round(theme.current_industry_score, 1),
+                beneficiary_theme_score=round(theme.beneficiary_theme_score, 1),
+                theme_label=theme.label,
+                matched_beneficiary_themes=theme.matched_beneficiary_themes,
                 confidence_score=round(confidence, 1),
                 confidence_label=confidence_label(confidence),
                 signal_label=short_term_signal_label(score, market, chart, volume, news, confidence, trade_signal),
                 setup_label=short_term_setup_label(momentum, chart, volume, trade_signal),
                 time_horizon="당일~2주",
-                reasons=short_term_reasons(stock, momentum, news, market, chart, volume, company),
-                cautions=short_term_cautions(stock, momentum, news_tuple, market, chart, volume, company),
+                reasons=short_term_reasons(stock, momentum, news, market, chart, volume, company, theme),
+                cautions=short_term_cautions(stock, momentum, news_tuple, market, chart, volume, company, theme),
                 trade_signal=trade_signal,
             )
         )
     return tuple(sorted(results, key=lambda item: item.score, reverse=True))
+
+
+def _promising_current_industry_names(industry_scores: Iterable[IndustryScore]) -> set[str]:
+    ranked = sorted(industry_scores, key=lambda item: item.news_score, reverse=True)
+    selected = {item.industry.name for item in ranked if item.news_score >= 60}
+    selected.update(item.industry.name for item in ranked[:2])
+    return selected
+
+
+def _promising_beneficiary_scores(
+    beneficiary_scores: Iterable[BeneficiaryIndustryScore],
+) -> tuple[BeneficiaryIndustryScore, ...]:
+    ranked = sorted(beneficiary_scores, key=_beneficiary_short_theme_score, reverse=True)
+    selected: list[BeneficiaryIndustryScore] = []
+    for index, item in enumerate(ranked):
+        theme_score = _beneficiary_short_theme_score(item)
+        if index < 3 or theme_score >= 60:
+            selected.append(item)
+    return tuple(selected)
+
+
+def _short_term_theme_signal(
+    stock: StockProfile,
+    industry_score: IndustryScore,
+    current_promising: set[str],
+    promising_beneficiaries: tuple[BeneficiaryIndustryScore, ...],
+) -> _ShortTermThemeSignal:
+    current_eligible = stock.industry in current_promising
+    current_score = industry_score.news_score
+    matched = tuple(
+        item
+        for item in promising_beneficiaries
+        if _stock_matches_beneficiary_theme(stock, item.profile)
+    )
+    beneficiary_score = max((_beneficiary_short_theme_score(item) for item in matched), default=0.0)
+    matched_names = tuple(item.profile.name for item in matched)
+    eligible = current_eligible or bool(matched)
+    if current_eligible and matched:
+        label = "현재 유망+미래 수혜"
+    elif current_eligible:
+        label = "현재 유망 산업"
+    elif matched:
+        label = "미래 수혜 산업"
+    else:
+        label = "테마 제외"
+    score = max(current_score if current_eligible else 0.0, beneficiary_score)
+    return _ShortTermThemeSignal(
+        score=score,
+        current_industry_score=current_score,
+        beneficiary_theme_score=beneficiary_score,
+        label=label,
+        matched_beneficiary_themes=matched_names,
+        eligible=eligible,
+    )
+
+
+def _beneficiary_short_theme_score(item: BeneficiaryIndustryScore) -> float:
+    return max(item.news_score, item.news_recent_score)
+
+
+def _stock_matches_beneficiary_theme(
+    stock: StockProfile,
+    profile: BeneficiaryIndustryProfile,
+) -> bool:
+    if stock.industry == profile.name:
+        return True
+    text = _normalized_theme_text(
+        " ".join(
+            (
+                stock.ticker,
+                stock.name,
+                stock.industry,
+                stock.thesis,
+                " ".join(stock.recent_issues),
+            )
+        )
+    )
+    terms = (profile.name, *profile.keywords)
+    return any(_normalized_theme_text(term) in text for term in terms if term)
+
+
+def _normalized_theme_text(value: str) -> str:
+    return value.casefold()
 
 
 def score_medium_term_candidates(
@@ -1100,20 +1205,12 @@ def short_term_penalty(
         penalty += 3
     if not _has_momentum_data(momentum):
         penalty += 6
-    if market < 35:
-        penalty += 8
     if chart < 35:
         penalty += 8
-    if volume < 38:
-        penalty += 5
-    if company < 35:
-        penalty += 5
     if _finite(momentum.rsi14) and momentum.rsi14 > 78:
         penalty += 6
     if _finite(momentum.range_position_pct) and momentum.range_position_pct > 96:
         penalty += 5
-    if stock.fundamentals.operating_margin_pct is not None and stock.fundamentals.operating_margin_pct < -15:
-        penalty += 4
     return penalty
 
 
@@ -1223,8 +1320,6 @@ def confidence_label(score: float) -> str:
 def _apply_short_term_caps(score: float, momentum: Momentum) -> float:
     if not _has_momentum_data(momentum):
         return min(score, 55)
-    if not _has_volume_data(momentum):
-        return min(score, 72)
     return score
 
 
@@ -1307,14 +1402,18 @@ def short_term_reasons(
     chart: float,
     volume: float,
     company: float,
+    theme: _ShortTermThemeSignal,
 ) -> tuple[str, ...]:
-    return (
+    parts = [
         f"차트 점수 {chart:.1f}/100: {_short_term_chart_reason(momentum)}",
-        f"거래량 점수 {volume:.1f}/100: {_short_term_volume_reason(momentum)}",
-        f"시장 데이터 점수 {market:.1f}/100: {_short_term_momentum_reason(momentum)}",
+        f"뉴스/산업 테마 {theme.score:.1f}/100: {theme.label}",
+        f"현재 산업 뉴스 {theme.current_industry_score:.1f}/100",
+        f"미래 수혜 테마 {theme.beneficiary_theme_score:.1f}/100",
         f"뉴스/이슈 점수 {news:.1f}/100: {_short_term_news_reason(stock)}",
-        f"기업 데이터 점수 {company:.1f}/100: {_growth_check(stock.fundamentals)}",
-    )
+    ]
+    if theme.matched_beneficiary_themes:
+        parts.append("매칭 수혜 산업: " + ", ".join(theme.matched_beneficiary_themes))
+    return tuple(parts)
 
 
 def short_term_cautions(
@@ -1325,22 +1424,17 @@ def short_term_cautions(
     chart: float,
     volume: float,
     company: float,
+    theme: _ShortTermThemeSignal,
 ) -> tuple[str, ...]:
     cautions: list[str] = []
     if not news_items:
         cautions.append("라이브 뉴스가 없으면 단기 이슈 점수는 보수적으로 해석")
+    if not theme.eligible:
+        cautions.append("현재 유망 산업 또는 미래 수혜 산업 매칭이 없어 단기 후보에서 제외")
     if not _has_momentum_data(momentum):
         cautions.append("실시간 가격 모멘텀 데이터 부족으로 시장/차트 신호 확인 필요")
-    if market < 45:
-        cautions.append("단기 가격 모멘텀이 약해 추세 반전 확인 전 진입 주의")
     if chart < 45:
         cautions.append("차트 위치가 약하거나 과열되어 지지선/저항선 확인 필요")
-    if not _has_volume_data(momentum):
-        cautions.append("거래량 데이터가 부족해 돌파 신호는 실제 거래량으로 재확인 필요")
-    elif volume < 45:
-        cautions.append("거래량 확인이 약해 돌파 지속성 확인 필요")
-    if company < 45:
-        cautions.append("단기 악재에 취약할 수 있어 실적과 재무 안정성 재확인 필요")
     cautions.extend(stock.risks[:1])
     return tuple(dict.fromkeys(cautions))
 
