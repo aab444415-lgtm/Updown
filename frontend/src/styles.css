@@ -722,6 +722,18 @@ h3 {
   gap: 9px;
 }
 
+.term-empty {
+  min-height: 112px;
+  border: 1px dashed #cbd8d2;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: #5e6b66;
+  font-weight: 800;
+  font-size: 0.88rem;
+  background: #f8faf8;
+}
+
 .term-card {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr) 58px;

@@ -114,11 +114,16 @@ def render_markdown(
 
     lines.append("## 단기 매매 후보")
     lines.append("")
-    lines.append("차트 구조, 거래량, 시장 모멘텀, 뉴스/이슈, 기업 데이터를 당일~2주 관점으로 따로 점수화합니다.")
+    lines.append("지지 재진입 매수 구간에 들어온 종목만 당일~2주 관점 후보로 표시합니다.")
     lines.append("")
-    for rank, item in enumerate(report.short_term_scores[:top_stocks], start=1):
-        lines.extend(_render_short_term_stock(rank, item))
+    short_entries = _short_term_entry_candidates(report.short_term_scores)
+    if not short_entries:
+        lines.append("- 현재 단기 매수 구간 후보가 없습니다.")
         lines.append("")
+    else:
+        for rank, item in enumerate(short_entries[:top_stocks], start=1):
+            lines.extend(_render_short_term_stock(rank, item))
+            lines.append("")
 
     lines.append("## 중기 매매 후보")
     lines.append("")
@@ -403,6 +408,14 @@ def _trade_signal_line(signal) -> str:
         f"1차 50% {target1}, 2차 완전익절 {target2}, MA200 {ma200}, "
         f"익절 {partial}/{final}{plan} / "
         f"무효화: {signal.invalidation_rule}"
+    )
+
+
+def _short_term_entry_candidates(items: tuple[ShortTermScore, ...]) -> tuple[ShortTermScore, ...]:
+    return tuple(
+        item
+        for item in items
+        if item.trade_signal is not None and item.trade_signal.action in {"buy", "scale_buy"}
     )
 
 

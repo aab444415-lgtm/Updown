@@ -968,6 +968,9 @@ function CandidateColumn({
         <span>{eyebrow}</span>
       </div>
       <div className="term-list">
+        {candidates.length === 0 ? (
+          <div className="term-empty">현재 매수 구간 후보 없음</div>
+        ) : null}
         {candidates.slice(0, 3).map((candidate, index) => {
           const tradeAction = candidate.tradeSignal?.action || "hold";
           const tradeLabel = candidate.tradeSignal?.label ? `매매 ${candidate.tradeSignal.label}` : null;

@@ -350,7 +350,7 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                 "reasons": list(item.reasons),
                 "cautions": list(item.cautions),
             }
-            for item in report.short_term_scores
+            for item in _short_term_entry_candidates(report.short_term_scores)
         ],
         "mediumTermCandidates": [
             {
@@ -827,6 +827,14 @@ def _trade_signal_payload(item) -> dict | None:
         "remainingExitRule": _redact_text(item.remaining_exit_rule),
         "invalidationRule": _redact_text(item.invalidation_rule),
     }
+
+
+def _short_term_entry_candidates(items) -> tuple:
+    return tuple(
+        item
+        for item in items
+        if item.trade_signal is not None and item.trade_signal.action in {"buy", "scale_buy"}
+    )
 
 
 def _price_anchor_payload(momentum: Momentum | None, currency: str) -> dict:

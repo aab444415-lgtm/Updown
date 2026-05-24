@@ -222,7 +222,7 @@ def report_to_dict(report: RecommendationReport) -> dict:
                 **_portfolio_fields(item.stock_score),
                 **_short_term_to_dict(item),
             }
-            for item in report.short_term_scores
+            for item in _short_term_entry_candidates(report.short_term_scores)
         ],
         "mediumTermCandidates": [
             {
@@ -479,6 +479,14 @@ def _short_term_to_dict(item) -> dict | None:
         "cautions": list(item.cautions),
         "tradeSignal": _trade_signal_to_dict(item.trade_signal),
     }
+
+
+def _short_term_entry_candidates(items) -> tuple:
+    return tuple(
+        item
+        for item in items
+        if item.trade_signal is not None and item.trade_signal.action in {"buy", "scale_buy"}
+    )
 
 
 def _medium_term_to_dict(item) -> dict | None:

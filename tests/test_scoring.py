@@ -709,7 +709,7 @@ class ScoringTests(unittest.TestCase):
                 ),
             ),
             momentums={
-                "FAST": Momentum(12.0, 24.0, 42.0, -8.0, 72.0),
+                "FAST": _strong_swing_momentum(),
                 "SLOW": Momentum(-18.0, -28.0, -35.0, -45.0, 8.0),
             },
         )
@@ -720,7 +720,7 @@ class ScoringTests(unittest.TestCase):
         self.assertGreater(top.news_score, report.short_term_scores[1].news_score)
         self.assertGreater(top.market_score, 70)
         self.assertGreater(top.chart_score, 70)
-        self.assertIn(top.signal_label, {"단기 강세 후보", "단기 관심"})
+        self.assertEqual(top.signal_label, "단기 매수 구간")
 
     def test_short_term_prefers_chart_volume_setup_over_news_only(self):
         industry = INDUSTRIES[0]
@@ -954,6 +954,78 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(signal.label, "완전 익절")
         self.assertEqual(signal.target_type, "target2")
         self.assertEqual(signal.final_take_profit_pct, 50)
+
+    def test_short_term_candidates_exclude_completed_take_profit_setups(self):
+        industry = INDUSTRIES[0]
+        entry = StockProfile(
+            ticker="ENTRY",
+            name="Entry Candidate",
+            industry=industry.name,
+            role="adjacent",
+            thesis="지지 재진입 구간에 들어온 단기 후보입니다.",
+            risks=("단기 변동성",),
+            fundamentals=Fundamentals(28.0, 18.0, 16.0, 40.0, 26.0, 20.0, 2_000_000_000),
+        )
+        done = StockProfile(
+            ticker="DONE",
+            name="Profit Done",
+            industry=industry.name,
+            role="adjacent",
+            thesis="이미 2차 목표에 도달한 종목입니다.",
+            risks=("익절 후 추격매수 위험",),
+            fundamentals=Fundamentals(45.0, 24.0, 20.0, 30.0, 30.0, 22.0, 5_000_000_000),
+        )
+
+        report = build_report(
+            macro_context=DEFAULT_MACRO_CONTEXT,
+            industries=(industry,),
+            stocks=(done, entry),
+            news_items=(),
+            momentums={
+                "ENTRY": _trade_signal_momentum(
+                    latest=960,
+                    ma200=900,
+                    volume_zone_lower=990,
+                    volume_zone_upper=1120,
+                    latest_high=965,
+                    latest_low=955,
+                    structure_zone_lower=990,
+                    structure_zone_upper=1120,
+                    support_retest_lower=950,
+                    support_retest_upper=970,
+                    nearest_resistance=990,
+                    major_resistance=1089,
+                ),
+                "DONE": _trade_signal_momentum(
+                    latest=1090,
+                    ma200=900,
+                    volume_zone_lower=990,
+                    volume_zone_upper=1120,
+                    latest_high=1095,
+                    latest_low=1080,
+                    structure_zone_lower=990,
+                    structure_zone_upper=1120,
+                    support_retest_lower=950,
+                    support_retest_upper=970,
+                    nearest_resistance=990,
+                    major_resistance=1089,
+                    support_retest_active=False,
+                    one_month=24,
+                    volume_ratio=2.2,
+                ),
+            },
+        )
+
+        by_ticker = {item.stock_score.stock.ticker: item for item in report.short_term_scores}
+        self.assertEqual(report.short_term_scores[0].stock_score.stock.ticker, "ENTRY")
+        self.assertEqual(by_ticker["ENTRY"].trade_signal.action, "buy")
+        self.assertEqual(by_ticker["DONE"].trade_signal.action, "take_profit_full")
+        self.assertLessEqual(by_ticker["DONE"].score, 28)
+
+        payload = report_to_dict(report)
+        self.assertEqual([item["ticker"] for item in payload["shortTermCandidates"]], ["ENTRY"])
+        done_detail = next(item for item in payload["stocks"] if item["ticker"] == "DONE")
+        self.assertEqual(done_detail["shortTerm"]["tradeSignal"]["action"], "take_profit_full")
 
     def test_trade_signal_reduces_or_sells_on_support_and_ma200_breaks(self):
         zone_signal = _single_short_trade_signal(
@@ -1370,12 +1442,36 @@ class ScoringTests(unittest.TestCase):
         self.assertTrue(any("R&D/매출" in reason for reason in by_ticker["RDLEAD"].reasons))
 
     def test_report_api_serializes_legend_strategy_fields(self):
+        industry = INDUSTRIES[0]
+        api_buy = StockProfile(
+            ticker="APIBUY",
+            name="API Buy",
+            industry=industry.name,
+            role="adjacent",
+            thesis="API 직렬화용 매수 구간 후보입니다.",
+            risks=("단기 변동성",),
+            fundamentals=Fundamentals(
+                revenue_growth_pct=35.0,
+                operating_margin_pct=24.0,
+                roe_pct=20.0,
+                debt_to_equity_pct=30.0,
+                pe=30.0,
+                forward_pe=22.0,
+                market_cap=20_000_000_000,
+                free_cash_flow=1_000_000_000,
+                revenue=10_000_000_000,
+                rd_to_revenue_pct=9.0,
+                roic_pct=18.0,
+                ev_to_ebit=24.0,
+                earnings_yield_pct=4.2,
+            ),
+        )
         report = build_report(
             macro_context=DEFAULT_MACRO_CONTEXT,
-            industries=INDUSTRIES[:1],
-            stocks=STOCKS[:2],
+            industries=(industry,),
+            stocks=(api_buy,),
             news_items=(),
-            momentums={STOCKS[0].ticker.upper(): _strong_swing_momentum()},
+            momentums={api_buy.ticker.upper(): _strong_swing_momentum()},
             beneficiary_industries=BENEFICIARY_INDUSTRIES[:1],
         )
 
@@ -2413,11 +2509,35 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn("longTermCandidates", rows[0]["payload"])
 
     def test_snapshot_payload_uses_current_timezone_and_audit_fields(self):
-        ticker = STOCKS[0].ticker.upper()
+        industry = INDUSTRIES[0]
+        stock = StockProfile(
+            ticker="SNAPBUY",
+            name="Snapshot Buy",
+            industry=industry.name,
+            role="adjacent",
+            thesis="스냅샷 직렬화용 매수 구간 후보입니다.",
+            risks=("단기 변동성",),
+            fundamentals=Fundamentals(
+                revenue_growth_pct=32.0,
+                operating_margin_pct=22.0,
+                roe_pct=19.0,
+                debt_to_equity_pct=30.0,
+                pe=28.0,
+                forward_pe=21.0,
+                market_cap=15_000_000_000,
+                free_cash_flow=900_000_000,
+                revenue=8_000_000_000,
+                roic_pct=17.0,
+                ev_to_ebit=22.0,
+                earnings_yield_pct=4.5,
+                rd_to_revenue_pct=8.0,
+            ),
+        )
+        ticker = stock.ticker.upper()
         report = build_report(
             macro_context=DEFAULT_MACRO_CONTEXT,
-            industries=INDUSTRIES,
-            stocks=STOCKS[:1],
+            industries=(industry,),
+            stocks=(stock,),
             news_items=(),
             momentums={
                 ticker: Momentum(

@@ -488,6 +488,18 @@ def score_short_term_candidates(
         total = chart * 0.45 + volume * 0.20 + market * 0.20 + news * 0.10 + company * 0.05
         total -= short_term_penalty(stock, momentum, news_tuple, market, chart, volume, company)
         score = _apply_short_term_caps(_clamp(total, 0, 100), momentum)
+        trade_signal = trade_timing_signal_for_stock(
+            item,
+            momentum,
+            horizon="short",
+            score=score,
+            confidence=confidence,
+            chart=chart,
+            market=market,
+            volume=volume,
+        )
+        score = _apply_short_term_trade_signal_caps(score, trade_signal)
+        score = _apply_short_term_caps(score, momentum)
         results.append(
             ShortTermScore(
                 stock_score=item,
@@ -499,21 +511,12 @@ def score_short_term_candidates(
                 company_score=round(company, 1),
                 confidence_score=round(confidence, 1),
                 confidence_label=confidence_label(confidence),
-                signal_label=short_term_signal_label(score, market, chart, volume, news, confidence),
-                setup_label=short_term_setup_label(momentum, chart, volume),
+                signal_label=short_term_signal_label(score, market, chart, volume, news, confidence, trade_signal),
+                setup_label=short_term_setup_label(momentum, chart, volume, trade_signal),
                 time_horizon="당일~2주",
                 reasons=short_term_reasons(stock, momentum, news, market, chart, volume, company),
                 cautions=short_term_cautions(stock, momentum, news_tuple, market, chart, volume, company),
-                trade_signal=trade_timing_signal_for_stock(
-                    item,
-                    momentum,
-                    horizon="short",
-                    score=score,
-                    confidence=confidence,
-                    chart=chart,
-                    market=market,
-                    volume=volume,
-                ),
+                trade_signal=trade_signal,
             )
         )
     return tuple(sorted(results, key=lambda item: item.score, reverse=True))
@@ -1114,7 +1117,26 @@ def short_term_penalty(
     return penalty
 
 
-def short_term_signal_label(score: float, market: float, chart: float, volume: float, news: float, confidence: float) -> str:
+def short_term_signal_label(
+    score: float,
+    market: float,
+    chart: float,
+    volume: float,
+    news: float,
+    confidence: float,
+    trade_signal: TradeTimingSignal | None = None,
+) -> str:
+    action = trade_signal.action if trade_signal else ""
+    if action == "buy":
+        return "단기 매수 구간"
+    if action == "scale_buy":
+        return "분할매수 구간"
+    if action == "take_profit_half":
+        return "1차 익절 구간"
+    if action == "take_profit_full":
+        return "익절 완료"
+    if action in {"reduce", "sell"}:
+        return "후보 제외"
     if confidence < 50 and score >= 58:
         return "데이터 확인"
     if score >= 78 and chart >= 66 and volume >= 62 and market >= 58:
@@ -1126,7 +1148,23 @@ def short_term_signal_label(score: float, market: float, chart: float, volume: f
     return "후순위"
 
 
-def short_term_setup_label(momentum: Momentum, chart: float, volume: float) -> str:
+def short_term_setup_label(
+    momentum: Momentum,
+    chart: float,
+    volume: float,
+    trade_signal: TradeTimingSignal | None = None,
+) -> str:
+    action = trade_signal.action if trade_signal else ""
+    if action == "buy":
+        return "지지 재진입"
+    if action == "scale_buy":
+        return "분할 진입"
+    if action == "take_profit_half":
+        return "1차 익절"
+    if action == "take_profit_full":
+        return "완전 익절"
+    if action in {"reduce", "sell"}:
+        return "방어 신호"
     if not _has_momentum_data(momentum):
         return "차트 데이터 부족"
     if (
@@ -1187,6 +1225,25 @@ def _apply_short_term_caps(score: float, momentum: Momentum) -> float:
         return min(score, 55)
     if not _has_volume_data(momentum):
         return min(score, 72)
+    return score
+
+
+def _apply_short_term_trade_signal_caps(score: float, trade_signal: TradeTimingSignal | None) -> float:
+    action = trade_signal.action if trade_signal else ""
+    if action == "buy":
+        return min(max(score, 78), 100)
+    if action == "scale_buy":
+        return min(max(score, 68), 88)
+    if action == "hold":
+        return min(score, 57)
+    if action == "take_profit_half":
+        return min(score, 42)
+    if action == "take_profit_full":
+        return min(score, 28)
+    if action == "reduce":
+        return min(score, 24)
+    if action == "sell":
+        return min(score, 18)
     return score
 
 
