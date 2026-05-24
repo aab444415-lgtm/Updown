@@ -1293,7 +1293,15 @@ class UniverseLoaderTests(unittest.TestCase):
             }
 
             with (
-                patch.object(universe_loader.SecEdgarClient, "fetch_ticker_map", return_value={"AAA": "1", "BBB": "2", "MISS": "3"}),
+                patch.object(
+                    universe_loader.SecEdgarClient,
+                    "fetch_ticker_records",
+                    return_value=(
+                        {"ticker": "AAA", "cik": "1", "title": "AAA Semiconductor"},
+                        {"ticker": "BBB", "cik": "2", "title": "BBB Health"},
+                        {"ticker": "MISS", "cik": "3", "title": "No Quote"},
+                    ),
+                ),
                 patch.object(universe_loader.OpenDartClient, "fetch_corp_code_map") as dart_map,
                 patch.object(universe_loader, "fetch_yahoo_quotes", side_effect=lambda tickers, **kwargs: {
                     ticker: quotes[ticker]
@@ -1310,6 +1318,34 @@ class UniverseLoaderTests(unittest.TestCase):
         self.assertEqual(result.stocks[0].industry, "AI 반도체 및 데이터센터")
         self.assertEqual(result.stocks[0].fundamentals.sources["marketCap"]["source"], "Yahoo Finance")
         self.assertTrue(any("OpenDART API 키" in warning for warning in result.warnings))
+
+    def test_official_candidates_fill_when_yahoo_quotes_unavailable(self):
+        with TemporaryDirectory() as tmpdir:
+            config = _test_app_config(tmpdir, universe_limit=2, us_universe_limit=2, kr_universe_limit=0)
+            cache = CacheStore(config.cache_db_path)
+
+            with (
+                patch.object(
+                    universe_loader.SecEdgarClient,
+                    "fetch_ticker_records",
+                    return_value=(
+                        {"ticker": "AAA", "cik": "1", "title": "AAA Semiconductor"},
+                        {"ticker": "BBB", "cik": "2", "title": "BBB Health"},
+                        {"ticker": "CCC", "cik": "3", "title": "CCC Energy"},
+                    ),
+                ),
+                patch.object(universe_loader.OpenDartClient, "fetch_corp_code_map") as dart_map,
+                patch.object(universe_loader, "fetch_yahoo_quotes", return_value={}),
+            ):
+                result = universe_loader.load_stock_universe(config, cache)
+
+        dart_map.assert_not_called()
+        self.assertEqual(result.candidate_count, 3)
+        self.assertEqual(result.quote_ready_count, 0)
+        self.assertEqual([stock.ticker for stock in result.stocks], ["AAA", "BBB"])
+        self.assertTrue(all(stock.fundamentals.market_cap is None for stock in result.stocks))
+        self.assertTrue(all(not stock.fundamentals.sources for stock in result.stocks))
+        self.assertTrue(any("SEC EDGAR 확인 후보 2개" in warning for warning in result.warnings))
 
     def test_opendart_candidates_confirm_ks_or_kq_quote(self):
         with TemporaryDirectory() as tmpdir:
@@ -1332,7 +1368,7 @@ class UniverseLoaderTests(unittest.TestCase):
                 return payload
 
             with (
-                patch.object(universe_loader.SecEdgarClient, "fetch_ticker_map", return_value={}),
+                patch.object(universe_loader.SecEdgarClient, "fetch_ticker_records", return_value=()),
                 patch.object(
                     universe_loader.OpenDartClient,
                     "fetch_corp_code_map",
@@ -1730,6 +1766,29 @@ class OpenDartTests(unittest.TestCase):
         self.assertAlmostEqual(fundamentals.latest_quarter_operating_income_yoy_pct, ((50_000 / 22_000) - 1) * 100)
         self.assertEqual(fundamentals.quarterly_revenue_yoy_streak, 2)
         self.assertEqual(fundamentals.quarterly_financials[0]["fiscalPeriod"], "Q2")
+        self.assertEqual(fundamentals.sources["revenueGrowth"]["source"], "OpenDART")
+
+    def test_opendart_growth_from_annual_series_keeps_source(self):
+        annual_payloads = (
+            _dart_payload(2024, "11011", 120_000, 18_000),
+            _dart_payload(2023, "11011", 100_000, 15_000),
+        )
+        payload_without_current_revenue_row = {
+            "status": "000",
+            "bsns_year": "2024",
+            "reprt_code": "11011",
+            "list": [],
+        }
+
+        fundamentals = extract_opendart_fundamentals(
+            payload_without_current_revenue_row,
+            fallback=Fundamentals(market_cap_currency="KRW"),
+            annual_payloads=annual_payloads,
+        )
+
+        self.assertAlmostEqual(fundamentals.revenue_growth_pct, 20.0)
+        self.assertEqual(fundamentals.sources["revenueGrowth"]["source"], "OpenDART")
+        self.assertEqual(fundamentals.sources["revenueGrowth"]["derivedFrom"], ["revenue"])
 
 
 class MarketDataSourceTests(unittest.TestCase):

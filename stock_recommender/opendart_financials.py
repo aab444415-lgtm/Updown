@@ -355,6 +355,7 @@ def extract_opendart_fundamentals(
         annual_financials=annual_financials,
         quarterly_financials=quarterly_financials,
         fields=(
+            ("revenueGrowth", revenue_growth_pct, ("revenue",)),
             ("revenueCagr3y", revenue_cagr_3y_pct, ("annualFinancials",)),
             ("revenueCagr5y", revenue_cagr_5y_pct, ("annualFinancials",)),
             ("operatingIncomeGrowth", operating_income_growth_pct, ("operatingIncome",)),

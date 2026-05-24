@@ -140,10 +140,29 @@ class SecEdgarClient:
         return SecFundamentalResult(tuple(enriched), updated_count, tuple(warnings))
 
     def fetch_ticker_map(self) -> dict[str, str]:
+        payload = self._fetch_ticker_payload()
+        return {str(item["ticker"]).upper(): str(item["cik_str"]).zfill(10) for item in payload.values()}
+
+    def fetch_ticker_records(self) -> tuple[dict, ...]:
+        payload = self._fetch_ticker_payload()
+        records: list[dict] = []
+        for item in payload.values():
+            if not isinstance(item, dict) or not item.get("ticker") or not item.get("cik_str"):
+                continue
+            records.append(
+                {
+                    "ticker": str(item["ticker"]).upper(),
+                    "cik": str(item["cik_str"]).zfill(10),
+                    "title": str(item.get("title") or item["ticker"]),
+                }
+            )
+        return tuple(records)
+
+    def _fetch_ticker_payload(self) -> dict:
         cache_key = "sec:ticker-map"
         cached = self.cache.get_json(cache_key)
         if isinstance(cached, dict):
-            return {str(item["ticker"]).upper(): str(item["cik_str"]).zfill(10) for item in cached.values()}
+            return cached
 
         try:
             payload = self._fetch_json(TICKER_MAP_URL)
@@ -151,12 +170,12 @@ class SecEdgarClient:
             stale = self.cache.get_json(cache_key, allow_expired=True)
             if isinstance(stale, dict):
                 self._record_event("stale", "SEC 티커 목록 호출 실패로 만료 캐시를 사용했습니다.")
-                return {str(item["ticker"]).upper(): str(item["cik_str"]).zfill(10) for item in stale.values()}
+                return stale
             raise
         if not isinstance(payload, dict):
             raise DataSourceError("티커 목록 응답 형식이 올바르지 않습니다.")
         self.cache.set_json(cache_key, "SEC EDGAR", TICKER_MAP_URL, payload, ttl_seconds=60 * 60 * 24)
-        return {str(item["ticker"]).upper(): str(item["cik_str"]).zfill(10) for item in payload.values()}
+        return payload
 
     def fetch_company_facts(self, cik: str) -> CompanyFactsResult:
         normalized_cik = cik.zfill(10)

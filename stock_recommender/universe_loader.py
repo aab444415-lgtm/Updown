@@ -15,6 +15,8 @@ from .universe import INDUSTRIES, STOCKS
 
 
 QUOTE_BATCH_SIZE = 80
+US_QUOTE_PROBE_MULTIPLIER = 2
+KR_QUOTE_PROBE_MULTIPLIER = 4
 BROAD_MARKET_INDUSTRY = IndustryProfile(
     name="광범위 시장 후보",
     description="특정 테마 키워드에 바로 묶이지 않는 실제 상장 후보군입니다.",
@@ -59,12 +61,34 @@ def load_stock_universe(config: AppConfig, cache: CacheStore) -> UniverseLoadRes
     kr_candidates = _kr_candidates(config, cache, warnings)
     candidate_count = len(us_candidates) + len(kr_candidates)
 
-    us_stocks, us_quote_ready = _quote_ready_us_stocks(us_candidates, cache)
-    kr_stocks, kr_quote_ready = _quote_ready_kr_stocks(kr_candidates, cache)
+    us_probe = us_candidates[: _quote_probe_limit(config.us_universe_limit, US_QUOTE_PROBE_MULTIPLIER)]
+    kr_probe = kr_candidates[: _quote_probe_limit(config.kr_universe_limit, KR_QUOTE_PROBE_MULTIPLIER)]
+    us_stocks, us_quote_ready = _quote_ready_us_stocks(us_probe, cache)
+    kr_stocks, kr_quote_ready = _quote_ready_kr_stocks(kr_probe, cache)
     if us_candidates and not us_quote_ready:
         warnings.append("미국 상장 후보의 Yahoo 가격/시총 확인에 실패했습니다.")
     if kr_candidates and not kr_quote_ready:
         warnings.append("한국 상장 후보의 Yahoo 가격/시총 확인에 실패했습니다.")
+    if len(us_probe) < len(us_candidates):
+        warnings.append(f"미국 후보 {len(us_candidates)}개 중 SEC 우선순위 상위 {len(us_probe)}개만 가격 확인했습니다.")
+    if len(kr_probe) < len(kr_candidates):
+        warnings.append(f"한국 후보 {len(kr_candidates)}개 중 stock_code 순서 상위 {len(kr_probe)}개만 가격 확인했습니다.")
+    if us_candidates and not us_quote_ready:
+        us_stocks = _fill_with_official_only_profiles(
+            us_stocks,
+            us_probe,
+            target_limit=config.us_universe_limit,
+            source_name="SEC EDGAR",
+            warnings=warnings,
+        )
+    if kr_candidates and not kr_quote_ready:
+        kr_stocks = _fill_with_official_only_profiles(
+            kr_stocks,
+            kr_probe,
+            target_limit=config.kr_universe_limit,
+            source_name="OpenDART",
+            warnings=warnings,
+        )
 
     selected = (
         *_limit_by_market_cap(us_stocks, config.us_universe_limit),
@@ -100,14 +124,19 @@ def select_financial_targets(
 
 def _us_candidates(config: AppConfig, cache: CacheStore, warnings: list[str]) -> tuple[_RawCandidate, ...]:
     try:
-        ticker_map = SecEdgarClient(config, cache).fetch_ticker_map()
+        records = SecEdgarClient(config, cache).fetch_ticker_records()
     except Exception as exc:
         warnings.append(f"SEC EDGAR 상장 후보 목록 수집 실패: {exc}")
         return ()
     return tuple(
-        _RawCandidate(ticker=ticker, name=ticker, country="US", currency="USD")
-        for ticker in sorted(ticker_map)
-        if _valid_us_symbol(ticker)
+        _RawCandidate(
+            ticker=str(record["ticker"]).upper(),
+            name=str(record.get("title") or record["ticker"]),
+            country="US",
+            currency="USD",
+        )
+        for record in records
+        if _valid_us_symbol(str(record.get("ticker", "")).upper())
     )
 
 
@@ -224,6 +253,25 @@ def _profile_from_quote(
     )
 
 
+def _profile_from_official_candidate(candidate: _RawCandidate, source_name: str) -> StockProfile:
+    industry = _classify_industry(f"{candidate.ticker} {candidate.name}")
+    return StockProfile(
+        ticker=candidate.ticker,
+        name=candidate.name,
+        industry=industry,
+        role="adjacent",
+        thesis=f"{source_name}에서 상장 여부가 확인된 동적 스크리너 후보입니다.",
+        risks=(
+            "Yahoo 가격/시총 확인 실패로 가격·규모 지표 없이 점수화됩니다.",
+            "공식 재무 데이터가 부족하면 점수 상한이 적용됩니다.",
+        ),
+        fundamentals=Fundamentals(market_cap_currency=candidate.currency),
+        country=candidate.country,
+        currency=candidate.currency,
+        dart_stock_code=candidate.dart_stock_code,
+    )
+
+
 def _fundamentals_from_quote(
     quote: dict,
     market_cap: float | None,
@@ -281,6 +329,53 @@ def _limit_by_market_cap(stocks: tuple[StockProfile, ...], limit: int) -> tuple[
         reverse=True,
     )
     return tuple(ranked[: max(0, limit)])
+
+
+def _quote_probe_limit(target_limit: int, multiplier: int) -> int:
+    return max(target_limit, target_limit * multiplier)
+
+
+def _fill_with_official_only_profiles(
+    stocks: tuple[StockProfile, ...],
+    candidates: tuple[_RawCandidate, ...],
+    target_limit: int,
+    source_name: str,
+    warnings: list[str],
+) -> tuple[StockProfile, ...]:
+    missing_count = max(0, target_limit - len(stocks))
+    if missing_count == 0:
+        return stocks
+    existing: set[str] = set()
+    for stock in stocks:
+        existing.update(_stock_identity_keys(stock))
+    fallback_profiles: list[StockProfile] = []
+    for candidate in candidates:
+        if existing.intersection(_candidate_identity_keys(candidate)):
+            continue
+        fallback_profiles.append(_profile_from_official_candidate(candidate, source_name))
+        if len(fallback_profiles) >= missing_count:
+            break
+    if fallback_profiles:
+        warnings.append(
+            f"{source_name} 확인 후보 {len(fallback_profiles)}개를 Yahoo 가격/시총 없이 보조 후보로 사용합니다."
+        )
+    return tuple((*stocks, *fallback_profiles))
+
+
+def _stock_identity_keys(stock: StockProfile) -> set[str]:
+    keys = {stock.ticker.upper()}
+    if "." in stock.ticker:
+        keys.add(stock.ticker.split(".", 1)[0].upper())
+    if stock.dart_stock_code:
+        keys.add(stock.dart_stock_code.upper())
+    return keys
+
+
+def _candidate_identity_keys(candidate: _RawCandidate) -> set[str]:
+    keys = {candidate.ticker.upper()}
+    if candidate.dart_stock_code:
+        keys.add(candidate.dart_stock_code.upper())
+    return keys
 
 
 def _field_source() -> dict:
