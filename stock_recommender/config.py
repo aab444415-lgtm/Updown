@@ -34,6 +34,7 @@ class AppConfig:
     kr_universe_limit: int = 200
     us_fundamental_limit: int = 250
     kr_fundamental_limit: int = 40
+    polygon_fresh_limit: int = 4
 
 
 def load_config(env_path: Path | None = None) -> AppConfig:
@@ -66,6 +67,10 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         kr_fundamental_limit=_positive_int(
             _clean(merged.get("STOCK_RECOMMENDER_KR_FUNDAMENTAL_LIMIT")),
             40,
+        ),
+        polygon_fresh_limit=_positive_int(
+            _clean(merged.get("STOCK_RECOMMENDER_POLYGON_FRESH_LIMIT")),
+            4,
         ),
     )
 

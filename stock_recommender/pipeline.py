@@ -88,7 +88,7 @@ def create_recommendation_report(
     if not news_items:
         warnings.append("뉴스 RSS 수집에 실패해 산업 테마 키워드만 사용했습니다.")
 
-    stocks = enrich_with_live_market_data(stocks, cache=cache)
+    stocks = enrich_with_live_market_data(stocks, cache=cache, config=config)
 
     financial_targets = select_financial_targets(stocks, config)
     if use_sec_fundamentals:

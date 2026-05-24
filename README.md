@@ -113,12 +113,15 @@ STOCK_RECOMMENDER_PERSIST_REPO_LEDGER=""
 OPENDART_API_KEY=""
 FRED_API_KEY=""
 ECOS_API_KEY=""
+POLYGON_API_KEY=""
+STOCK_RECOMMENDER_POLYGON_FRESH_LIMIT="4"
 ```
 
 - SEC EDGAR: 미국 재무제표용입니다. API 키는 필요 없지만, `SEC_USER_AGENT`에 연락 가능한 이메일을 넣는 것이 좋습니다.
 - OpenDART: 한국 재무제표/공시용입니다. 인증키가 필요합니다.
 - FRED: 미국 거시경제 지표용입니다. 무료 계정/API 키가 필요합니다.
 - ECOS: 한국은행 거시경제 지표용입니다. 인증키가 필요합니다.
+- Polygon: 미국 가격/시총 확인용입니다. Yahoo보다 먼저 사용하며, 무료 플랜은 호출 제한 때문에 `STOCK_RECOMMENDER_POLYGON_FRESH_LIMIT` 기본값을 4로 둡니다.
 
 현재 구현된 것:
 
@@ -128,6 +131,7 @@ ECOS_API_KEY=""
 - SQLite 캐시 저장소 `data/cache.sqlite`
 - OpenDART/FRED/ECOS 클라이언트 기본 구조
 - OpenDART/FRED/ECOS 키 응답 상태 진단
+- Polygon 기반 미국 가격/시총 확인과 Yahoo 보조 fallback
 - FRED 금리/물가/고용/달러 지표와 ECOS 원달러 환율을 산업 점수에 반영
 - 웹/리포트의 데이터 품질 표시
 - GitHub Actions가 갱신하는 compact repo 기반 스냅샷 ledger
@@ -138,6 +142,7 @@ ECOS_API_KEY=""
 - OpenDART: 원칙적으로 무료
 - FRED: 무료 API 키
 - ECOS: 일반적으로 무료 인증키
+- Polygon: Basic 무료 플랜으로 시작할 수 있습니다. 무료 플랜은 캐시가 쌓이기 전까지 한 번에 확인되는 미국 후보 수가 제한됩니다.
 - 안정적인 가격 데이터/뉴스 API: 무료 플랜으로 시작 가능하지만 운영용은 유료 가능
 
 ## 2단계 점수화/투자 판단 모델

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from .config import AppConfig
-from .data_sources import SOURCE_YAHOO, fetch_yahoo_quotes
+from .data_sources import SOURCE_POLYGON, SOURCE_YAHOO, fetch_polygon_us_quotes, fetch_yahoo_quotes
 from .models import Fundamentals, IndustryProfile, StockProfile
 from .official_sources import OpenDartClient
 from .sec_edgar import SecEdgarClient
@@ -63,10 +63,13 @@ def load_stock_universe(config: AppConfig, cache: CacheStore) -> UniverseLoadRes
 
     us_probe = us_candidates[: _quote_probe_limit(config.us_universe_limit, US_QUOTE_PROBE_MULTIPLIER)]
     kr_probe = kr_candidates[: _quote_probe_limit(config.kr_universe_limit, KR_QUOTE_PROBE_MULTIPLIER)]
-    us_stocks, us_quote_ready = _quote_ready_us_stocks(us_probe, cache)
+    us_stocks, us_quote_ready = _quote_ready_us_stocks(us_probe, config, cache, warnings)
     kr_stocks, kr_quote_ready = _quote_ready_kr_stocks(kr_probe, cache)
     if us_candidates and not us_quote_ready:
-        warnings.append("미국 상장 후보의 Yahoo 가격/시총 확인에 실패했습니다.")
+        if config.polygon_api_key:
+            warnings.append("미국 상장 후보의 Polygon/Yahoo 가격/시총 확인에 실패했습니다.")
+        else:
+            warnings.append("미국 상장 후보의 Yahoo 가격/시총 확인에 실패했습니다.")
     if kr_candidates and not kr_quote_ready:
         warnings.append("한국 상장 후보의 Yahoo 가격/시총 확인에 실패했습니다.")
     if len(us_probe) < len(us_candidates):
@@ -167,9 +170,25 @@ def _kr_candidates(config: AppConfig, cache: CacheStore, warnings: list[str]) ->
 
 def _quote_ready_us_stocks(
     candidates: tuple[_RawCandidate, ...],
+    config: AppConfig,
     cache: CacheStore,
+    warnings: list[str],
 ) -> tuple[tuple[StockProfile, ...], int]:
-    quote_by_ticker = _quotes_for_symbols((item.ticker for item in candidates), cache)
+    quote_by_ticker: dict[str, dict] = {}
+    if config.polygon_api_key:
+        polygon_quotes = fetch_polygon_us_quotes(
+            (item.ticker for item in candidates),
+            api_key=config.polygon_api_key,
+            fresh_limit=config.polygon_fresh_limit,
+            cache=cache,
+        )
+        quote_by_ticker.update(polygon_quotes)
+        if polygon_quotes:
+            warnings.append(f"Polygon 가격/시총으로 미국 후보 {len(polygon_quotes)}개를 확인했습니다.")
+        else:
+            warnings.append("Polygon 가격/시총 확인 결과가 없어 Yahoo 확인으로 보완합니다.")
+    missing_symbols = tuple(item.ticker for item in candidates if item.ticker.upper() not in quote_by_ticker)
+    quote_by_ticker.update(_quotes_for_symbols(missing_symbols, cache))
     stocks = tuple(
         profile
         for item in candidates
@@ -232,10 +251,11 @@ def _profile_from_quote(
         if value
     )
     industry = _classify_industry(text)
-    fundamentals = _fundamentals_from_quote(quote, market_cap, currency)
+    quote_source = str(quote.get("_source") or SOURCE_YAHOO)
+    fundamentals = _fundamentals_from_quote(quote, market_cap, currency, quote_source)
     market_cap_for_role = fundamentals.market_cap or 0
     role = _role_for_dynamic_stock(industry, market_cap_for_role, currency)
-    source_name = "OpenDART+Yahoo" if candidate.country == "KR" else "SEC EDGAR+Yahoo"
+    source_name = f"OpenDART+{quote_source}" if candidate.country == "KR" else f"SEC EDGAR+{quote_source}"
     return StockProfile(
         ticker=symbol,
         name=name,
@@ -262,7 +282,7 @@ def _profile_from_official_candidate(candidate: _RawCandidate, source_name: str)
         role="adjacent",
         thesis=f"{source_name}에서 상장 여부가 확인된 동적 스크리너 후보입니다.",
         risks=(
-            "Yahoo 가격/시총 확인 실패로 가격·규모 지표 없이 점수화됩니다.",
+            "가격/시총 확인 실패로 가격·규모 지표 없이 점수화됩니다.",
             "공식 재무 데이터가 부족하면 점수 상한이 적용됩니다.",
         ),
         fundamentals=Fundamentals(market_cap_currency=candidate.currency),
@@ -276,16 +296,17 @@ def _fundamentals_from_quote(
     quote: dict,
     market_cap: float | None,
     currency: str,
+    source: str = SOURCE_YAHOO,
 ) -> Fundamentals:
     sources: dict[str, dict] = {}
     pe = _number(quote.get("trailingPE"))
     forward_pe = _number(quote.get("forwardPE"))
     if pe is not None:
-        sources["pe"] = _field_source()
+        sources["pe"] = _field_source(source, quote.get("_sourceUrl"))
     if forward_pe is not None:
-        sources["forwardPe"] = _field_source()
+        sources["forwardPe"] = _field_source(source, quote.get("_sourceUrl"))
     if market_cap is not None:
-        sources["marketCap"] = _field_source()
+        sources["marketCap"] = _field_source(source, quote.get("_sourceUrl"))
     return Fundamentals(
         pe=pe,
         forward_pe=forward_pe,
@@ -357,7 +378,7 @@ def _fill_with_official_only_profiles(
             break
     if fallback_profiles:
         warnings.append(
-            f"{source_name} 확인 후보 {len(fallback_profiles)}개를 Yahoo 가격/시총 없이 보조 후보로 사용합니다."
+            f"{source_name} 확인 후보 {len(fallback_profiles)}개를 가격/시총 없이 보조 후보로 사용합니다."
         )
     return tuple((*stocks, *fallback_profiles))
 
@@ -378,7 +399,11 @@ def _candidate_identity_keys(candidate: _RawCandidate) -> set[str]:
     return keys
 
 
-def _field_source() -> dict:
+def _field_source(source: str = SOURCE_YAHOO, url: object = None) -> dict:
+    if isinstance(url, str) and url:
+        return {"source": source, "url": url}
+    if source == SOURCE_POLYGON:
+        return {"source": source, "url": "https://polygon.io/docs/rest/stocks/tickers/ticker-overview"}
     return {"source": SOURCE_YAHOO, "url": "https://finance.yahoo.com/quote/"}
 
 

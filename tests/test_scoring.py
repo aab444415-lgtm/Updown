@@ -1244,6 +1244,7 @@ class ConfigTests(unittest.TestCase):
                         "STOCK_RECOMMENDER_KR_UNIVERSE_LIMIT=12",
                         "STOCK_RECOMMENDER_US_FUNDAMENTAL_LIMIT=9",
                         "STOCK_RECOMMENDER_KR_FUNDAMENTAL_LIMIT=3",
+                        "STOCK_RECOMMENDER_POLYGON_FRESH_LIMIT=7",
                     ]
                 ),
                 encoding="utf-8",
@@ -1262,6 +1263,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.kr_universe_limit, 12)
         self.assertEqual(config.us_fundamental_limit, 9)
         self.assertEqual(config.kr_fundamental_limit, 3)
+        self.assertEqual(config.polygon_fresh_limit, 7)
 
     def test_load_config_defaults_to_korea_timezone(self):
         with TemporaryDirectory() as tmpdir:
@@ -1279,6 +1281,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.kr_universe_limit, 200)
         self.assertEqual(config.us_fundamental_limit, 250)
         self.assertEqual(config.kr_fundamental_limit, 40)
+        self.assertEqual(config.polygon_fresh_limit, 4)
 
 
 class UniverseLoaderTests(unittest.TestCase):
@@ -1318,6 +1321,44 @@ class UniverseLoaderTests(unittest.TestCase):
         self.assertEqual(result.stocks[0].industry, "AI 반도체 및 데이터센터")
         self.assertEqual(result.stocks[0].fundamentals.sources["marketCap"]["source"], "Yahoo Finance")
         self.assertTrue(any("OpenDART API 키" in warning for warning in result.warnings))
+
+    def test_polygon_quotes_are_used_before_yahoo_for_us_screening(self):
+        with TemporaryDirectory() as tmpdir:
+            config = _test_app_config(
+                tmpdir,
+                universe_limit=2,
+                us_universe_limit=2,
+                kr_universe_limit=0,
+                polygon_api_key="polygon-key",
+                polygon_fresh_limit=1,
+            )
+            cache = CacheStore(config.cache_db_path)
+            polygon_quote = _quote("AAA", "AAA Semiconductor", 30_000_000_000)
+            polygon_quote["_source"] = "Polygon"
+            polygon_quote["_sourceUrl"] = "https://api.polygon.io/v3/reference/tickers/AAA"
+
+            with (
+                patch.object(
+                    universe_loader.SecEdgarClient,
+                    "fetch_ticker_records",
+                    return_value=(
+                        {"ticker": "AAA", "cik": "1", "title": "AAA Semiconductor"},
+                        {"ticker": "BBB", "cik": "2", "title": "BBB Health"},
+                    ),
+                ),
+                patch.object(universe_loader.OpenDartClient, "fetch_corp_code_map") as dart_map,
+                patch.object(universe_loader, "fetch_polygon_us_quotes", return_value={"AAA": polygon_quote}) as polygon,
+                patch.object(universe_loader, "fetch_yahoo_quotes", return_value={}) as yahoo,
+            ):
+                result = universe_loader.load_stock_universe(config, cache)
+
+        dart_map.assert_not_called()
+        polygon.assert_called_once()
+        yahoo.assert_called()
+        self.assertEqual(result.quote_ready_count, 1)
+        self.assertEqual(result.stocks[0].ticker, "AAA")
+        self.assertEqual(result.stocks[0].fundamentals.sources["marketCap"]["source"], "Polygon")
+        self.assertTrue(any("Polygon 가격/시총으로 미국 후보 1개" in warning for warning in result.warnings))
 
     def test_official_candidates_fill_when_yahoo_quotes_unavailable(self):
         with TemporaryDirectory() as tmpdir:
@@ -1816,6 +1857,44 @@ class MarketDataSourceTests(unittest.TestCase):
         self.assertEqual(fundamentals.market_cap, 2_000_000)
         self.assertEqual(fundamentals.sources["marketCap"]["source"], "Yahoo Finance")
         self.assertEqual(fundamentals.sources["pe"]["source"], "Yahoo Finance")
+
+    def test_polygon_quote_updates_us_market_cap_before_yahoo(self):
+        stock = StockProfile(
+            ticker="TEST",
+            name="Test Co",
+            industry=INDUSTRIES[0].name,
+            role="adjacent",
+            thesis="test",
+            risks=(),
+            country="US",
+            fundamentals=Fundamentals(market_cap=1_000_000),
+        )
+        config = _test_app_config("/tmp", polygon_api_key="polygon-key")
+        original_polygon = data_sources.fetch_polygon_us_quotes
+        original_yahoo = data_sources.fetch_yahoo_quotes
+
+        try:
+            data_sources.fetch_polygon_us_quotes = lambda tickers, **kwargs: {
+                "TEST": {
+                    "symbol": "TEST",
+                    "regularMarketPrice": 10,
+                    "marketCap": 3_000_000,
+                    "currency": "USD",
+                    "_source": "Polygon",
+                    "_sourceUrl": "https://api.polygon.io/v3/reference/tickers/TEST",
+                }
+            }
+            data_sources.fetch_yahoo_quotes = lambda tickers, timeout=8.0, cache=None: {
+                "TEST": {"marketCap": 2_000_000, "currency": "USD"}
+            }
+            enriched = data_sources.enrich_with_live_market_data((stock,), config=config)
+        finally:
+            data_sources.fetch_polygon_us_quotes = original_polygon
+            data_sources.fetch_yahoo_quotes = original_yahoo
+
+        fundamentals = enriched[0].fundamentals
+        self.assertEqual(fundamentals.market_cap, 3_000_000)
+        self.assertEqual(fundamentals.sources["marketCap"]["source"], "Polygon")
 
 
 class DecisionGradeTests(unittest.TestCase):
@@ -2925,12 +3004,14 @@ def _test_app_config(
     root: str,
     *,
     opendart_api_key: str | None = None,
+    polygon_api_key: str | None = None,
     universe_mode: str = "screened",
     universe_limit: int = 800,
     us_universe_limit: int = 600,
     kr_universe_limit: int = 200,
     us_fundamental_limit: int = 250,
     kr_fundamental_limit: int = 40,
+    polygon_fresh_limit: int = 4,
 ) -> AppConfig:
     project_root = Path(root)
     data_dir = project_root / "data"
@@ -2943,6 +3024,7 @@ def _test_app_config(
         persist_repo_ledger=False,
         sec_user_agent="stock-recommender-test test@example.com",
         opendart_api_key=opendart_api_key,
+        polygon_api_key=polygon_api_key,
         timezone_name="Asia/Seoul",
         universe_mode=universe_mode,
         universe_limit=universe_limit,
@@ -2950,6 +3032,7 @@ def _test_app_config(
         kr_universe_limit=kr_universe_limit,
         us_fundamental_limit=us_fundamental_limit,
         kr_fundamental_limit=kr_fundamental_limit,
+        polygon_fresh_limit=polygon_fresh_limit,
     )
 
 

@@ -4,6 +4,7 @@ import argparse
 import sys
 
 from .config import load_config
+from .data_sources import fetch_polygon_us_quotes
 from .official_sources import EcosClient, FredClient, OpenDartClient, SourceResponse
 from .storage import CacheStore
 
@@ -20,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
         ("OpenDART", config.opendart_api_key, lambda: OpenDartClient(config, cache, args.timeout).fetch_recent_filings()),
         ("FRED", config.fred_api_key, lambda: FredClient(config, cache, args.timeout).fetch_series_observations("FEDFUNDS", "2025-01-01")),
         ("ECOS", config.ecos_api_key, lambda: EcosClient(config, cache, args.timeout).fetch_statistic_table_list()),
-        ("Polygon", config.polygon_api_key, None),
+        ("Polygon", config.polygon_api_key, lambda: _check_polygon(config.polygon_api_key, cache, args.timeout)),
         ("NewsAPI", config.news_api_key, None),
     ]
 
@@ -52,6 +53,13 @@ def _response_ok(response: SourceResponse) -> bool:
     if response.source == "ECOS" and isinstance(response.payload, dict):
         return "StatisticTableList" in response.payload
     return True
+
+
+def _check_polygon(api_key: str | None, cache: CacheStore, timeout: float) -> SourceResponse:
+    quotes = fetch_polygon_us_quotes(("AAPL",), api_key=api_key, fresh_limit=1, timeout=timeout, cache=cache)
+    if quotes:
+        return SourceResponse(True, "Polygon", payload=quotes)
+    return SourceResponse(False, "Polygon", warning="AAPL 가격/시총 확인에 실패했습니다.")
 
 
 def _extract_api_message(response: SourceResponse) -> str:
