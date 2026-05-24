@@ -132,7 +132,7 @@ class SecEdgarClient:
             enriched.append(replace(stock, fundamentals=fundamentals))
 
         if updated_count == 0:
-            warnings.append("SEC EDGAR에서 갱신 가능한 재무지표를 찾지 못해 내장 지표를 유지했습니다.")
+            warnings.append("SEC EDGAR에서 갱신 가능한 공식 재무지표를 찾지 못했습니다.")
         else:
             warnings.append(f"SEC EDGAR 재무지표로 {updated_count}개 종목을 갱신했습니다.")
         if stale_count:
@@ -140,10 +140,29 @@ class SecEdgarClient:
         return SecFundamentalResult(tuple(enriched), updated_count, tuple(warnings))
 
     def fetch_ticker_map(self) -> dict[str, str]:
+        payload = self._fetch_ticker_payload()
+        return {str(item["ticker"]).upper(): str(item["cik_str"]).zfill(10) for item in payload.values()}
+
+    def fetch_ticker_records(self) -> tuple[dict, ...]:
+        payload = self._fetch_ticker_payload()
+        records: list[dict] = []
+        for item in payload.values():
+            if not isinstance(item, dict) or not item.get("ticker") or not item.get("cik_str"):
+                continue
+            records.append(
+                {
+                    "ticker": str(item["ticker"]).upper(),
+                    "cik": str(item["cik_str"]).zfill(10),
+                    "title": str(item.get("title") or item["ticker"]),
+                }
+            )
+        return tuple(records)
+
+    def _fetch_ticker_payload(self) -> dict:
         cache_key = "sec:ticker-map"
         cached = self.cache.get_json(cache_key)
         if isinstance(cached, dict):
-            return {str(item["ticker"]).upper(): str(item["cik_str"]).zfill(10) for item in cached.values()}
+            return cached
 
         try:
             payload = self._fetch_json(TICKER_MAP_URL)
@@ -151,12 +170,12 @@ class SecEdgarClient:
             stale = self.cache.get_json(cache_key, allow_expired=True)
             if isinstance(stale, dict):
                 self._record_event("stale", "SEC 티커 목록 호출 실패로 만료 캐시를 사용했습니다.")
-                return {str(item["ticker"]).upper(): str(item["cik_str"]).zfill(10) for item in stale.values()}
+                return stale
             raise
         if not isinstance(payload, dict):
             raise DataSourceError("티커 목록 응답 형식이 올바르지 않습니다.")
         self.cache.set_json(cache_key, "SEC EDGAR", TICKER_MAP_URL, payload, ttl_seconds=60 * 60 * 24)
-        return {str(item["ticker"]).upper(): str(item["cik_str"]).zfill(10) for item in payload.values()}
+        return payload
 
     def fetch_company_facts(self, cik: str) -> CompanyFactsResult:
         normalized_cik = cik.zfill(10)
@@ -318,6 +337,33 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
     _set_source(sources, "pretaxIncome", pretax_income[0])
     _set_source(sources, "incomeTaxExpense", income_tax_expense[0])
     _set_source(sources, "researchAndDevelopment", research_and_development[0])
+    if revenue_growth_pct is not None:
+        _set_source(sources, "revenueGrowth", revenue[0], derived_from=("revenue",))
+    if operating_margin_pct is not None:
+        _set_source(sources, "operatingMargin", operating_income[0] or revenue[0], derived_from=("operatingIncome", "revenue"))
+    if roe_pct is not None:
+        _set_source(sources, "roe", net_income[0] or equity[0], derived_from=("netIncome", "equity"))
+    if debt_to_equity_pct is not None:
+        _set_source(
+            sources,
+            "debtToEquity",
+            direct_debt[0] or debt_components[0] or liabilities[0] or equity[0],
+            derived_from=("totalDebt", "liabilities", "equity"),
+        )
+    if current_ratio_pct is not None:
+        _set_source(
+            sources,
+            "currentRatio",
+            current_assets[0] or current_liabilities[0],
+            derived_from=("currentAssets", "currentLiabilities"),
+        )
+    if interest_coverage is not None:
+        _set_source(
+            sources,
+            "interestCoverage",
+            operating_income[0] or interest_expense[0],
+            derived_from=("operatingIncome", "interestExpense"),
+        )
     if ebitda is not None:
         _set_source(sources, "ebitda", operating_income[0] or depreciation_amortization[0])
     if free_cash_flow is not None:
@@ -455,11 +501,6 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
         quarterly_financials=quarterly_financials or fallback.quarterly_financials,
         sources=sources,
     )
-
-
-def _latest_and_previous(us_gaap: dict, tags: tuple[str, ...]) -> tuple[float | None, float | None]:
-    latest, previous = _latest_and_previous_facts(us_gaap, tags)
-    return _fact_value(latest), _fact_value(previous)
 
 
 def _latest_and_previous_facts(

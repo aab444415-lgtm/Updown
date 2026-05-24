@@ -14,6 +14,7 @@ from .models import (
     BeneficiaryIndustryProfile,
     BeneficiaryIndustryScore,
     DataQuality,
+    FUNDAMENTAL_SOURCE_BY_ATTR,
     EarlyGrowthScore,
     Fundamentals,
     IndustryProfile,
@@ -40,6 +41,19 @@ LEGEND_DEFAULT_WEIGHTS = {
     "greenblatt": 0.25,
     "fisher": 0.15,
 }
+OFFICIAL_FUNDAMENTAL_SOURCES = {"SEC EDGAR", "OpenDART"}
+OFFICIAL_COVERAGE_FIELDS = (
+    "revenue_growth_pct",
+    "operating_margin_pct",
+    "roe_pct",
+    "debt_to_equity_pct",
+    "revenue",
+    "operating_income",
+    "net_income",
+    "operating_cash_flow",
+    "free_cash_flow",
+    "current_ratio_pct",
+)
 STYLE_WEIGHT_PROFILES = {
     "고성장주": {
         "growth_quality": 0.30,
@@ -329,6 +343,8 @@ def score_stocks(
             weight_profile=weight_profile,
         )
         total = risk_adjusted_stock_score(total, risk_gate, risk_gate_reasons)
+        data_cap, data_cautions = data_coverage_gate_for_stock(stock.fundamentals)
+        total = min(total, data_cap)
         reasons = _stock_reasons(
             stock,
             quality,
@@ -347,6 +363,7 @@ def score_stocks(
                     *stock.risks,
                     *industry_score.industry.risks[:1],
                     *(() if risk_gate == "Pass" else risk_gate_reasons),
+                    *data_cautions,
                     *risk_cautions_for_stock(stock, analysis_style),
                 )
             )
@@ -620,7 +637,7 @@ def score_legend_strategy_candidates(
 def lynch_strategy_score(item: StockScore) -> float:
     fundamentals = item.stock.fundamentals
     growth = _scale(fundamentals.revenue_growth_pct, low=0, high=35)
-    peg = _peg_proxy(fundamentals)
+    peg = 50
     leverage = _inverse_scale(fundamentals.debt_to_equity_pct, low=40, high=200)
     size = company_size_score(fundamentals.market_cap, fundamentals.market_cap_currency)
     understandable = 68 if item.stock.thesis else 50
@@ -704,7 +721,7 @@ def legend_strategy_reasons(
     greenblatt_basis = _greenblatt_basis_text(fundamentals)
     fisher_basis = _fisher_basis_text(fundamentals)
     return (
-        f"린치 {lynch:.1f}/100: PEG 프록시 {_peg_proxy_text(fundamentals)}, {_growth_check(fundamentals)}",
+        f"린치 {lynch:.1f}/100: EPS 성장률 미연결로 PEG는 제외, {_growth_check(fundamentals)}",
         f"오닐 {oneil:.1f}/100: 상대강도 {(_momentum_label(momentum))}, 최근 이슈 {'있음' if item.stock.recent_issues else '미확인'}",
         f"그린블라트 {greenblatt:.1f}/100: {greenblatt_basis}",
         f"피셔 {fisher:.1f}/100: {fisher_basis}",
@@ -714,20 +731,20 @@ def legend_strategy_reasons(
 def legend_strategy_warnings(item: StockScore, momentum: Momentum) -> tuple[str, ...]:
     fundamentals = item.stock.fundamentals
     warnings: list[str] = []
-    if _peg_proxy_value(fundamentals) is None:
-        warnings.append("EPS 성장률 데이터가 없어 매출 성장률 기반 PEG 프록시를 제한적으로 사용")
-    else:
-        warnings.append("EPS 성장률이 없어 매출 성장률을 PEG 계산의 성장률 대체값으로 사용")
+    official_coverage = official_fundamental_coverage_pct(fundamentals)
+    if official_coverage < 30:
+        warnings.append(f"공식 재무 데이터 커버리지 {official_coverage:.0f}%로 정량 판단 신뢰도 제한")
+    warnings.append("EPS 성장률 데이터가 없어 PEG 항목은 점수에 포함하지 않음")
     if not _has_momentum_data(momentum):
         warnings.append("가격 상대강도 데이터가 부족해 오닐 모멘텀 항목은 중립 처리")
-    warnings.append("기관 신규 매수와 거래량 급증 데이터는 아직 연결되지 않아 정량 프록시로 대체")
+    warnings.append("기관 신규 매수 데이터는 아직 연결되지 않아 점수에 포함하지 않음")
     if fundamentals.rd_to_revenue_pct is None:
         warnings.append("R&D 투자 데이터가 없어 피셔 연구개발 항목은 중립 처리")
-    warnings.append("경영진 정성 평가는 아직 없어 ROE/부채비율 기반 자본효율 프록시로 대체")
+    warnings.append("경영진 정성 평가는 아직 연결되지 않아 점수에 포함하지 않음")
     if fundamentals.roic_pct is None:
-        warnings.append("ROIC 원천 데이터가 부족해 ROE/마진 프록시로 그린블라트 자본수익률을 대체")
+        warnings.append("ROIC 원천 데이터가 부족해 실제 ROE/마진 지표만 반영")
     if fundamentals.earnings_yield_pct is None or fundamentals.ev_to_ebit is None:
-        warnings.append("EV/EBIT 원천 데이터가 부족해 PER 또는 시가총액 기반 이익수익률 프록시로 대체")
+        warnings.append("EV/EBIT 원천 데이터가 부족해 실제 이익/시가총액 지표만 반영")
     roic_source = fundamentals.sources.get("roic") if isinstance(fundamentals.sources, dict) else None
     if isinstance(roic_source, dict) and roic_source.get("taxRateDefault"):
         default_rate = roic_source.get("defaultTaxRate")
@@ -741,7 +758,7 @@ def _greenblatt_basis_text(fundamentals: Fundamentals) -> str:
     if _finite(fundamentals.roic_pct):
         parts.append(f"실제 ROIC {fundamentals.roic_pct:.1f}%")
     else:
-        parts.append("ROE/마진 프록시")
+        parts.append("ROIC 미연결, 실제 ROE/마진")
     if _finite(fundamentals.earnings_yield_pct):
         if _finite(fundamentals.ev_to_ebit):
             parts.append(
@@ -751,7 +768,7 @@ def _greenblatt_basis_text(fundamentals: Fundamentals) -> str:
         else:
             parts.append(f"이익수익률 {fundamentals.earnings_yield_pct:.1f}%")
     else:
-        parts.append("이익수익률 프록시")
+        parts.append("EV/EBIT 미연결, 실제 이익/시가총액")
     return "와 ".join(parts) + "를 결합"
 
 
@@ -760,7 +777,7 @@ def _fisher_basis_text(fundamentals: Fundamentals) -> str:
         rd_text = f"R&D/매출 {fundamentals.rd_to_revenue_pct:.1f}%"
     else:
         rd_text = "R&D 중립값"
-    return f"장기 성장성, 영업이익률, {rd_text}, ROE 기반 자본배분 프록시를 반영"
+    return f"장기 성장성, 영업이익률, {rd_text}, ROE/부채비율 기반 재무 건전성을 반영"
 
 
 def early_revenue_growth_score(growth_pct: float | None) -> float:
@@ -1179,6 +1196,30 @@ def _fundamental_coverage_score(fundamentals: Fundamentals) -> float:
     )
     covered = sum(1 for value in fields if _finite(value))
     return covered / len(fields) * 100
+
+
+def official_fundamental_coverage_pct(fundamentals: Fundamentals) -> float:
+    covered = 0
+    for attr in OFFICIAL_COVERAGE_FIELDS:
+        value = getattr(fundamentals, attr)
+        source_key = FUNDAMENTAL_SOURCE_BY_ATTR.get(attr)
+        source = fundamentals.sources.get(source_key) if source_key else None
+        if _finite(value) and _official_source(source):
+            covered += 1
+    return covered / len(OFFICIAL_COVERAGE_FIELDS) * 100
+
+
+def data_coverage_gate_for_stock(fundamentals: Fundamentals) -> tuple[float, tuple[str, ...]]:
+    coverage = official_fundamental_coverage_pct(fundamentals)
+    if coverage == 0:
+        return 58.0, ("공식 재무 데이터가 없어 가격/시총 중심 후보로만 봐야 합니다.",)
+    if coverage < 30:
+        return 68.0, (f"공식 재무 데이터 커버리지 {coverage:.0f}%로 점수 상한을 적용했습니다.",)
+    return 100.0, ()
+
+
+def _official_source(source: object) -> bool:
+    return isinstance(source, dict) and source.get("source") in OFFICIAL_FUNDAMENTAL_SOURCES
 
 
 def short_term_reasons(
@@ -2495,6 +2536,7 @@ def _stock_reasons(
         stock.thesis,
         f"분석 스타일: {analysis_style}",
         f"기본적 분석 점수 {quality:.1f}/100, 성장 품질 {growth_quality:.1f}/100, 밸류에이션 점수 {valuation:.1f}/100",
+        f"공식 재무 데이터 커버리지 {official_fundamental_coverage_pct(stock.fundamentals):.0f}%",
         _growth_quality_reason(stock.fundamentals),
         valuation_note,
         f"가격 모멘텀 점수 {momentum:.1f}/100",
@@ -2842,44 +2884,6 @@ def _valuation_range_check(valuation_range: ValuationRange) -> str:
         f"{valuation_range.profit_metric} x {valuation_range.multiple_low:.1f}~{valuation_range.multiple_high:.1f}배, "
         f"현재 시총 대비 여력 {upside}"
     )
-
-
-def _peg_proxy(fundamentals: Fundamentals) -> float:
-    value = _peg_proxy_value(fundamentals)
-    if value is None:
-        return 45
-    if value <= 0.5:
-        return 100
-    if value <= 1.0:
-        return _clamp(100 - (value - 0.5) * 30, 0, 100)
-    if value <= 1.5:
-        return _clamp(85 - (value - 1.0) * 45, 0, 100)
-    if value <= 2.5:
-        return _clamp(62 - (value - 1.5) * 28, 0, 100)
-    return _clamp(34 - (value - 2.5) * 12, 0, 100)
-
-
-def _peg_proxy_value(fundamentals: Fundamentals) -> float | None:
-    pe = fundamentals.forward_pe if fundamentals.forward_pe is not None else fundamentals.pe
-    growth = fundamentals.revenue_growth_pct
-    if pe is None or growth is None or not math.isfinite(pe) or not math.isfinite(growth):
-        return None
-    if pe <= 0 or growth <= 0:
-        return None
-    return pe / growth
-
-
-def _peg_proxy_text(fundamentals: Fundamentals) -> str:
-    value = _peg_proxy_value(fundamentals)
-    if value is None:
-        return "계산 불가"
-    if value <= 1:
-        label = "린치식 저평가 성장 조건"
-    elif value <= 1.5:
-        label = "허용 가능한 성장 대비 가격"
-    else:
-        label = "성장 대비 가격 부담"
-    return f"{value:.2f} ({label})"
 
 
 def _earnings_yield_proxy_score(fundamentals: Fundamentals) -> float:

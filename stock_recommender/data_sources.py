@@ -7,11 +7,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from hashlib import sha1
+from typing import TYPE_CHECKING
 
 from .models import Fundamentals, Momentum, NewsItem, StockProfile
 from .storage import CacheStore
@@ -26,13 +27,20 @@ from .technical import (
     volume_ratio,
 )
 
+if TYPE_CHECKING:
+    from .config import AppConfig
+
 
 USER_AGENT = "stock-recommender-mvp/0.1"
 NEWS_TTL_SECONDS = 60 * 30
 QUOTE_TTL_SECONDS = 60 * 15
 MOMENTUM_TTL_SECONDS = 60 * 60 * 6
+POLYGON_REFERENCE_TTL_SECONDS = 60 * 60 * 12
+POLYGON_GROUPED_TTL_SECONDS = 60 * 60 * 6
 SOURCE_YAHOO = "Yahoo Finance"
+SOURCE_POLYGON = "Polygon"
 SOURCE_GOOGLE_NEWS = "Google News"
+POLYGON_API_BASE_URL = "https://api.polygon.io"
 
 
 def fetch_news(
@@ -98,22 +106,39 @@ def fetch_news(
 
 
 def enrich_with_live_market_data(
-    stocks: Iterable[StockProfile], timeout: float = 8.0, cache: CacheStore | None = None
+    stocks: Iterable[StockProfile],
+    timeout: float = 8.0,
+    cache: CacheStore | None = None,
+    config: "AppConfig | None" = None,
 ) -> tuple[StockProfile, ...]:
     profiles = list(stocks)
-    quotes = fetch_yahoo_quotes([stock.ticker for stock in profiles], timeout=timeout, cache=cache)
+    polygon_quotes: dict[str, dict] = {}
+    if config is not None and config.polygon_api_key:
+        polygon_quotes = fetch_polygon_us_quotes(
+            (stock.ticker for stock in profiles if stock.country != "KR"),
+            api_key=config.polygon_api_key,
+            fresh_limit=config.polygon_fresh_limit,
+            timeout=timeout,
+            cache=cache,
+        )
+    yahoo_tickers = [stock.ticker for stock in profiles if stock.ticker.upper() not in polygon_quotes]
+    quotes = {
+        **fetch_yahoo_quotes(yahoo_tickers, timeout=timeout, cache=cache),
+        **polygon_quotes,
+    }
     enriched: list[StockProfile] = []
     for stock in profiles:
         quote = quotes.get(stock.ticker.upper(), {})
         fundamentals = stock.fundamentals
         if quote:
+            source_name = str(quote.get("_source") or SOURCE_YAHOO)
             sources = dict(fundamentals.sources)
             if _is_number(quote.get("trailingPE")):
-                sources["pe"] = _field_source(SOURCE_YAHOO)
+                sources["pe"] = _field_source(source_name, quote.get("_sourceUrl"))
             if _is_number(quote.get("forwardPE")):
-                sources["forwardPe"] = _field_source(SOURCE_YAHOO)
+                sources["forwardPe"] = _field_source(source_name, quote.get("_sourceUrl"))
             if _is_number(quote.get("marketCap")):
-                sources["marketCap"] = _field_source(SOURCE_YAHOO)
+                sources["marketCap"] = _field_source(source_name, quote.get("_sourceUrl"))
             fundamentals = replace(
                 fundamentals,
                 pe=_number_or_existing(quote.get("trailingPE"), fundamentals.pe),
@@ -127,6 +152,180 @@ def enrich_with_live_market_data(
             )
         enriched.append(replace(stock, fundamentals=fundamentals))
     return tuple(enriched)
+
+
+def fetch_polygon_us_quotes(
+    tickers: Iterable[str],
+    api_key: str | None,
+    fresh_limit: int = 4,
+    timeout: float = 8.0,
+    cache: CacheStore | None = None,
+) -> dict[str, dict]:
+    symbols = tuple(dict.fromkeys(ticker.upper() for ticker in tickers if ticker))
+    if not symbols or not api_key:
+        return {}
+
+    closes = _fetch_polygon_grouped_closes(api_key, timeout=timeout, cache=cache)
+    details_by_symbol = _fetch_polygon_ticker_details(
+        symbols,
+        api_key=api_key,
+        fresh_limit=fresh_limit,
+        timeout=timeout,
+        cache=cache,
+    )
+    quotes: dict[str, dict] = {}
+    for symbol in symbols:
+        polygon_symbol = _polygon_symbol(symbol)
+        details = details_by_symbol.get(symbol)
+        close_payload = closes.get(polygon_symbol) or closes.get(symbol)
+        quote = _polygon_quote_from_payload(symbol, details, close_payload)
+        if quote is not None:
+            quotes[symbol] = quote
+    if cache is not None:
+        _record_event(cache, SOURCE_POLYGON, "success", f"Polygon quote {len(quotes)}건을 준비했습니다.")
+    return quotes
+
+
+def _fetch_polygon_ticker_details(
+    symbols: tuple[str, ...],
+    api_key: str,
+    fresh_limit: int,
+    timeout: float,
+    cache: CacheStore | None,
+) -> dict[str, dict]:
+    details_by_symbol: dict[str, dict] = {}
+    fresh_remaining = max(0, fresh_limit)
+    skipped = 0
+    for symbol in symbols:
+        polygon_symbol = _polygon_symbol(symbol)
+        cache_key = f"polygon:ticker-details:{polygon_symbol}"
+        cached = cache.get_json(cache_key) if cache is not None else None
+        if isinstance(cached, dict):
+            details_by_symbol[symbol] = cached
+            continue
+        if fresh_remaining <= 0:
+            skipped += 1
+            continue
+        fresh_remaining -= 1
+        url, public_url = _polygon_url(f"/v3/reference/tickers/{urllib.parse.quote(polygon_symbol, safe='')}", api_key)
+        try:
+            with _open_url(url, timeout=timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            result = payload.get("results") if isinstance(payload, dict) else None
+            if isinstance(result, dict):
+                if cache is not None:
+                    cache.set_json(
+                        cache_key,
+                        SOURCE_POLYGON,
+                        public_url,
+                        result,
+                        POLYGON_REFERENCE_TTL_SECONDS,
+                    )
+                    _record_event(cache, SOURCE_POLYGON, "success", f"{polygon_symbol} ticker overview를 수집했습니다.")
+                details_by_symbol[symbol] = result
+        except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            stale = cache.get_json(cache_key, allow_expired=True) if cache is not None else None
+            if isinstance(stale, dict):
+                details_by_symbol[symbol] = stale
+                if cache is not None:
+                    _record_event(cache, SOURCE_POLYGON, "stale", f"{polygon_symbol} ticker overview 호출 실패로 만료 캐시를 사용했습니다.")
+            elif cache is not None:
+                _record_event(cache, SOURCE_POLYGON, "error", f"{polygon_symbol} ticker overview 호출 또는 파싱에 실패했습니다.")
+    if skipped and cache is not None:
+        _record_event(
+            cache,
+            SOURCE_POLYGON,
+            "warning",
+            f"Polygon fresh limit 때문에 ticker overview {skipped}건은 이번 실행에서 새로 호출하지 않았습니다.",
+            metadata={"freshLimit": max(0, fresh_limit), "skipped": skipped},
+        )
+    return details_by_symbol
+
+
+def _fetch_polygon_grouped_closes(
+    api_key: str,
+    timeout: float,
+    cache: CacheStore | None,
+) -> dict[str, dict]:
+    for target_date in _recent_weekdays(date.today(), lookback_days=10):
+        cache_key = f"polygon:grouped-daily:{target_date.isoformat()}"
+        cached = cache.get_json(cache_key) if cache is not None else None
+        if isinstance(cached, dict):
+            return _polygon_grouped_close_map(cached, target_date)
+        url, public_url = _polygon_url(
+            f"/v2/aggs/grouped/locale/us/market/stocks/{target_date.isoformat()}",
+            api_key,
+            params={"adjusted": "true"},
+        )
+        try:
+            with _open_url(url, timeout=timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            if isinstance(payload, dict) and isinstance(payload.get("results"), list) and payload["results"]:
+                if cache is not None:
+                    cache.set_json(
+                        cache_key,
+                        SOURCE_POLYGON,
+                        public_url,
+                        payload,
+                        POLYGON_GROUPED_TTL_SECONDS,
+                    )
+                    _record_event(cache, SOURCE_POLYGON, "success", f"{target_date.isoformat()} grouped daily close를 수집했습니다.")
+                return _polygon_grouped_close_map(payload, target_date)
+        except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            stale = cache.get_json(cache_key, allow_expired=True) if cache is not None else None
+            if isinstance(stale, dict):
+                if cache is not None:
+                    _record_event(cache, SOURCE_POLYGON, "stale", f"{target_date.isoformat()} grouped close 호출 실패로 만료 캐시를 사용했습니다.")
+                return _polygon_grouped_close_map(stale, target_date)
+            if cache is not None:
+                _record_event(cache, SOURCE_POLYGON, "error", f"{target_date.isoformat()} grouped close 호출 또는 파싱에 실패했습니다.")
+    return {}
+
+
+def _polygon_grouped_close_map(payload: dict, target_date: date) -> dict[str, dict]:
+    results = payload.get("results")
+    if not isinstance(results, list):
+        return {}
+    close_by_symbol: dict[str, dict] = {}
+    for item in results:
+        if not isinstance(item, dict) or not isinstance(item.get("T"), str):
+            continue
+        close = _number(item.get("c"))
+        if close is None or close <= 0:
+            continue
+        close_by_symbol[item["T"].upper()] = {
+            "close": close,
+            "date": target_date.isoformat(),
+            "volume": _number(item.get("v")),
+        }
+    return close_by_symbol
+
+
+def _polygon_quote_from_payload(symbol: str, details: dict | None, close_payload: dict | None) -> dict | None:
+    if not isinstance(details, dict) or not isinstance(close_payload, dict):
+        return None
+    market_cap = _number(details.get("market_cap"))
+    close = _number(close_payload.get("close"))
+    if market_cap is None or market_cap <= 0 or close is None or close <= 0:
+        return None
+    name = details.get("name")
+    currency = str(details.get("currency_name") or "USD").upper()
+    return {
+        "symbol": symbol.upper(),
+        "shortName": name if isinstance(name, str) else symbol.upper(),
+        "longName": name if isinstance(name, str) else symbol.upper(),
+        "regularMarketPreviousClose": close,
+        "regularMarketPrice": close,
+        "marketCap": market_cap,
+        "currency": currency,
+        "financialCurrency": currency,
+        "quoteType": details.get("type"),
+        "market": details.get("market"),
+        "exchange": details.get("primary_exchange"),
+        "_source": SOURCE_POLYGON,
+        "_sourceUrl": f"{POLYGON_API_BASE_URL}/v3/reference/tickers/{urllib.parse.quote(_polygon_symbol(symbol), safe='')}",
+        "_priceDate": close_payload.get("date"),
+    }
 
 
 def fetch_yahoo_quotes(
@@ -346,6 +545,28 @@ def _range_position(latest: float, low: float, high: float) -> float | None:
     return _clamp((latest - low) / (high - low) * 100, 0, 100)
 
 
+def _polygon_symbol(symbol: str) -> str:
+    return symbol.upper().replace("-", ".")
+
+
+def _polygon_url(path: str, api_key: str, params: dict[str, str] | None = None) -> tuple[str, str]:
+    query = dict(params or {})
+    query["apiKey"] = api_key
+    public_query = dict(params or {})
+    url = f"{POLYGON_API_BASE_URL}{path}?{urllib.parse.urlencode(query)}"
+    public_url = f"{POLYGON_API_BASE_URL}{path}"
+    if public_query:
+        public_url = f"{public_url}?{urllib.parse.urlencode(public_query)}"
+    return url, public_url
+
+
+def _recent_weekdays(today: date, lookback_days: int) -> Iterable[date]:
+    for offset in range(0, lookback_days):
+        candidate = today - timedelta(days=offset)
+        if candidate.weekday() < 5:
+            yield candidate
+
+
 def _open_url(url: str, timeout: float):
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     return urllib.request.urlopen(request, timeout=timeout)
@@ -364,6 +585,13 @@ def _number_or_existing(value: object, existing: float | None) -> float | None:
     return existing
 
 
+def _number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
 def _is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and math.isfinite(value)
 
@@ -375,8 +603,8 @@ def _list_number(values: list, index: int) -> float | None:
     return float(value) if _is_number(value) else None
 
 
-def _field_source(source: str) -> dict:
-    return {
+def _field_source(source: str, url: object = None) -> dict:
+    payload = {
         "source": source,
         "periodEnd": None,
         "fiscalYear": None,
@@ -385,6 +613,9 @@ def _field_source(source: str) -> dict:
         "reportCode": None,
         "fallback": False,
     }
+    if isinstance(url, str) and url:
+        payload["url"] = url
+    return payload
 
 
 def _text_or_existing(value: object, existing: str) -> str:
@@ -431,8 +662,14 @@ def _digest(value: str) -> str:
     return sha1(value.encode("utf-8")).hexdigest()
 
 
-def _record_event(cache: CacheStore, source: str, event_type: str, message: str) -> None:
+def _record_event(
+    cache: CacheStore,
+    source: str,
+    event_type: str,
+    message: str,
+    metadata: dict | None = None,
+) -> None:
     try:
-        cache.record_source_event(source, event_type, message)
+        cache.record_source_event(source, event_type, message, metadata=metadata)
     except Exception:
         return

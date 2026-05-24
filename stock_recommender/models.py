@@ -154,6 +154,98 @@ class Fundamentals:
         return self.market_cap
 
 
+FUNDAMENTAL_SOURCE_BY_ATTR = {
+    "revenue_growth_pct": "revenueGrowth",
+    "operating_margin_pct": "operatingMargin",
+    "roe_pct": "roe",
+    "debt_to_equity_pct": "debtToEquity",
+    "pe": "pe",
+    "forward_pe": "forwardPe",
+    "market_cap": "marketCap",
+    "revenue": "revenue",
+    "operating_income": "operatingIncome",
+    "ebitda": "ebitda",
+    "net_income": "netIncome",
+    "operating_cash_flow": "operatingCashFlow",
+    "capital_expenditure": "capitalExpenditure",
+    "free_cash_flow": "freeCashFlow",
+    "current_assets": "currentAssets",
+    "current_liabilities": "currentLiabilities",
+    "current_ratio_pct": "currentRatio",
+    "interest_expense": "interestExpense",
+    "interest_coverage": "interestCoverage",
+    "cash_and_equivalents": "cashAndEquivalents",
+    "total_debt": "totalDebt",
+    "pretax_income": "pretaxIncome",
+    "income_tax_expense": "incomeTaxExpense",
+    "research_and_development": "researchAndDevelopment",
+    "enterprise_value": "enterpriseValue",
+    "roic_pct": "roic",
+    "ev_to_ebit": "evToEbit",
+    "earnings_yield_pct": "earningsYield",
+    "rd_to_revenue_pct": "rdToRevenue",
+    "revenue_cagr_3y_pct": "revenueCagr3y",
+    "revenue_cagr_5y_pct": "revenueCagr5y",
+    "operating_income_growth_pct": "operatingIncomeGrowth",
+    "operating_income_cagr_3y_pct": "operatingIncomeCagr3y",
+    "operating_leverage_spread_pct": "operatingLeverageSpread",
+    "latest_quarter_revenue_yoy_pct": "latestQuarterRevenueYoy",
+    "latest_quarter_operating_income_yoy_pct": "latestQuarterOperatingIncomeYoy",
+}
+
+
+def fundamentals_with_real_sources_only(fundamentals: Fundamentals) -> Fundamentals:
+    values = {
+        attr: getattr(fundamentals, attr)
+        if _has_real_source(fundamentals.sources.get(source_key))
+        else None
+        for attr, source_key in FUNDAMENTAL_SOURCE_BY_ATTR.items()
+    }
+    quarterly_financials = _real_financial_records(fundamentals.quarterly_financials)
+    values["quarterly_revenue_yoy_streak"] = (
+        fundamentals.quarterly_revenue_yoy_streak if quarterly_financials else None
+    )
+    values["quarterly_operating_leverage_streak"] = (
+        fundamentals.quarterly_operating_leverage_streak if quarterly_financials else None
+    )
+    return Fundamentals(
+        **values,
+        market_cap_currency=fundamentals.market_cap_currency,
+        annual_financials=_real_financial_records(fundamentals.annual_financials),
+        quarterly_financials=quarterly_financials,
+        sources={
+            key: dict(value)
+            for key, value in fundamentals.sources.items()
+            if _has_real_source(value)
+        },
+    )
+
+
+def real_fundamental_value_count(fundamentals: Fundamentals) -> int:
+    return sum(
+        1
+        for attr in FUNDAMENTAL_SOURCE_BY_ATTR
+        if getattr(fundamentals, attr) is not None
+        and _has_real_source(fundamentals.sources.get(FUNDAMENTAL_SOURCE_BY_ATTR[attr]))
+    )
+
+
+def _real_financial_records(records: tuple[dict, ...]) -> tuple[dict, ...]:
+    return tuple(record for record in records if _real_record_source(record))
+
+
+def _real_record_source(record: dict) -> bool:
+    source = record.get("source")
+    return isinstance(source, str) and source and source != "universeFallback"
+
+
+def _has_real_source(source: object) -> bool:
+    if not isinstance(source, dict):
+        return False
+    name = source.get("source")
+    return isinstance(name, str) and bool(name) and name != "universeFallback" and not source.get("fallback")
+
+
 @dataclass(frozen=True)
 class Momentum:
     one_month_pct: float | None = None
@@ -267,6 +359,14 @@ class DataQuality:
     live_fundamentals: bool = False
     live_macro: bool = False
     live_korea_fundamentals: bool = False
+    universe_mode: str = "screened"
+    universe_candidate_count: int = 0
+    universe_quote_ready_count: int = 0
+    universe_financial_target_count: int = 0
+    universe_financial_ready_count: int = 0
+    universe_final_count: int = 0
+    universe_us_count: int = 0
+    universe_kr_count: int = 0
     configured_sources: tuple[str, ...] = ()
     missing_sources: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()

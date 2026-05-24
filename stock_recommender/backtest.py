@@ -423,14 +423,18 @@ def run_snapshot_backtest(
     unique_selected_tickers: set[str] = set()
     price_ready_tickers: set[str] = set()
     skipped_snapshot_warnings: set[str] = set()
+    eligibility_cache: dict[int, tuple[bool, str | None, bool]] = {}
+    anchor_closes_by_payload = {
+        id(snapshot.payload): _anchor_closes(snapshot.payload) for snapshot in snapshots
+    }
     for start_date, end_date in zip(period_dates, period_dates[1:]):
         snapshot = _latest_eligible_snapshot_on_or_before(
-            snapshots, start_date, warnings, skipped_snapshot_warnings
+            snapshots, start_date, warnings, skipped_snapshot_warnings, eligibility_cache
         )
         if snapshot is None:
             continue
         end_snapshot = _latest_eligible_snapshot_on_or_before(
-            snapshots, end_date, warnings, skipped_snapshot_warnings
+            snapshots, end_date, warnings, skipped_snapshot_warnings, eligibility_cache
         )
         periods_with_snapshot += 1
         selected = _snapshot_selected_stocks(snapshot.payload, top_n, horizon, method)
@@ -446,6 +450,12 @@ def run_snapshot_backtest(
         anchor_hits = 0
         anchor_possible = top_n + 1
         selected_weights: list[float] = []
+        start_anchor_closes = anchor_closes_by_payload.get(id(snapshot.payload), {})
+        end_anchor_closes = (
+            anchor_closes_by_payload.get(id(end_snapshot.payload), {})
+            if end_snapshot is not None
+            else {}
+        )
         for item in selected:
             ticker = str(item.get("ticker", "")).upper()
             name = str(item.get("name") or ticker)
@@ -453,7 +463,7 @@ def run_snapshot_backtest(
                 continue
             unique_selected_tickers.add(ticker)
             anchor_return = (
-                _anchor_return(snapshot.payload, end_snapshot.payload, ticker)
+                _anchor_return_from_closes(start_anchor_closes, end_anchor_closes, ticker)
                 if end_snapshot is not None
                 else None
             )
@@ -475,7 +485,7 @@ def run_snapshot_backtest(
             selected_weights.append(_snapshot_target_weight(item))
 
         benchmark_return = (
-            _anchor_return(snapshot.payload, end_snapshot.payload, benchmark_ticker)
+            _anchor_return_from_closes(start_anchor_closes, end_anchor_closes, benchmark_ticker)
             if end_snapshot is not None
             else None
         )
@@ -894,24 +904,23 @@ def _period_return(points: tuple[PricePoint, ...], start: date, end: date) -> fl
     return ((end_price / start_price) - 1) * 100
 
 
-def _anchor_return(start_payload: dict, end_payload: dict, ticker: str) -> float | None:
-    start_close = _anchor_close(start_payload, ticker)
-    end_close = _anchor_close(end_payload, ticker)
-    if start_close is None or end_close is None or start_close <= 0:
-        return None
-    return ((end_close / start_close) - 1) * 100
-
-
 def _latest_eligible_snapshot_on_or_before(
     snapshots: tuple[SnapshotRecord, ...],
     target: date,
     warnings: list[str],
     skipped_warnings: set[str],
+    eligibility_cache: dict[int, tuple[bool, str | None, bool]] | None = None,
 ) -> SnapshotRecord | None:
     for snapshot in reversed(snapshots):
         if snapshot.snapshot_date > target:
             continue
-        eligible, reason, fallback_allowed = _snapshot_backtest_eligibility(snapshot.payload)
+        cache_key = id(snapshot.payload)
+        if eligibility_cache is not None and cache_key in eligibility_cache:
+            eligible, reason, fallback_allowed = eligibility_cache[cache_key]
+        else:
+            eligible, reason, fallback_allowed = _snapshot_backtest_eligibility(snapshot.payload)
+            if eligibility_cache is not None:
+                eligibility_cache[cache_key] = (eligible, reason, fallback_allowed)
         if eligible:
             if fallback_allowed:
                 _append_once(
@@ -976,7 +985,7 @@ def _anchor_collection_coverage(collection: object) -> float:
     for item in collection:
         if not isinstance(item, dict):
             continue
-        if _anchor_close({"stocks": [item]}, str(item.get("ticker") or "")) is not None:
+        if _anchor_close_from_item(item) is not None:
             covered += 1
     return round(covered / len(collection) * 100, 1)
 
@@ -993,7 +1002,7 @@ def _benchmark_anchor_coverage(payload: dict) -> float:
     covered = 0
     for ticker in BENCHMARKS:
         item = by_ticker.get(ticker)
-        if item is not None and _anchor_close({"benchmarks": [item]}, ticker) is not None:
+        if item is not None and _anchor_close_from_item(item) is not None:
             covered += 1
     return round(covered / len(BENCHMARKS) * 100, 1)
 
@@ -1005,26 +1014,47 @@ def _append_once(warnings: list[str], seen: set[str], message: str) -> None:
     warnings.append(message)
 
 
-def _anchor_close(payload: dict, ticker: str) -> float | None:
-    normalized = ticker.upper()
+def _anchor_closes(payload: dict) -> dict[str, float]:
+    closes: dict[str, float] = {}
     for collection_name in ("stocks", "benchmarks", "priceAnchors"):
         collection = payload.get(collection_name)
         if not isinstance(collection, list):
             continue
         for item in collection:
-            if not isinstance(item, dict) or str(item.get("ticker") or "").upper() != normalized:
+            if not isinstance(item, dict):
                 continue
-            anchor = item.get("priceAnchor")
-            if isinstance(anchor, dict):
-                close = anchor.get("latestClose")
-                if isinstance(close, (int, float)) and math.isfinite(close) and close > 0:
-                    return float(close)
-            momentum = item.get("momentumRaw")
-            if isinstance(momentum, dict):
-                close = momentum.get("latestClose")
-                if isinstance(close, (int, float)) and math.isfinite(close) and close > 0:
-                    return float(close)
+            ticker = str(item.get("ticker") or "").upper()
+            if not ticker or ticker in closes:
+                continue
+            close = _anchor_close_from_item(item)
+            if close is not None:
+                closes[ticker] = close
+    return closes
+
+
+def _anchor_close_from_item(item: dict) -> float | None:
+    anchor = item.get("priceAnchor")
+    if isinstance(anchor, dict):
+        close = anchor.get("latestClose")
+        if isinstance(close, (int, float)) and math.isfinite(close) and close > 0:
+            return float(close)
+    momentum = item.get("momentumRaw")
+    if isinstance(momentum, dict):
+        close = momentum.get("latestClose")
+        if isinstance(close, (int, float)) and math.isfinite(close) and close > 0:
+            return float(close)
     return None
+
+
+def _anchor_return_from_closes(
+    start_closes: dict[str, float], end_closes: dict[str, float], ticker: str
+) -> float | None:
+    normalized = ticker.upper()
+    start_close = start_closes.get(normalized)
+    end_close = end_closes.get(normalized)
+    if start_close is None or end_close is None or start_close <= 0:
+        return None
+    return ((end_close / start_close) - 1) * 100
 
 
 def _pct_from_high(latest: float | None, high: float | None) -> float | None:
@@ -1298,17 +1328,6 @@ def _snapshot_collection_name(horizon: str) -> str:
         "medium": "mediumTermCandidates",
         "long": "longTermCandidates",
     }.get(horizon, "stocks")
-
-
-def _latest_snapshot_on_or_before(
-    snapshots: tuple[SnapshotRecord, ...], target: date
-) -> SnapshotRecord | None:
-    selected: SnapshotRecord | None = None
-    for snapshot in snapshots:
-        if snapshot.snapshot_date > target:
-            break
-        selected = snapshot
-    return selected
 
 
 def _record_event(cache: CacheStore, source: str, event_type: str, message: str) -> None:

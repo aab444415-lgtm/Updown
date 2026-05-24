@@ -28,12 +28,20 @@ npm run build
 
 Cloudflare Pages 자동 업데이트는 [docs/cloudflare-auto-update.md](docs/cloudflare-auto-update.md)를 참고하세요.
 
-기본 실행은 항상 Google News/Yahoo Finance 공개 데이터, SEC EDGAR, OpenDART, FRED, ECOS 갱신을 시도합니다. 외부 데이터가 일부 실패하면 기본 유니버스 지표와 중립 모멘텀을 보조값으로 사용하고 경고에 남깁니다.
+기본 실행은 SEC/OpenDART 상장 목록과 Yahoo Finance 가격/시총으로 동적 유니버스를 만든 뒤 Google News/Yahoo Finance 공개 데이터, SEC EDGAR, OpenDART, FRED, ECOS 갱신을 시도합니다. 재무 지표는 실제 출처가 확인된 값만 추천 계산과 화면에 사용하며, 내장 유니버스 숫자나 출처 없는 값은 제외하고 경고에 남깁니다.
+
+기본 동적 유니버스 한도는 전체 800개, 미국 600개, 한국 200개이며 공식 재무 수집 대상은 미국 250개, 한국 40개입니다.
 
 특정 산업 개수와 종목 개수를 조정하려면:
 
 ```bash
 python3 -m stock_recommender.cli --top-industries 5 --top-stocks 4
+```
+
+기존 31개 디버그 유니버스를 비교용으로 쓰려면:
+
+```bash
+python3 -m stock_recommender.cli --universe-mode curated
 ```
 
 리포트를 파일로 저장하려면:
@@ -105,12 +113,15 @@ STOCK_RECOMMENDER_PERSIST_REPO_LEDGER=""
 OPENDART_API_KEY=""
 FRED_API_KEY=""
 ECOS_API_KEY=""
+POLYGON_API_KEY=""
+STOCK_RECOMMENDER_POLYGON_FRESH_LIMIT="4"
 ```
 
 - SEC EDGAR: 미국 재무제표용입니다. API 키는 필요 없지만, `SEC_USER_AGENT`에 연락 가능한 이메일을 넣는 것이 좋습니다.
 - OpenDART: 한국 재무제표/공시용입니다. 인증키가 필요합니다.
 - FRED: 미국 거시경제 지표용입니다. 무료 계정/API 키가 필요합니다.
 - ECOS: 한국은행 거시경제 지표용입니다. 인증키가 필요합니다.
+- Polygon: 미국 가격/시총 확인용입니다. Yahoo보다 먼저 사용하며, 무료 플랜은 호출 제한 때문에 `STOCK_RECOMMENDER_POLYGON_FRESH_LIMIT` 기본값을 4로 둡니다.
 
 현재 구현된 것:
 
@@ -120,6 +131,7 @@ ECOS_API_KEY=""
 - SQLite 캐시 저장소 `data/cache.sqlite`
 - OpenDART/FRED/ECOS 클라이언트 기본 구조
 - OpenDART/FRED/ECOS 키 응답 상태 진단
+- Polygon 기반 미국 가격/시총 확인과 Yahoo 보조 fallback
 - FRED 금리/물가/고용/달러 지표와 ECOS 원달러 환율을 산업 점수에 반영
 - 웹/리포트의 데이터 품질 표시
 - GitHub Actions가 갱신하는 compact repo 기반 스냅샷 ledger
@@ -130,6 +142,7 @@ ECOS_API_KEY=""
 - OpenDART: 원칙적으로 무료
 - FRED: 무료 API 키
 - ECOS: 일반적으로 무료 인증키
+- Polygon: Basic 무료 플랜으로 시작할 수 있습니다. 무료 플랜은 캐시가 쌓이기 전까지 한 번에 확인되는 미국 후보 수가 제한됩니다.
 - 안정적인 가격 데이터/뉴스 API: 무료 플랜으로 시작 가능하지만 운영용은 유료 가능
 
 ## 2단계 점수화/투자 판단 모델
@@ -198,11 +211,12 @@ ECOS_API_KEY=""
 
 - 세계 뉴스 RSS 제목/요약에서 산업 키워드 빈도를 계산합니다.
 - Yahoo Finance 공개 quote/chart API에서 가격 모멘텀과 일부 투자 지표를 가져오려고 시도합니다.
+- SEC EDGAR와 OpenDART 상장 목록에서 미국/한국 후보를 만들고, Yahoo 가격/시총이 확인된 종목만 1차 통과시킵니다.
 - SEC EDGAR와 OpenDART에서 미국/한국 기업 기본 재무를 갱신합니다.
 - FRED와 ECOS에서 금리, 물가, 고용, 달러, 원/달러 환율을 가져와 산업 점수에 반영합니다.
 - 과거 가격 데이터로 월별 리밸런싱 백테스트를 실행합니다.
 - 추천 점수와 근거를 일별 스냅샷으로 저장합니다.
-- 네트워크나 API가 실패하면 기본 유니버스 지표와 중립 모멘텀으로 계속 실행하고 경고를 표시합니다.
+- 네트워크나 API가 실패하면 확인된 실제 데이터와 중립 모멘텀만으로 계속 실행하고 경고를 표시합니다.
 - 산업별 핵심 기업과 부가 기업을 분리해서 추천 후보를 만듭니다.
 - 중소형/초기 성장 후보를 별도 유니버스와 랭킹으로 추적합니다.
 - 단기 매매 후보를 뉴스, 시장 모멘텀, 차트 위치, 기업 데이터 기준으로 따로 정렬합니다.
@@ -225,7 +239,8 @@ stock_recommender/
   report.py       # Markdown 리포트 생성
   scoring.py      # 산업/종목 점수화 로직
   sec_edgar.py    # SEC EDGAR 재무제표 수집/파싱
-  universe.py     # 기본 산업/종목 유니버스
+  universe.py     # 산업 정의와 curated 디버그 유니버스
+  universe_loader.py # SEC/OpenDART/Yahoo 기반 동적 후보군 생성
   web.py          # 웹 대시보드 서버
 web/
   index.html      # React 대시보드 빌드 진입점
@@ -238,7 +253,7 @@ frontend/
 
 ## 다음에 붙이면 좋은 것
 
-- 한국/미국/일본/유럽 등 시장별 유니버스 확장
+- 일본/유럽 등 추가 시장 유니버스 확장
 - World Bank, OECD, IMF 같은 추가 거시경제 지표 연결
 - 분기 재무제표와 컨센서스 추정치 연결
 - 뉴스 원문 요약, 감성 분석, 일회성/구조적 이슈 분류

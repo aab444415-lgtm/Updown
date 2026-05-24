@@ -123,6 +123,37 @@ h3 {
   color: #ffffff;
 }
 
+.universe-strip {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 14px;
+  border: 1px solid #cbd7d2;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  padding: 12px;
+}
+
+.universe-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.universe-warning-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.universe-warning-row span {
+  border-radius: 8px;
+  background: #fff7ea;
+  color: #815117;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .status-pill,
 .icon-button,
 .tag-row span {
@@ -1219,6 +1250,7 @@ h3 {
   .metric-grid,
   .backtest-metrics,
   .portfolio-rule-grid,
+  .universe-stat-grid,
   .flow-stat-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -1262,6 +1294,7 @@ h3 {
     .portfolio-rule-grid,
     .metric-grid,
     .backtest-metrics,
+    .universe-stat-grid,
     .flow-stat-grid,
     .insight-grid {
       grid-template-columns: 1fr;

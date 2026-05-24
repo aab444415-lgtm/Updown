@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import json
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 from stock_recommender.backtest import BACKTEST_HORIZONS, BACKTEST_METHODS, BENCHMARKS, backtest_to_dict, create_backtest
-from stock_recommender.config import load_config
-from stock_recommender.storage import CacheStore
+from stock_recommender.http_utils import int_query as _int_query
+from stock_recommender.http_utils import record_api_error as _record_api_error
+from stock_recommender.http_utils import send_json_response
 
 
 class handler(BaseHTTPRequestHandler):
@@ -41,24 +41,4 @@ class handler(BaseHTTPRequestHandler):
         self._send_json(payload)
 
     def _send_json(self, payload: dict, status: HTTPStatus = HTTPStatus.OK) -> None:
-        content = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(content)))
-        self.end_headers()
-        self.wfile.write(content)
-
-
-def _int_query(query: dict[str, list[str]], name: str, default: int) -> int:
-    try:
-        return int(query.get(name, [str(default)])[0])
-    except (TypeError, ValueError):
-        return default
-
-
-def _record_api_error(source: str, exc: Exception) -> None:
-    try:
-        config = load_config()
-        CacheStore(config.cache_db_path).record_source_event(source, "error", str(exc))
-    except Exception:
-        return
+        send_json_response(self, payload, status=status)

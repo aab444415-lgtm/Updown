@@ -61,33 +61,6 @@ def report_payload() -> dict:
     )
 
 
-def empty_report_payload(warning: str) -> dict:
-    return {
-        "createdAt": "",
-        "macroContext": DEFAULT_MACRO_CONTEXT,
-        "dataQuality": {
-            "liveNews": False,
-            "liveMarketData": False,
-            "liveFundamentals": False,
-            "liveMacro": False,
-            "liveKoreaFundamentals": False,
-            "configuredSources": [],
-            "missingSources": [],
-            "warnings": [warning],
-        },
-        "macroSnapshot": None,
-        "industries": [],
-        "beneficiaryIndustries": [],
-        "stocks": [],
-        "shortTermCandidates": [],
-        "mediumTermCandidates": [],
-        "longTermCandidates": [],
-        "earlyGrowthCandidates": [],
-        "legendCandidates": [],
-        "news": [],
-    }
-
-
 def export_backtests() -> None:
     for months in (6, 12, 24):
         for top_n in (3, 5, 10):

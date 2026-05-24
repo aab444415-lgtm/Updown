@@ -35,6 +35,20 @@ def render_markdown(
     lines.append(f"- 공식 재무 데이터 사용: {'예' if report.data_quality.live_fundamentals else '아니오'}")
     lines.append(f"- 한국 OpenDART 재무 사용: {'예' if report.data_quality.live_korea_fundamentals else '아니오'}")
     lines.append(f"- 거시경제 지표 사용: {'예' if report.data_quality.live_macro else '아니오'}")
+    lines.append(f"- 유니버스 모드: {report.data_quality.universe_mode}")
+    lines.append(
+        f"- 유니버스 통계: 후보 {report.data_quality.universe_candidate_count:,}개, "
+        f"가격/시총 확인 {report.data_quality.universe_quote_ready_count:,}개, "
+        f"최종 점수화 {report.data_quality.universe_final_count:,}개"
+    )
+    lines.append(
+        f"- 공식 재무 수집 대상/확보: {report.data_quality.universe_financial_target_count:,}개 / "
+        f"{report.data_quality.universe_financial_ready_count:,}개"
+    )
+    lines.append(
+        f"- 시장 비중: 미국 {report.data_quality.universe_us_count:,}개, "
+        f"한국 {report.data_quality.universe_kr_count:,}개"
+    )
     if report.data_quality.configured_sources:
         lines.append("- 설정된 데이터 소스: " + ", ".join(report.data_quality.configured_sources))
     if report.data_quality.missing_sources:
@@ -92,7 +106,7 @@ def render_markdown(
 
     lines.append("## 투자 전설 전략 후보")
     lines.append("")
-    lines.append("린치, 오닐, 그린블라트, 피셔의 정량 프록시를 결합해 후보를 따로 정렬합니다.")
+    lines.append("린치, 오닐, 그린블라트, 피셔 기준에 맞춰 실제 출처가 있는 정량 지표만 결합해 후보를 따로 정렬합니다.")
     lines.append("")
     for rank, item in enumerate(report.legend_strategy_scores[:top_stocks], start=1):
         lines.extend(_render_legend_strategy_stock(rank, item))
@@ -353,7 +367,8 @@ def _format_fundamentals(fundamentals: Fundamentals) -> str:
         ("Forward PER", _multiple(fundamentals.forward_pe)),
         ("시가총액", _market_cap(fundamentals.market_cap, fundamentals.market_cap_currency)),
     ]
-    return ", ".join(f"{name} {value}" for name, value in parts if value != "N/A")
+    formatted = ", ".join(f"{name} {value}" for name, value in parts if value != "N/A")
+    return formatted or "실제 출처 확인 지표 없음"
 
 
 def _format_valuation_range(item: StockScore) -> str:

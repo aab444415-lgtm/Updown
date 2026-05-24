@@ -96,7 +96,7 @@ class OpenDartFinancialClient:
                 annual_payloads.append(payload)
 
             if not annual_payloads:
-                warnings.append(f"{stock.ticker} OpenDART 연간 재무제표를 찾지 못해 기본 유니버스 지표를 유지했습니다.")
+                warnings.append(f"{stock.ticker} OpenDART 연간 재무제표를 찾지 못했습니다.")
                 enriched.append(stock)
                 continue
 
@@ -253,6 +253,48 @@ def extract_opendart_fundamentals(
         research_and_development_rows[0] if research_and_development_rows else None,
         payload,
     )
+    if revenue_growth_pct is not None:
+        _set_row_source(sources, "revenueGrowth", revenue_row, payload, derived_from=("revenue",))
+    if operating_margin_pct is not None:
+        _set_row_source(
+            sources,
+            "operatingMargin",
+            operating_income_row or revenue_row,
+            payload,
+            derived_from=("operatingIncome", "revenue"),
+        )
+    if roe_pct is not None:
+        _set_row_source(
+            sources,
+            "roe",
+            net_income_row or equity_row,
+            payload,
+            derived_from=("netIncome", "equity"),
+        )
+    if debt_to_equity_pct is not None:
+        _set_row_source(
+            sources,
+            "debtToEquity",
+            (debt_rows[0] if debt_rows else None) or liabilities_row or equity_row,
+            payload,
+            derived_from=("totalDebt", "liabilities", "equity"),
+        )
+    if current_ratio_pct is not None:
+        _set_row_source(
+            sources,
+            "currentRatio",
+            current_assets_row or current_liabilities_row,
+            payload,
+            derived_from=("currentAssets", "currentLiabilities"),
+        )
+    if interest_coverage is not None:
+        _set_row_source(
+            sources,
+            "interestCoverage",
+            operating_income_row or interest_expense_row,
+            payload,
+            derived_from=("operatingIncome", "interestExpense"),
+        )
     if ebitda is not None:
         _set_row_source(sources, "ebitda", operating_income_row or depreciation_row or amortization_row, payload)
     if free_cash_flow is not None:
@@ -313,6 +355,7 @@ def extract_opendart_fundamentals(
         annual_financials=annual_financials,
         quarterly_financials=quarterly_financials,
         fields=(
+            ("revenueGrowth", revenue_growth_pct, ("revenue",)),
             ("revenueCagr3y", revenue_cagr_3y_pct, ("annualFinancials",)),
             ("revenueCagr5y", revenue_cagr_5y_pct, ("annualFinancials",)),
             ("operatingIncomeGrowth", operating_income_growth_pct, ("operatingIncome",)),
@@ -536,10 +579,6 @@ def _annotate_quarterly_yoy(records: tuple[dict, ...]) -> tuple[dict, ...]:
             next_record["operatingLeverageSpreadPct"] = _subtract(operating_yoy, revenue_yoy)
         annotated.append(next_record)
     return tuple(annotated)
-
-
-def _find_current_previous(rows: list[dict], names: tuple[str, ...]) -> tuple[float | None, float | None]:
-    return _current_previous_from_row(_find_row(rows, names))
 
 
 def _find_row(rows: list[dict], names: tuple[str, ...]) -> dict | None:
