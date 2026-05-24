@@ -1274,6 +1274,11 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.timezone_name, "Asia/Seoul")
         self.assertFalse(config.persist_repo_ledger)
         self.assertIsNone(config.full_snapshot_dir)
+        self.assertEqual(config.universe_limit, 800)
+        self.assertEqual(config.us_universe_limit, 600)
+        self.assertEqual(config.kr_universe_limit, 200)
+        self.assertEqual(config.us_fundamental_limit, 250)
+        self.assertEqual(config.kr_fundamental_limit, 40)
 
 
 class UniverseLoaderTests(unittest.TestCase):
@@ -2862,11 +2867,11 @@ def _test_app_config(
     *,
     opendart_api_key: str | None = None,
     universe_mode: str = "screened",
-    universe_limit: int = 500,
-    us_universe_limit: int = 350,
-    kr_universe_limit: int = 150,
-    us_fundamental_limit: int = 200,
-    kr_fundamental_limit: int = 30,
+    universe_limit: int = 800,
+    us_universe_limit: int = 600,
+    kr_universe_limit: int = 200,
+    us_fundamental_limit: int = 250,
+    kr_fundamental_limit: int = 40,
 ) -> AppConfig:
     project_root = Path(root)
     data_dir = project_root / "data"

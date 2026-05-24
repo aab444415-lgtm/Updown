@@ -30,6 +30,8 @@ Cloudflare Pages 자동 업데이트는 [docs/cloudflare-auto-update.md](docs/cl
 
 기본 실행은 SEC/OpenDART 상장 목록과 Yahoo Finance 가격/시총으로 동적 유니버스를 만든 뒤 Google News/Yahoo Finance 공개 데이터, SEC EDGAR, OpenDART, FRED, ECOS 갱신을 시도합니다. 재무 지표는 실제 출처가 확인된 값만 추천 계산과 화면에 사용하며, 내장 유니버스 숫자나 출처 없는 값은 제외하고 경고에 남깁니다.
 
+기본 동적 유니버스 한도는 전체 800개, 미국 600개, 한국 200개이며 공식 재무 수집 대상은 미국 250개, 한국 40개입니다.
+
 특정 산업 개수와 종목 개수를 조정하려면:
 
 ```bash

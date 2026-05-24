@@ -29,11 +29,11 @@ class AppConfig:
     news_api_key: str | None = None
     timezone_name: str = DEFAULT_TIMEZONE
     universe_mode: str = DEFAULT_UNIVERSE_MODE
-    universe_limit: int = 500
-    us_universe_limit: int = 350
-    kr_universe_limit: int = 150
-    us_fundamental_limit: int = 200
-    kr_fundamental_limit: int = 30
+    universe_limit: int = 800
+    us_universe_limit: int = 600
+    kr_universe_limit: int = 200
+    us_fundamental_limit: int = 250
+    kr_fundamental_limit: int = 40
 
 
 def load_config(env_path: Path | None = None) -> AppConfig:
@@ -56,16 +56,16 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         news_api_key=_clean(merged.get("NEWS_API_KEY")),
         timezone_name=_timezone_name(_clean(merged.get("STOCK_RECOMMENDER_TIMEZONE"))),
         universe_mode=_universe_mode(_clean(merged.get("STOCK_RECOMMENDER_UNIVERSE_MODE"))),
-        universe_limit=_positive_int(_clean(merged.get("STOCK_RECOMMENDER_UNIVERSE_LIMIT")), 500),
-        us_universe_limit=_positive_int(_clean(merged.get("STOCK_RECOMMENDER_US_UNIVERSE_LIMIT")), 350),
-        kr_universe_limit=_positive_int(_clean(merged.get("STOCK_RECOMMENDER_KR_UNIVERSE_LIMIT")), 150),
+        universe_limit=_positive_int(_clean(merged.get("STOCK_RECOMMENDER_UNIVERSE_LIMIT")), 800),
+        us_universe_limit=_positive_int(_clean(merged.get("STOCK_RECOMMENDER_US_UNIVERSE_LIMIT")), 600),
+        kr_universe_limit=_positive_int(_clean(merged.get("STOCK_RECOMMENDER_KR_UNIVERSE_LIMIT")), 200),
         us_fundamental_limit=_positive_int(
             _clean(merged.get("STOCK_RECOMMENDER_US_FUNDAMENTAL_LIMIT")),
-            200,
+            250,
         ),
         kr_fundamental_limit=_positive_int(
             _clean(merged.get("STOCK_RECOMMENDER_KR_FUNDAMENTAL_LIMIT")),
-            30,
+            40,
         ),
     )
 
