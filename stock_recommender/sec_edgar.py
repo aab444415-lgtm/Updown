@@ -484,11 +484,6 @@ def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> F
     )
 
 
-def _latest_and_previous(us_gaap: dict, tags: tuple[str, ...]) -> tuple[float | None, float | None]:
-    latest, previous = _latest_and_previous_facts(us_gaap, tags)
-    return _fact_value(latest), _fact_value(previous)
-
-
 def _latest_and_previous_facts(
     us_gaap: dict, tags: tuple[str, ...]
 ) -> tuple[SelectedFact | None, SelectedFact | None]:

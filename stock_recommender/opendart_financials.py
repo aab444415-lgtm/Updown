@@ -580,10 +580,6 @@ def _annotate_quarterly_yoy(records: tuple[dict, ...]) -> tuple[dict, ...]:
     return tuple(annotated)
 
 
-def _find_current_previous(rows: list[dict], names: tuple[str, ...]) -> tuple[float | None, float | None]:
-    return _current_previous_from_row(_find_row(rows, names))
-
-
 def _find_row(rows: list[dict], names: tuple[str, ...]) -> dict | None:
     normalized_names = tuple(name.replace(" ", "") for name in names)
     for row in rows:

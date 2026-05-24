@@ -208,12 +208,6 @@ type Report = {
   shortTermCandidates: TermCandidate[];
   mediumTermCandidates: TermCandidate[];
   longTermCandidates: TermCandidate[];
-  legendCandidates: Array<{
-    ticker: string;
-    name: string;
-    legendCompositeScore: number;
-    legendScores: LegendScores;
-  }>;
 };
 
 type BacktestResult = {
@@ -305,6 +299,7 @@ export default function App() {
     }
   };
 
+  const normalizedQuery = query.trim().toLowerCase();
   const rankedStocks = useMemo(() => {
     if (!report) return [];
     return report.stocks
@@ -314,10 +309,28 @@ export default function App() {
       }))
       .filter((stock) => {
         const text = `${stock.ticker} ${stock.name} ${stock.industry}`.toLowerCase();
-        return text.includes(query.trim().toLowerCase());
+        return text.includes(normalizedQuery);
       })
       .sort((a, b) => b.weightedLegendScore - a.weightedLegendScore);
-  }, [report, query, weights]);
+  }, [report, normalizedQuery, weights]);
+
+  const strategyLeaders = useMemo(() => {
+    const leaders: Partial<Record<LegendKey, Stock>> = {};
+    if (!report) return leaders;
+    for (const strategy of STRATEGIES) {
+      let bestStock: Stock | undefined;
+      let bestScore = Number.NEGATIVE_INFINITY;
+      for (const stock of report.stocks) {
+        const score = stock.legendScores?.[strategy.key] ?? Number.NEGATIVE_INFINITY;
+        if (score > bestScore) {
+          bestScore = score;
+          bestStock = stock;
+        }
+      }
+      leaders[strategy.key] = bestStock;
+    }
+    return leaders;
+  }, [report]);
 
   const selectedStock =
     rankedStocks.find((stock) => stock.ticker === selectedTicker) || rankedStocks[0] || null;
@@ -385,7 +398,7 @@ export default function App() {
                   <StrategyLeader
                     key={strategy.key}
                     strategy={strategy}
-                    stock={topByStrategy(report.stocks, strategy.key)}
+                    stock={strategyLeaders[strategy.key]}
                   />
                 ))}
               </section>
@@ -1366,10 +1379,6 @@ function weightedScore(
   }, 0);
 }
 
-function topByStrategy(stocks: Stock[], key: LegendKey) {
-  return [...stocks].sort((a, b) => (b.legendScores?.[key] ?? 0) - (a.legendScores?.[key] ?? 0))[0];
-}
-
 function safeScore(value: number | null | undefined) {
   if (value === null || value === undefined || Number.isNaN(value)) return 0;
   return Math.max(0, Math.min(100, value));
@@ -1392,12 +1401,6 @@ function formatInteger(value: number | null | undefined) {
   return value === null || value === undefined || Number.isNaN(value)
     ? "-"
     : Math.round(value).toLocaleString();
-}
-
-function formatReturn(value: number | null | undefined) {
-  if (value === null || value === undefined || Number.isNaN(value)) return "-";
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${value.toFixed(1)}%`;
 }
 
 function formatNumber(value: number | null) {

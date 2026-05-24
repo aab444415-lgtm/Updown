@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import json
+import math
 import mimetypes
 import sys
 from http import HTTPStatus
@@ -9,21 +9,38 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .backtest import BACKTEST_HORIZONS, BACKTEST_METHODS, BENCHMARKS, backtest_to_dict, create_backtest, fetch_price_history
-from .config import load_config
+from .backtest import BACKTEST_HORIZONS, BACKTEST_METHODS, BENCHMARKS, backtest_to_dict, create_backtest
+from .http_utils import int_query as _int_query
+from .http_utils import record_api_error as _record_api_error
+from .http_utils import send_json_response
 from .models import RecommendationReport
 from .pipeline import create_recommendation_report
 from .snapshots import snapshot_history
-from .storage import CacheStore
-from .technical import build_technical_snapshot, technical_snapshot_to_dict
 from .universe import DEFAULT_MACRO_CONTEXT
 
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+REPORT_PAYLOAD_TTL_SECONDS = 60 * 10
 
 
 def create_report(macro_context: str = DEFAULT_MACRO_CONTEXT) -> RecommendationReport:
     return create_recommendation_report(macro_context=macro_context)
+
+
+def create_report_payload(
+    macro_context: str = DEFAULT_MACRO_CONTEXT,
+    force_refresh: bool = False,
+) -> dict:
+    cache = _report_payload_cache()
+    cache_key = f"web-report-payload:{macro_context}"
+    if not force_refresh:
+        cached = cache.get_json(cache_key)
+        if isinstance(cached, dict) and cached.get("stocks"):
+            return cached
+    payload = report_to_dict(create_report(macro_context=macro_context))
+    if payload.get("stocks"):
+        cache.set_json(cache_key, "local-report", "local://api/report", payload, REPORT_PAYLOAD_TTL_SECONDS)
+    return payload
 
 
 def report_to_dict(report: RecommendationReport) -> dict:
@@ -302,15 +319,52 @@ def _beneficiary_industry_to_dict(item) -> dict:
 
 
 def _technical_by_ticker(report: RecommendationReport) -> dict[str, dict]:
-    config = load_config()
-    cache = CacheStore(config.cache_db_path)
     results: dict[str, dict] = {}
     tickers = tuple(dict.fromkeys(item.stock.ticker.upper() for item in report.stock_scores))
     for ticker in tickers:
-        points = fetch_price_history(ticker, cache=cache, range_value="1y", timeout=5.0)
-        snapshot = build_technical_snapshot(points)
-        results[ticker] = technical_snapshot_to_dict(snapshot)
+        results[ticker] = _momentum_technical_to_dict(report.momentums.get(ticker))
     return results
+
+
+def _momentum_technical_to_dict(momentum) -> dict:
+    return {
+        "rsi14": _round_or_none(getattr(momentum, "rsi14", None)),
+        "ma20DistancePct": _round_or_none(getattr(momentum, "ma20_distance_pct", None)),
+        "ma60DistancePct": _round_or_none(getattr(momentum, "ma60_distance_pct", None)),
+        "ma120DistancePct": _round_or_none(getattr(momentum, "ma120_distance_pct", None)),
+        "volumeRatio": _round_or_none(getattr(momentum, "volume_ratio", None)),
+        "twentyDayBreakoutPct": _round_or_none(getattr(momentum, "twenty_day_breakout_pct", None)),
+        "sixtyDayBreakoutPct": _round_or_none(getattr(momentum, "sixty_day_breakout_pct", None)),
+        "trendLabel": _momentum_trend_label(momentum),
+    }
+
+
+def _momentum_trend_label(momentum) -> str:
+    ma20_distance = getattr(momentum, "ma20_distance_pct", None)
+    ma60_distance = getattr(momentum, "ma60_distance_pct", None)
+    ma120_distance = getattr(momentum, "ma120_distance_pct", None)
+    distances = (ma20_distance, ma60_distance, ma120_distance)
+    if not all(isinstance(value, (int, float)) and math.isfinite(value) for value in distances):
+        return "데이터 부족"
+    if all(value > 0 for value in distances):
+        return "상승 추세"
+    if all(value < 0 for value in distances):
+        return "하락 추세"
+    return "중립"
+
+
+def _round_or_none(value: object) -> float | None:
+    if not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return round(float(value), 2)
+
+
+def _report_payload_cache():
+    from .config import load_config
+    from .storage import CacheStore
+
+    config = load_config()
+    return CacheStore(config.cache_db_path)
 
 
 def _legend_metric_coverage(report: RecommendationReport) -> dict[str, float]:
@@ -538,8 +592,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/report":
             query = parse_qs(parsed.query)
             macro_context = query.get("macro", [DEFAULT_MACRO_CONTEXT])[0] or DEFAULT_MACRO_CONTEXT
+            force_refresh = query.get("refresh", ["0"])[0] in {"1", "true", "yes"}
             try:
-                payload = report_to_dict(create_report(macro_context=macro_context))
+                payload = create_report_payload(macro_context=macro_context, force_refresh=force_refresh)
             except Exception as exc:  # pragma: no cover - defensive server boundary
                 _record_api_error("web/report", exc)
                 self._send_json({"error": "추천 리포트를 생성하지 못했습니다."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
@@ -620,28 +675,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def _send_json(
         self, payload: dict, status: HTTPStatus = HTTPStatus.OK, include_body: bool = True
     ) -> None:
-        content = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(content)))
-        self.end_headers()
-        if include_body:
-            self.wfile.write(content)
-
-
-def _int_query(query: dict[str, list[str]], name: str, default: int) -> int:
-    try:
-        return int(query.get(name, [str(default)])[0])
-    except (TypeError, ValueError):
-        return default
-
-
-def _record_api_error(source: str, exc: Exception) -> None:
-    try:
-        config = load_config()
-        CacheStore(config.cache_db_path).record_source_event(source, "error", str(exc))
-    except Exception:
-        return
+        send_json_response(self, payload, status=status, include_body=include_body)
 
 
 def _asset_path(request_path: str) -> Path | None:

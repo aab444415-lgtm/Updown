@@ -2886,44 +2886,6 @@ def _valuation_range_check(valuation_range: ValuationRange) -> str:
     )
 
 
-def _peg_proxy(fundamentals: Fundamentals) -> float:
-    value = _peg_proxy_value(fundamentals)
-    if value is None:
-        return 45
-    if value <= 0.5:
-        return 100
-    if value <= 1.0:
-        return _clamp(100 - (value - 0.5) * 30, 0, 100)
-    if value <= 1.5:
-        return _clamp(85 - (value - 1.0) * 45, 0, 100)
-    if value <= 2.5:
-        return _clamp(62 - (value - 1.5) * 28, 0, 100)
-    return _clamp(34 - (value - 2.5) * 12, 0, 100)
-
-
-def _peg_proxy_value(fundamentals: Fundamentals) -> float | None:
-    pe = fundamentals.forward_pe if fundamentals.forward_pe is not None else fundamentals.pe
-    growth = fundamentals.revenue_growth_pct
-    if pe is None or growth is None or not math.isfinite(pe) or not math.isfinite(growth):
-        return None
-    if pe <= 0 or growth <= 0:
-        return None
-    return pe / growth
-
-
-def _peg_proxy_text(fundamentals: Fundamentals) -> str:
-    value = _peg_proxy_value(fundamentals)
-    if value is None:
-        return "계산 불가"
-    if value <= 1:
-        label = "린치식 저평가 성장 조건"
-    elif value <= 1.5:
-        label = "허용 가능한 성장 대비 가격"
-    else:
-        label = "성장 대비 가격 부담"
-    return f"{value:.2f} ({label})"
-
-
 def _earnings_yield_proxy_score(fundamentals: Fundamentals) -> float:
     if (
         fundamentals.operating_income is not None
