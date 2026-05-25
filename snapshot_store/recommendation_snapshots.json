@@ -1,6 +1,280 @@
 {
-  "lastUpdatedAt": "2026-05-24T22:31:17.235747+00:00",
+  "lastUpdatedAt": "2026-05-25T22:35:21.711660+00:00",
   "snapshots": [
+    {
+      "createdAt": "2026-05-26T07:32:46.832726+09:00",
+      "id": 7,
+      "mode": "live",
+      "payload": {
+        "audit": {
+          "createdAt": "2026-05-26T07:32:46.832726+09:00",
+          "createdAtTimezone": "Asia/Seoul",
+          "gitCommit": "d58c47c97709a78835131d4005b0c733c491c6c9",
+          "gitDirty": true,
+          "modelVersion": "stock-recommender/0.1.0",
+          "runId": "26422373927"
+        },
+        "benchmarks": [
+          {
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 745.6400146484375,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "ticker": "SPY"
+          },
+          {
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 717.5399780273438,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "ticker": "QQQ"
+          },
+          {
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 7847.7099609375,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "ticker": "^KS11"
+          }
+        ],
+        "createdAt": "2026-05-26T07:32:46.832726+09:00",
+        "createdAtDisplay": "2026-05-26 07:32:46",
+        "createdAtTimezone": "Asia/Seoul",
+        "mode": "live",
+        "payloadDigest": "sha256:cdec19e706a19617e14a3c61abddba269b790bb724dc0533105779c200a4b6dd",
+        "payloadKind": "compact",
+        "snapshotDate": "2026-05-26",
+        "snapshotQuality": {
+          "backtestEligible": true,
+          "benchmarkAnchorCoveragePct": 100.0,
+          "exclusionReasons": [],
+          "fundamentalSourceCoveragePct": 20.9,
+          "priceAnchorCoveragePct": 100.0,
+          "sourceErrorCount": 26,
+          "sourceStaleCount": 0
+        },
+        "sourceEventSummary": {
+          "bySource": {
+            "Google News": {
+              "success": 1
+            },
+            "SEC EDGAR": {
+              "error": 10,
+              "success": 242
+            },
+            "Yahoo Finance": {
+              "error": 16,
+              "success": 31
+            }
+          },
+          "byStatus": {
+            "error": 26,
+            "success": 274
+          },
+          "errorCount": 26,
+          "staleCount": 0,
+          "total": 300
+        },
+        "stocks": [
+          {
+            "decisionGrade": "매수 후보",
+            "maxWeightPct": 10.0,
+            "name": "ADVANCED MICRO DEVICES INC",
+            "portfolioSignal": "편입 후보",
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 467.510009765625,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 76.7,
+            "targetWeightPct": 8.0,
+            "ticker": "AMD"
+          },
+          {
+            "decisionGrade": "관심",
+            "maxWeightPct": 4.0,
+            "name": "AppLovin Corp",
+            "portfolioSignal": "소액 관찰",
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 481.67999267578125,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Aggressive Allow",
+            "riskLevel": "높음",
+            "score": 74.5,
+            "targetWeightPct": 3.0,
+            "ticker": "APP"
+          },
+          {
+            "decisionGrade": "관심",
+            "maxWeightPct": 6.0,
+            "name": "Palantir Technologies Inc.",
+            "portfolioSignal": "분할 관찰",
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 136.8800048828125,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 73.6,
+            "targetWeightPct": 4.0,
+            "ticker": "PLTR"
+          },
+          {
+            "decisionGrade": "관심",
+            "maxWeightPct": 6.0,
+            "name": "MICRON TECHNOLOGY INC",
+            "portfolioSignal": "분할 관찰",
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 751.0,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 72.5,
+            "targetWeightPct": 4.0,
+            "ticker": "MU"
+          },
+          {
+            "decisionGrade": "관심",
+            "maxWeightPct": 6.0,
+            "name": "NVIDIA CORP",
+            "portfolioSignal": "분할 관찰",
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 215.3300018310547,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 71.4,
+            "targetWeightPct": 4.0,
+            "ticker": "NVDA"
+          },
+          {
+            "decisionGrade": "관심",
+            "maxWeightPct": 6.0,
+            "name": "Arista Networks, Inc.",
+            "portfolioSignal": "분할 관찰",
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 154.02999877929688,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 71.4,
+            "targetWeightPct": 4.0,
+            "ticker": "ANET"
+          },
+          {
+            "decisionGrade": "관심",
+            "maxWeightPct": 6.0,
+            "name": "AMPHENOL CORP /DE/",
+            "portfolioSignal": "분할 관찰",
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 132.05999755859375,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 69.7,
+            "targetWeightPct": 4.0,
+            "ticker": "APH"
+          },
+          {
+            "decisionGrade": "관심",
+            "maxWeightPct": 6.0,
+            "name": "Vertiv Holdings Co",
+            "portfolioSignal": "분할 관찰",
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 327.4599914550781,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 68.9,
+            "targetWeightPct": 4.0,
+            "ticker": "VRT"
+          },
+          {
+            "decisionGrade": "관망",
+            "maxWeightPct": 3.0,
+            "name": "CARVANA CO.",
+            "portfolioSignal": "소액 관찰",
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 68.27999877929688,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Aggressive Allow",
+            "riskLevel": "높음",
+            "score": 67.8,
+            "targetWeightPct": 0.0,
+            "ticker": "CVNA"
+          },
+          {
+            "decisionGrade": "관망",
+            "maxWeightPct": 3.0,
+            "name": "Seagate Technology Holdings plc",
+            "portfolioSignal": "보유 점검",
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 812.72998046875,
+              "latestCloseDate": "2026-05-22",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 66.5,
+            "targetWeightPct": 0.0,
+            "ticker": "STX"
+          }
+        ],
+        "version": 20
+      },
+      "payloadDigest": "sha256:cdec19e706a19617e14a3c61abddba269b790bb724dc0533105779c200a4b6dd",
+      "payloadKind": "compact",
+      "snapshotDate": "2026-05-26",
+      "topName": "ADVANCED MICRO DEVICES INC",
+      "topScore": 76.7,
+      "topTicker": "AMD"
+    },
     {
       "createdAt": "2026-05-25T07:28:41.406820+09:00",
       "id": 6,
