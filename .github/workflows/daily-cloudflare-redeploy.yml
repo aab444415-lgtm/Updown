@@ -28,10 +28,20 @@ jobs:
           OPENDART_API_KEY: ${{ secrets.OPENDART_API_KEY }}
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           ECOS_API_KEY: ${{ secrets.ECOS_API_KEY }}
+          KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          STOCK_RECOMMENDER_POLYGON_FRESH_LIMIT: ${{ vars.STOCK_RECOMMENDER_POLYGON_FRESH_LIMIT || '4' }}
           STOCK_RECOMMENDER_TIMEZONE: Asia/Seoul
           STOCK_RECOMMENDER_PERSIST_REPO_LEDGER: "1"
         run: |
           python3 -m stock_recommender.snapshot_cli
+
+      - name: Verify daily snapshot health
+        env:
+          STOCK_RECOMMENDER_TIMEZONE: Asia/Seoul
+          STOCK_RECOMMENDER_PERSIST_REPO_LEDGER: "1"
+        run: |
+          python3 -m stock_recommender.snapshot_health --require-today --min-days 30
 
       - name: Commit snapshot ledger
         run: |

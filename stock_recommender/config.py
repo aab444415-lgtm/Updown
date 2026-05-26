@@ -26,6 +26,7 @@ class AppConfig:
     fred_api_key: str | None = None
     ecos_api_key: str | None = None
     polygon_api_key: str | None = None
+    krx_auth_key: str | None = None
     news_api_key: str | None = None
     adanos_api_key: str | None = None
     funda_api_key: str | None = None
@@ -57,6 +58,7 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         fred_api_key=_clean(merged.get("FRED_API_KEY")),
         ecos_api_key=_clean(merged.get("ECOS_API_KEY")),
         polygon_api_key=_clean(merged.get("POLYGON_API_KEY")),
+        krx_auth_key=_clean(merged.get("KRX_AUTH_KEY")),
         news_api_key=_clean(merged.get("NEWS_API_KEY")),
         adanos_api_key=_clean(merged.get("ADANOS_API_KEY")),
         funda_api_key=_clean(merged.get("FUNDA_API_KEY")),
@@ -119,6 +121,8 @@ def configured_source_names(config: AppConfig) -> tuple[str, ...]:
         names.append("ECOS")
     if config.polygon_api_key:
         names.append("Polygon")
+    if config.krx_auth_key:
+        names.append("KRX")
     if config.news_api_key:
         names.append("NewsAPI")
     if config.enable_external_research and config.adanos_api_key:
@@ -138,6 +142,8 @@ def missing_optional_source_names(config: AppConfig) -> tuple[str, ...]:
         missing.append("ECOS")
     if not config.polygon_api_key:
         missing.append("Polygon")
+    if not config.krx_auth_key:
+        missing.append("KRX")
     if not config.news_api_key:
         missing.append("NewsAPI")
     if config.enable_external_research and not config.adanos_api_key:

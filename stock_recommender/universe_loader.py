@@ -8,7 +8,7 @@ from typing import Iterable
 from .config import AppConfig
 from .data_sources import SOURCE_POLYGON, SOURCE_YAHOO, fetch_polygon_us_quotes, fetch_yahoo_quotes
 from .models import Fundamentals, IndustryProfile, StockProfile
-from .official_sources import OpenDartClient
+from .official_sources import KrxClient, OpenDartClient
 from .sec_edgar import SecEdgarClient
 from .storage import CacheStore
 from .universe import INDUSTRIES, STOCKS
@@ -64,7 +64,7 @@ def load_stock_universe(config: AppConfig, cache: CacheStore) -> UniverseLoadRes
     us_probe = us_candidates[: _quote_probe_limit(config.us_universe_limit, US_QUOTE_PROBE_MULTIPLIER)]
     kr_probe = kr_candidates[: _quote_probe_limit(config.kr_universe_limit, KR_QUOTE_PROBE_MULTIPLIER)]
     us_stocks, us_quote_ready = _quote_ready_us_stocks(us_probe, config, cache, warnings)
-    kr_stocks, kr_quote_ready = _quote_ready_kr_stocks(kr_probe, cache)
+    kr_stocks, kr_quote_ready = _quote_ready_kr_stocks(kr_probe, config, cache, warnings)
     if us_candidates and not us_quote_ready:
         if config.polygon_api_key:
             warnings.append("미국 상장 후보의 Polygon/Yahoo 가격/시총 확인에 실패했습니다.")
@@ -200,17 +200,21 @@ def _quote_ready_us_stocks(
 
 def _quote_ready_kr_stocks(
     candidates: tuple[_RawCandidate, ...],
+    config: AppConfig,
     cache: CacheStore,
+    warnings: list[str],
 ) -> tuple[tuple[StockProfile, ...], int]:
-    ks_by_code = _quotes_for_symbols((f"{item.ticker}.KS" for item in candidates), cache)
-    missing = tuple(item for item in candidates if f"{item.ticker}.KS" not in ks_by_code)
-    kq_by_code = _quotes_for_symbols((f"{item.ticker}.KQ" for item in missing), cache)
+    krx_by_code = _krx_quotes_for_candidates(candidates, config, cache, warnings)
+    missing_for_yahoo = tuple(item for item in candidates if item.ticker.upper() not in krx_by_code)
+    ks_by_code = _quotes_for_symbols((f"{item.ticker}.KS" for item in missing_for_yahoo), cache)
+    missing_ks = tuple(item for item in missing_for_yahoo if f"{item.ticker}.KS" not in ks_by_code)
+    kq_by_code = _quotes_for_symbols((f"{item.ticker}.KQ" for item in missing_ks), cache)
 
     stocks: list[StockProfile] = []
     for item in candidates:
         ks_symbol = f"{item.ticker}.KS"
         kq_symbol = f"{item.ticker}.KQ"
-        quote = ks_by_code.get(ks_symbol) or kq_by_code.get(kq_symbol)
+        quote = krx_by_code.get(item.ticker.upper()) or ks_by_code.get(ks_symbol) or kq_by_code.get(kq_symbol)
         if quote is None:
             continue
         symbol = str(quote.get("symbol") or ks_symbol).upper()
@@ -218,6 +222,103 @@ def _quote_ready_kr_stocks(
         if profile is not None:
             stocks.append(profile)
     return tuple(stocks), len(stocks)
+
+
+def _krx_quotes_for_candidates(
+    candidates: tuple[_RawCandidate, ...],
+    config: AppConfig,
+    cache: CacheStore,
+    warnings: list[str],
+) -> dict[str, dict]:
+    if not candidates or not config.krx_auth_key:
+        return {}
+
+    response = KrxClient(config, cache).fetch_latest_stock_daily_trades()
+    if not response.ok or not isinstance(response.payload, dict):
+        warnings.append(response.warning or "KRX 가격/시총 확인에 실패했습니다.")
+        return {}
+
+    rows = response.payload.get("OutBlock_1")
+    if not isinstance(rows, list):
+        warnings.append("KRX 일별매매정보 응답 형식이 예상과 다릅니다.")
+        return {}
+    warnings.extend(_krx_market_status_warnings(response.payload))
+
+    wanted = {item.ticker.upper() for item in candidates}
+    quotes: dict[str, dict] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        code = _krx_stock_code(row)
+        if code not in wanted:
+            continue
+        quote = _krx_quote_from_row(row, code)
+        if quote is not None:
+            quotes[code] = quote
+    if quotes:
+        bas_dd = response.payload.get("basDd")
+        suffix = f"({bas_dd})" if isinstance(bas_dd, str) and bas_dd else ""
+        warnings.append(f"KRX 가격/시총으로 한국 후보 {len(quotes)}개를 확인했습니다{suffix}.")
+    return quotes
+
+
+def _krx_market_status_warnings(payload: dict) -> list[str]:
+    market_status = payload.get("marketStatus")
+    if not isinstance(market_status, dict):
+        return []
+    warnings: list[str] = []
+    for market in ("KOSPI", "KOSDAQ"):
+        status = market_status.get(market)
+        if not isinstance(status, dict) or status.get("ok"):
+            continue
+        warning = status.get("warning")
+        detail = f": {warning}" if isinstance(warning, str) and warning else ""
+        warnings.append(f"KRX {market} 일별매매정보 확인이 일부 실패했습니다{detail}.")
+    return warnings
+
+
+def _krx_quote_from_row(row: dict, code: str) -> dict | None:
+    price = _number_from_text(row.get("TDD_CLSPRC"))
+    market_cap = _number_from_text(row.get("MKTCAP"))
+    if not _positive(price) or not _positive(market_cap):
+        return None
+    market = str(row.get("_market") or row.get("MKT_NM") or "").upper()
+    suffix = ".KQ" if "KOSDAQ" in market or "코스닥" in market else ".KS"
+    name = _text(row.get("ISU_NM")) or _text(row.get("ISU_ABBRV")) or code
+    quote = {
+        "symbol": f"{code}{suffix}",
+        "shortName": name,
+        "longName": name,
+        "regularMarketPrice": price,
+        "marketCap": market_cap,
+        "currency": "KRW",
+        "financialCurrency": "KRW",
+        "_source": "KRX",
+        "_sourceUrl": "https://openapi.krx.co.kr/contents/OPP/INFO/service/OPPINFO004.cmd",
+    }
+    previous_close = _krx_previous_close_from_row(row)
+    if _positive(previous_close):
+        quote["regularMarketPreviousClose"] = previous_close
+    return quote
+
+
+def _krx_previous_close_from_row(row: dict) -> float | None:
+    for key in ("BFDD_CLSPRC", "PRVDD_CLSPRC", "PREV_CLSPRC"):
+        value = _number_from_text(row.get(key))
+        if _positive(value):
+            return value
+    return None
+
+
+def _krx_stock_code(row: dict) -> str:
+    for key in ("ISU_SRT_CD", "ISU_CD"):
+        value = row.get(key)
+        if value is None:
+            continue
+        text = str(value).strip().upper()
+        if _valid_kr_stock_code(text):
+            return text
+    return ""
 
 
 def _quotes_for_symbols(symbols: Iterable[str], cache: CacheStore) -> dict[str, dict]:
@@ -329,10 +430,21 @@ def _quote_has_price_and_market_cap(quote: dict) -> bool:
 
 def _classify_industry(text: str) -> str:
     normalized = text.lower()
+    tokens = set(re.findall(r"[a-z0-9가-힣]+", normalized))
+    for alias, industry in _INDUSTRY_ALIASES:
+        if _keyword_matches(alias, normalized, tokens):
+            return industry
     for industry, keywords in _INDUSTRY_KEYWORDS:
-        if any(keyword in normalized for keyword in keywords):
+        if any(_keyword_matches(keyword, normalized, tokens) for keyword in keywords):
             return industry
     return BROAD_MARKET_INDUSTRY.name
+
+
+def _keyword_matches(keyword: str, normalized_text: str, tokens: set[str]) -> bool:
+    normalized_keyword = keyword.lower()
+    if re.fullmatch(r"[a-z0-9]{1,6}", normalized_keyword):
+        return normalized_keyword in tokens
+    return normalized_keyword in normalized_text
 
 
 def _role_for_dynamic_stock(industry: str, market_cap: float, currency: str) -> str:
@@ -404,7 +516,9 @@ def _field_source(source: str = SOURCE_YAHOO, url: object = None) -> dict:
         return {"source": source, "url": url}
     if source == SOURCE_POLYGON:
         return {"source": source, "url": "https://polygon.io/docs/rest/stocks/tickers/ticker-overview"}
-    return {"source": SOURCE_YAHOO, "url": "https://finance.yahoo.com/quote/"}
+    if source == SOURCE_YAHOO:
+        return {"source": SOURCE_YAHOO, "url": "https://finance.yahoo.com/quote/"}
+    return {"source": source, "url": ""}
 
 
 def _quote_name(quote: dict) -> str | None:
@@ -441,6 +555,30 @@ def _number(value: object) -> float | None:
         return None
     number = float(value)
     return number if math.isfinite(number) else None
+
+
+def _number_from_text(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return _number(value)
+    if not isinstance(value, str):
+        return None
+    text = value.strip().replace(",", "")
+    if not text or text in {"-", "N/A"}:
+        return None
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
 
 
 def _positive(value: float | None) -> bool:
@@ -524,4 +662,108 @@ _INDUSTRY_KEYWORDS = (
             "firewall",
         ),
     ),
+)
+
+
+_INDUSTRY_ALIASES = (
+    ("nvda", "AI 반도체 및 데이터센터"),
+    ("nvidia", "AI 반도체 및 데이터센터"),
+    ("amd", "AI 반도체 및 데이터센터"),
+    ("advanced micro devices", "AI 반도체 및 데이터센터"),
+    ("avgo", "AI 반도체 및 데이터센터"),
+    ("broadcom", "AI 반도체 및 데이터센터"),
+    ("tsm", "AI 반도체 및 데이터센터"),
+    ("taiwan semiconductor", "AI 반도체 및 데이터센터"),
+    ("asml", "AI 반도체 및 데이터센터"),
+    ("amat", "AI 반도체 및 데이터센터"),
+    ("applied materials", "AI 반도체 및 데이터센터"),
+    ("lrcx", "AI 반도체 및 데이터센터"),
+    ("lam research", "AI 반도체 및 데이터센터"),
+    ("mu", "AI 반도체 및 데이터센터"),
+    ("micron", "AI 반도체 및 데이터센터"),
+    ("mrvl", "AI 반도체 및 데이터센터"),
+    ("marvell", "AI 반도체 및 데이터센터"),
+    ("smci", "AI 반도체 및 데이터센터"),
+    ("super micro", "AI 반도체 및 데이터센터"),
+    ("arm", "AI 반도체 및 데이터센터"),
+    ("intc", "AI 반도체 및 데이터센터"),
+    ("intel", "AI 반도체 및 데이터센터"),
+    ("msft", "AI 반도체 및 데이터센터"),
+    ("microsoft", "AI 반도체 및 데이터센터"),
+    ("amzn", "AI 반도체 및 데이터센터"),
+    ("amazon", "AI 반도체 및 데이터센터"),
+    ("googl", "AI 반도체 및 데이터센터"),
+    ("google", "AI 반도체 및 데이터센터"),
+    ("alphabet", "AI 반도체 및 데이터센터"),
+    ("000660", "AI 반도체 및 데이터센터"),
+    ("sk하이닉스", "AI 반도체 및 데이터센터"),
+    ("sk hynix", "AI 반도체 및 데이터센터"),
+    ("005930", "AI 반도체 및 데이터센터"),
+    ("삼성전자", "AI 반도체 및 데이터센터"),
+    ("095340", "AI 반도체 및 데이터센터"),
+    ("isc", "AI 반도체 및 데이터센터"),
+    ("042700", "AI 반도체 및 데이터센터"),
+    ("한미반도체", "AI 반도체 및 데이터센터"),
+    ("039030", "AI 반도체 및 데이터센터"),
+    ("이오테크닉스", "AI 반도체 및 데이터센터"),
+    ("vRT", "전력 인프라 및 에너지 장비"),
+    ("vertiv", "전력 인프라 및 에너지 장비"),
+    ("etn", "전력 인프라 및 에너지 장비"),
+    ("eaton", "전력 인프라 및 에너지 장비"),
+    ("pwr", "전력 인프라 및 에너지 장비"),
+    ("quanta services", "전력 인프라 및 에너지 장비"),
+    ("ge", "전력 인프라 및 에너지 장비"),
+    ("gev", "전력 인프라 및 에너지 장비"),
+    ("ge vernova", "전력 인프라 및 에너지 장비"),
+    ("nee", "전력 인프라 및 에너지 장비"),
+    ("next era energy", "전력 인프라 및 에너지 장비"),
+    ("010120", "전력 인프라 및 에너지 장비"),
+    ("ls electric", "전력 인프라 및 에너지 장비"),
+    ("267260", "전력 인프라 및 에너지 장비"),
+    ("hd현대일렉트릭", "전력 인프라 및 에너지 장비"),
+    ("llY", "비만 치료제 및 바이오 플랫폼"),
+    ("eli lilly", "비만 치료제 및 바이오 플랫폼"),
+    ("nvo", "비만 치료제 및 바이오 플랫폼"),
+    ("novo nordisk", "비만 치료제 및 바이오 플랫폼"),
+    ("amgn", "비만 치료제 및 바이오 플랫폼"),
+    ("amgen", "비만 치료제 및 바이오 플랫폼"),
+    ("regn", "비만 치료제 및 바이오 플랫폼"),
+    ("regeneron", "비만 치료제 및 바이오 플랫폼"),
+    ("vrtx", "비만 치료제 및 바이오 플랫폼"),
+    ("vertex", "비만 치료제 및 바이오 플랫폼"),
+    ("207940", "비만 치료제 및 바이오 플랫폼"),
+    ("삼성바이오로직스", "비만 치료제 및 바이오 플랫폼"),
+    ("068270", "비만 치료제 및 바이오 플랫폼"),
+    ("셀트리온", "비만 치료제 및 바이오 플랫폼"),
+    ("326030", "비만 치료제 및 바이오 플랫폼"),
+    ("sk바이오팜", "비만 치료제 및 바이오 플랫폼"),
+    ("lmt", "방산 및 우주항공"),
+    ("lockheed", "방산 및 우주항공"),
+    ("rtx", "방산 및 우주항공"),
+    ("raytheon", "방산 및 우주항공"),
+    ("noc", "방산 및 우주항공"),
+    ("northrop", "방산 및 우주항공"),
+    ("gd", "방산 및 우주항공"),
+    ("general dynamics", "방산 및 우주항공"),
+    ("ba", "방산 및 우주항공"),
+    ("boeing", "방산 및 우주항공"),
+    ("rklb", "방산 및 우주항공"),
+    ("rocket lab", "방산 및 우주항공"),
+    ("064350", "방산 및 우주항공"),
+    ("현대로템", "방산 및 우주항공"),
+    ("012450", "방산 및 우주항공"),
+    ("한화에어로스페이스", "방산 및 우주항공"),
+    ("047810", "방산 및 우주항공"),
+    ("한국항공우주", "방산 및 우주항공"),
+    ("crwd", "사이버보안"),
+    ("crowdstrike", "사이버보안"),
+    ("panw", "사이버보안"),
+    ("palo alto", "사이버보안"),
+    ("zs", "사이버보안"),
+    ("zscaler", "사이버보안"),
+    ("ftnt", "사이버보안"),
+    ("fortinet", "사이버보안"),
+    ("okta", "사이버보안"),
+    ("cybr", "사이버보안"),
+    ("cyberark", "사이버보안"),
 )

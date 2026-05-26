@@ -115,6 +115,7 @@ FRED_API_KEY=""
 ECOS_API_KEY=""
 POLYGON_API_KEY=""
 STOCK_RECOMMENDER_POLYGON_FRESH_LIMIT="4"
+KRX_AUTH_KEY=""
 STOCK_RECOMMENDER_ENABLE_EXTERNAL_RESEARCH=""
 ADANOS_API_KEY=""
 FUNDA_API_KEY=""
@@ -125,6 +126,7 @@ FUNDA_API_KEY=""
 - FRED: 미국 거시경제 지표용입니다. 무료 계정/API 키가 필요합니다.
 - ECOS: 한국은행 거시경제 지표용입니다. 인증키가 필요합니다.
 - Polygon: 미국 가격/시총 확인용입니다. Yahoo보다 먼저 사용하며, 무료 플랜은 호출 제한 때문에 `STOCK_RECOMMENDER_POLYGON_FRESH_LIMIT` 기본값을 4로 둡니다.
+- KRX: 한국 가격/거래대금/시총 확인용입니다. KRX OpenAPI 인증키 발급 후 `유가증권 일별매매정보`, `코스닥 일별매매정보` API 이용신청 승인이 필요합니다. 상태 진단까지 완전히 통과시키려면 종목기본정보 서비스도 함께 승인합니다.
 - Funda/Adanos: 선택형 외부 리서치 키입니다. `STOCK_RECOMMENDER_ENABLE_EXTERNAL_RESEARCH=1`일 때만 상태 진단에 포함하며, 실패하거나 비어 있어도 기존 추천 계산은 계속됩니다.
 
 현재 구현된 것:
@@ -133,9 +135,10 @@ FUNDA_API_KEY=""
 - SEC `companyfacts` 기반 매출성장률, 영업이익률, ROE, 부채비율 갱신
 - OpenDART 기반 한국 상장사 연간 재무제표 갱신
 - SQLite 캐시 저장소 `data/cache.sqlite`
-- OpenDART/FRED/ECOS 클라이언트 기본 구조
-- OpenDART/FRED/ECOS 키 응답 상태 진단
+- OpenDART/FRED/ECOS/KRX 클라이언트 기본 구조
+- OpenDART/FRED/ECOS/KRX 키 응답 상태 진단
 - Polygon 기반 미국 가격/시총 확인과 Yahoo 보조 fallback
+- KRX 기반 한국 가격/시총 확인과 Yahoo 보조 fallback
 - FRED 금리/물가/고용/달러 지표와 ECOS 원달러 환율을 산업 점수에 반영
 - 웹/리포트의 데이터 품질 표시
 - GitHub Actions가 갱신하는 compact repo 기반 스냅샷 ledger

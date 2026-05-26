@@ -436,7 +436,7 @@ def score_stocks(
             valuation=valuation,
             momentum=momentum,
         )
-        valuation_label = valuation_label_for_score(valuation)
+        valuation_label = valuation_label_for_score(valuation, stock.fundamentals)
         results.append(
             StockScore(
                 stock=stock,
@@ -3004,7 +3004,9 @@ def early_growth_cautions(
     return tuple(dict.fromkeys(cautions))
 
 
-def valuation_label_for_score(score: float) -> str:
+def valuation_label_for_score(score: float, fundamentals: Fundamentals | None = None) -> str:
+    if fundamentals is not None and not _has_valuation_multiple_data(fundamentals):
+        return "데이터 부족"
     if score >= 76:
         return "저평가/합리"
     if score >= 63:
@@ -3012,6 +3014,18 @@ def valuation_label_for_score(score: float) -> str:
     if score >= 48:
         return "약간 고평가"
     return "고평가"
+
+
+def _has_valuation_multiple_data(fundamentals: Fundamentals) -> bool:
+    return any(
+        value is not None
+        for value in (
+            fundamentals.pe,
+            fundamentals.forward_pe,
+            fundamentals.ev_to_ebit,
+            fundamentals.earnings_yield_pct,
+        )
+    )
 
 
 def _industry_evidence(

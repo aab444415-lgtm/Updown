@@ -151,19 +151,24 @@ def enrich_with_live_market_data(
         if quote:
             source_name = str(quote.get("_source") or SOURCE_YAHOO)
             sources = dict(fundamentals.sources)
+            preserve_market_cap = _preserve_existing_market_cap(fundamentals)
             if _is_number(quote.get("trailingPE")):
                 sources["pe"] = _field_source(source_name, quote.get("_sourceUrl"))
             if _is_number(quote.get("forwardPE")):
                 sources["forwardPe"] = _field_source(source_name, quote.get("_sourceUrl"))
-            if _is_number(quote.get("marketCap")):
+            if _is_number(quote.get("marketCap")) and not preserve_market_cap:
                 sources["marketCap"] = _field_source(source_name, quote.get("_sourceUrl"))
             fundamentals = replace(
                 fundamentals,
                 pe=_number_or_existing(quote.get("trailingPE"), fundamentals.pe),
                 forward_pe=_number_or_existing(quote.get("forwardPE"), fundamentals.forward_pe),
-                market_cap=_number_or_existing(quote.get("marketCap"), fundamentals.market_cap),
+                market_cap=(
+                    fundamentals.market_cap
+                    if preserve_market_cap
+                    else _number_or_existing(quote.get("marketCap"), fundamentals.market_cap)
+                ),
                 market_cap_currency=_text_or_existing(
-                    quote.get("financialCurrency") or quote.get("currency"),
+                    None if preserve_market_cap else quote.get("financialCurrency") or quote.get("currency"),
                     fundamentals.market_cap_currency,
                 ),
                 sources=sources,
@@ -796,6 +801,15 @@ def _field_source(source: str, url: object = None) -> dict:
     if isinstance(url, str) and url:
         payload["url"] = url
     return payload
+
+
+def _preserve_existing_market_cap(fundamentals: Fundamentals) -> bool:
+    source = fundamentals.sources.get("marketCap")
+    return (
+        isinstance(source, dict)
+        and source.get("source") == "KRX"
+        and _is_number(fundamentals.market_cap)
+    )
 
 
 def _text_or_existing(value: object, existing: str) -> str:

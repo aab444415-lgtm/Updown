@@ -1745,7 +1745,11 @@ async function fetchBacktest(horizon: HorizonKey, method: BacktestMethod): Promi
     horizon,
   });
   const endpoints = window.STATIC_DATA_ONLY
-    ? [`/data/backtest-12-5-SPY-${horizon}.json`, "/data/backtest-12-5-SPY.json"]
+    ? [
+        `/data/backtest-${method}-12-5-SPY-${horizon}.json`,
+        `/data/backtest-12-5-SPY-${horizon}.json`,
+        "/data/backtest-12-5-SPY.json",
+      ]
     : [`/api/backtest?${params.toString()}`, `/data/backtest-12-5-SPY-${horizon}.json`];
   let payload: BacktestResult | null = null;
   let lastError: Error | null = null;

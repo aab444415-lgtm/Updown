@@ -389,14 +389,15 @@ def run_snapshot_backtest(
     horizon = _normalize_horizon(horizon)
     method = "rules" if _normalize_method(method) == "rules" else "snapshot"
     benchmark_history = histories.get(benchmark_ticker, ())
-    required_snapshot_days = months + 1
+    required_snapshot_days = max(months + 1, 30)
     snapshot_days = len({snapshot.snapshot_date for snapshot in snapshots})
+    readiness_warnings = _snapshot_readiness_warnings(snapshot_days, required_snapshot_days)
     if snapshot_days < 2:
         return _empty_result(
             months,
             top_n,
             benchmark_ticker,
-            "저장된 추천 스냅샷이 부족해 포인트인타임 백테스트를 만들지 못했습니다. 먼저 2일 이상 스냅샷을 저장하세요.",
+            "저장된 추천 스냅샷이 부족해 포인트인타임 백테스트를 만들지 못했습니다. 최소 2일, 의미 있는 검증은 30일 이상 스냅샷이 필요합니다.",
             created_at=created_at,
             timezone_name=timezone_name,
             method=method,
@@ -405,6 +406,7 @@ def run_snapshot_backtest(
             snapshot_coverage_pct=0,
             required_snapshot_days=required_snapshot_days,
             price_source="snapshotAnchors",
+            extra_warnings=readiness_warnings,
             horizon=horizon,
         )
 
@@ -422,12 +424,13 @@ def run_snapshot_backtest(
             snapshot_days=snapshot_days,
             required_snapshot_days=required_snapshot_days,
             price_source="unknown",
+            extra_warnings=readiness_warnings,
             horizon=horizon,
         )
 
     possible_periods = max(0, len(period_dates) - 1)
 
-    warnings: list[str] = []
+    warnings: list[str] = list(readiness_warnings)
     periods: list[BacktestPeriod] = []
     periods_with_snapshot = 0
     unique_selected_tickers: set[str] = set()
@@ -1243,6 +1246,16 @@ def _empty_result(
     )
 
 
+def _snapshot_readiness_warnings(snapshot_days: int, required_snapshot_days: int) -> tuple[str, ...]:
+    if snapshot_days >= required_snapshot_days:
+        return ()
+    remaining = max(0, required_snapshot_days - snapshot_days)
+    return (
+        f"포인트인타임 검증 준비도 낮음: 스냅샷 {snapshot_days}/{required_snapshot_days}일. "
+        f"앞으로 {remaining}일 이상 더 저장해야 요청 기간의 최소 검증 기준을 채웁니다.",
+    )
+
+
 def _history_range_for_months(months: int) -> str:
     if months <= 12:
         return "2y"
@@ -1329,6 +1342,8 @@ def _snapshot_selected_stocks(
 def _snapshot_rules_stocks(payload: dict, top_n: int, horizon: str = "overall") -> tuple[dict, ...]:
     stocks = payload.get(_snapshot_collection_name(horizon))
     if not isinstance(stocks, list):
+        if horizon != "overall":
+            return _snapshot_rules_stocks(payload, top_n, "overall")
         return ()
     eligible: list[dict] = []
     for item in stocks:
@@ -1353,6 +1368,8 @@ def _snapshot_rules_stocks(payload: dict, top_n: int, horizon: str = "overall") 
 def _snapshot_top_stocks(payload: dict, top_n: int, horizon: str = "overall") -> tuple[dict, ...]:
     stocks = payload.get(_snapshot_collection_name(horizon))
     if not isinstance(stocks, list):
+        if horizon != "overall":
+            return _snapshot_top_stocks(payload, top_n, "overall")
         return ()
     valid = [item for item in stocks if isinstance(item, dict) and item.get("ticker")]
     return tuple(valid[:top_n])
