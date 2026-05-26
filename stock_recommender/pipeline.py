@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 
 from .config import configured_source_names, load_config, missing_optional_source_names
-from .data_sources import enrich_with_live_market_data, fetch_many_momentums, fetch_news
+from .data_sources import enrich_with_live_market_data, fetch_many_momentums, fetch_many_price_histories, fetch_news
+from .finance_profiles import build_liquidity_profiles
 from .macro_data import fetch_macro_snapshot
 from .models import (
     FUNDAMENTAL_SOURCE_BY_ATTR,
@@ -122,6 +123,11 @@ def create_recommendation_report(
         )
     )
     momentums = fetch_many_momentums(momentum_tickers, cache=cache)
+    price_histories = fetch_many_price_histories(
+        tuple(dict.fromkeys(stock.ticker for stock in stocks)),
+        cache=cache,
+    )
+    liquidity_profiles = build_liquidity_profiles(stocks, price_histories, momentums)
     live_market_data = any(
         any(
             value is not None
@@ -152,6 +158,8 @@ def create_recommendation_report(
         created_at=run_started_at,
         source_events=source_events,
         beneficiary_industries=BENEFICIARY_INDUSTRIES,
+        price_histories=price_histories,
+        liquidity_profiles=liquidity_profiles,
         data_quality=DataQuality(
             live_news=bool(news_items),
             live_market_data=live_market_data,

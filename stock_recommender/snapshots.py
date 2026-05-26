@@ -170,6 +170,7 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
             **legend_coverage,
         },
         "macroSnapshot": _macro_snapshot_payload(report),
+        "correlation": _correlation_payload(report.correlation_profile),
         "industries": [
             {
                 "name": item.industry.name,
@@ -258,6 +259,14 @@ def report_to_snapshot_payload(report: RecommendationReport, mode: str = "live")
                 },
                 "fundamentalSources": _fundamental_sources(item.stock.fundamentals.sources),
                 "momentumRaw": _momentum_payload(report.momentums.get(item.stock.ticker.upper())),
+                "liquidity": _liquidity_payload(report.liquidity_profiles.get(item.stock.ticker.upper())),
+                "sepa": _sepa_payload(report.sepa_profiles.get(item.stock.ticker.upper())),
+                "earningsEstimate": _earnings_estimate_payload(
+                    report.earnings_estimate_profiles.get(item.stock.ticker.upper())
+                ),
+                "detailedValuation": _detailed_valuation_payload(
+                    report.detailed_valuation_profiles.get(item.stock.ticker.upper())
+                ),
                 "tradeSignals": {
                     "short": _trade_signal_payload(
                         short_term_by_ticker.get(item.stock.ticker.upper()).trade_signal
@@ -825,6 +834,110 @@ def _momentum_payload(momentum: Momentum | None) -> dict:
         "ohlcvCoveragePct": momentum.ohlcv_coverage_pct,
         "source": momentum.source,
         "stale": momentum.stale,
+    }
+
+
+def _liquidity_payload(item) -> dict | None:
+    if item is None:
+        return None
+    return {
+        "score": item.score,
+        "grade": _redact_text(item.grade),
+        "avgDailyVolume": item.avg_daily_volume,
+        "avgDollarVolume": item.avg_dollar_volume,
+        "volumeStabilityScore": item.volume_stability_score,
+        "amihudIlliquidity": item.amihud_illiquidity,
+        "marketImpactBps": item.market_impact_bps,
+        "observations": item.observations,
+        "source": _redact_text(item.source),
+        "warnings": [_redact_text(text) for text in item.warnings],
+    }
+
+
+def _sepa_payload(item) -> dict | None:
+    if item is None:
+        return None
+    return {
+        "score": item.score,
+        "stage": item.stage,
+        "stageLabel": _redact_text(item.stage_label),
+        "trendTemplatePasses": item.trend_template_passes,
+        "trendTemplateTotal": item.trend_template_total,
+        "trendTemplateChecks": [_redact_text(text) for text in item.trend_template_checks],
+        "maAlignment": _redact_text(item.ma_alignment),
+        "pricePositionLabel": _redact_text(item.price_position_label),
+        "pivotLabel": _redact_text(item.pivot_label),
+        "breakoutQualityLabel": _redact_text(item.breakout_quality_label),
+        "reasons": [_redact_text(text) for text in item.reasons],
+        "cautions": [_redact_text(text) for text in item.cautions],
+    }
+
+
+def _earnings_estimate_payload(item) -> dict | None:
+    if item is None:
+        return None
+    return {
+        "score": item.score,
+        "eventRiskLabel": _redact_text(item.event_risk_label),
+        "nextEarningsDate": item.next_earnings_date,
+        "epsConsensus": item.eps_consensus,
+        "revenueConsensus": item.revenue_consensus,
+        "epsRevisionLabel": _redact_text(item.eps_revision_label),
+        "beatMissSummary": _redact_text(item.beat_miss_summary),
+        "analystCoverage": item.analyst_coverage,
+        "source": _redact_text(item.source),
+        "warnings": [_redact_text(text) for text in item.warnings],
+    }
+
+
+def _detailed_valuation_payload(item) -> dict | None:
+    if item is None:
+        return None
+    return {
+        "score": item.score,
+        "method": _redact_text(item.method),
+        "fairMarketCapMid": item.fair_market_cap_mid,
+        "upsideMidPct": item.upside_mid_pct,
+        "dcfMarketCap": item.dcf_market_cap,
+        "relativeMarketCap": item.relative_market_cap,
+        "bearMarketCap": item.bear_market_cap,
+        "bullMarketCap": item.bull_market_cap,
+        "sensitivity": [_valuation_sensitivity_payload(row) for row in item.sensitivity],
+        "notes": [_redact_text(text) for text in item.notes],
+        "warnings": [_redact_text(text) for text in item.warnings],
+    }
+
+
+def _valuation_sensitivity_payload(row: object) -> dict | str:
+    if isinstance(row, dict):
+        return {
+            "case": _redact_text(str(row.get("case", ""))),
+            "marketCap": row.get("marketCap"),
+        }
+    return _redact_text(str(row))
+
+
+def _correlation_payload(item) -> dict | None:
+    if item is None:
+        return None
+    return {
+        "label": _redact_text(item.label),
+        "averageCorrelation": item.average_correlation,
+        "maxCorrelation": item.max_correlation,
+        "maxPair": list(item.max_pair) if item.max_pair else None,
+        "coveragePct": item.coverage_pct,
+        "crowdedIndustries": [_redact_text(text) for text in item.crowded_industries],
+        "diversificationHints": [_redact_text(text) for text in item.diversification_hints],
+        "pairs": [
+            {
+                "tickerA": pair.ticker_a,
+                "tickerB": pair.ticker_b,
+                "correlation": pair.correlation,
+                "observations": pair.observations,
+            }
+            for pair in item.pairs
+        ],
+        "warnings": [_redact_text(text) for text in item.warnings],
     }
 
 

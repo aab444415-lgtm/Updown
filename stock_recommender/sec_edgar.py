@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -20,6 +21,7 @@ COMPANY_FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
 ANNUAL_FORMS = {"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"}
 QUARTERLY_FORMS = {"10-Q", "10-Q/A", "10-K", "10-K/A"}
 USD = "USD"
+SEC_FETCH_MAX_ATTEMPTS = 3
 
 REVENUE_TAGS = (
     "RevenueFromContractWithCustomerExcludingAssessedTax",
@@ -199,7 +201,6 @@ class SecEdgarClient:
         return CompanyFactsResult(payload, stale=False)
 
     def _fetch_json(self, url: str) -> dict | list:
-        time.sleep(self.request_interval_seconds)
         request = urllib.request.Request(
             url,
             headers={
@@ -208,14 +209,41 @@ class SecEdgarClient:
                 "Accept": "application/json",
             },
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                raw = response.read()
-                if response.headers.get("Content-Encoding") == "gzip":
-                    raw = gzip.decompress(raw)
-        except (OSError, urllib.error.URLError, TimeoutError) as exc:
-            self._record_event("error", f"SEC EDGAR 호출 실패: {exc}")
-            raise DataSourceError(str(exc)) from exc
+        last_exc: BaseException | None = None
+        for attempt in range(1, SEC_FETCH_MAX_ATTEMPTS + 1):
+            time.sleep(self.request_interval_seconds * attempt)
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    raw = response.read()
+                    if response.headers.get("Content-Encoding") == "gzip":
+                        raw = gzip.decompress(raw)
+                    break
+            except urllib.error.HTTPError as exc:
+                last_exc = exc
+                message = _sec_error_message(exc)
+                if attempt < SEC_FETCH_MAX_ATTEMPTS and _retryable_sec_error(exc):
+                    self._record_event(
+                        "warning",
+                        f"SEC EDGAR 호출 실패({message}); {attempt + 1}/{SEC_FETCH_MAX_ATTEMPTS} 재시도합니다.",
+                    )
+                    continue
+                self._record_event("error", f"SEC EDGAR 호출 실패: {message}")
+                raise DataSourceError(message) from exc
+            except (OSError, urllib.error.URLError, TimeoutError) as exc:
+                last_exc = exc
+                message = _sec_error_message(exc)
+                if attempt < SEC_FETCH_MAX_ATTEMPTS:
+                    self._record_event(
+                        "warning",
+                        f"SEC EDGAR 호출 실패({message}); {attempt + 1}/{SEC_FETCH_MAX_ATTEMPTS} 재시도합니다.",
+                    )
+                    continue
+                self._record_event("error", f"SEC EDGAR 호출 실패: {message}")
+                raise DataSourceError(message) from exc
+        else:
+            message = _sec_error_message(last_exc) if last_exc is not None else "알 수 없는 오류"
+            self._record_event("error", f"SEC EDGAR 호출 실패: {message}")
+            raise DataSourceError(message)
 
         try:
             payload = json.loads(raw.decode("utf-8"))
@@ -230,6 +258,45 @@ class SecEdgarClient:
             self.cache.record_source_event("SEC EDGAR", event_type, message)
         except Exception:
             return
+
+
+def _retryable_sec_error(exc: urllib.error.HTTPError) -> bool:
+    return exc.code in {403, 408, 425, 429, 500, 502, 503, 504}
+
+
+def _sec_error_message(exc: BaseException | None) -> str:
+    if exc is None:
+        return "알 수 없는 오류"
+    if isinstance(exc, urllib.error.HTTPError):
+        reason = str(getattr(exc, "reason", "") or getattr(exc, "msg", "") or "").strip()
+        status = f"HTTP {exc.code}"
+        detail = f" {reason}" if reason else ""
+        hint = _sec_http_hint(exc.code)
+        return f"{status}{detail}{hint}"
+    if isinstance(exc, urllib.error.URLError):
+        reason = exc.reason
+        hint = _network_hint(reason)
+        return f"{reason}{hint}"
+    hint = _network_hint(exc)
+    return f"{exc}{hint}"
+
+
+def _sec_http_hint(status: int) -> str:
+    if status == 403:
+        return " - SEC 접근 제한 가능: User-Agent 연락처, 호출 빈도, 캐시 상태를 확인하세요."
+    if status == 429:
+        return " - SEC rate limit 가능: 호출 간격을 늘리고 캐시를 우선 사용하세요."
+    if status >= 500:
+        return " - SEC 일시 장애 가능"
+    return ""
+
+
+def _network_hint(reason: object) -> str:
+    if isinstance(reason, socket.gaierror) or "[Errno 8]" in str(reason):
+        return " - DNS/네트워크 이름 해석 실패 가능"
+    if isinstance(reason, TimeoutError):
+        return " - 네트워크 타임아웃"
+    return ""
 
 
 def extract_fundamentals(facts: dict, fallback: Fundamentals | None = None) -> Fundamentals:

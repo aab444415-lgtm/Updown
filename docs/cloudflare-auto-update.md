@@ -36,7 +36,12 @@ SEC_USER_AGENT=stock-recommender/0.1 your-email@example.com
 OPENDART_API_KEY=발급받은키
 FRED_API_KEY=발급받은키
 ECOS_API_KEY=발급받은키
+KRX_AUTH_KEY=발급받은키
+POLYGON_API_KEY=발급받은키
 ```
+
+위 값은 GitHub Actions의 일일 스냅샷 생성에 직접 쓰입니다. Secret에 등록하지 않은 키는 Cloudflare 환경변수에 있어도 매일 커밋되는 스냅샷 품질에는 반영되지 않습니다.
+`STOCK_RECOMMENDER_POLYGON_FRESH_LIMIT`는 repository variable로 등록하지 않으면 기본값 `4`를 사용합니다.
 
 ## 3. Cloudflare 환경변수 확인
 
@@ -49,9 +54,11 @@ STOCK_RECOMMENDER_SNAPSHOT_STORE_PATH=snapshot_store/recommendation_snapshots.js
 OPENDART_API_KEY=발급받은키
 FRED_API_KEY=발급받은키
 ECOS_API_KEY=발급받은키
+KRX_AUTH_KEY=발급받은키
+POLYGON_API_KEY=발급받은키
 ```
 
-`POLYGON_API_KEY`, `NEWS_API_KEY`는 아직 필수는 아닙니다.
+`POLYGON_API_KEY`, `KRX_AUTH_KEY`, `NEWS_API_KEY`는 아직 필수는 아닙니다.
 
 ## 4. 수동 실행 테스트
 

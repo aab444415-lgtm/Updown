@@ -167,6 +167,7 @@ def _payload_digest(payload: dict) -> str:
 def _compact_payload(payload: dict, payload_digest: str) -> dict:
     stocks = payload.get("stocks")
     benchmarks = payload.get("benchmarks")
+    price_anchors = _price_anchor_by_ticker(payload)
     compact_stocks = [
         _compact_stock(item)
         for item in (stocks if isinstance(stocks, list) else [])[:COMPACT_TOP_N]
@@ -194,6 +195,9 @@ def _compact_payload(payload: dict, payload_digest: str) -> dict:
         if isinstance(payload.get("snapshotQuality"), dict)
         else {},
         "stocks": compact_stocks,
+        "shortTermCandidates": _compact_candidate_collection(payload, "shortTermCandidates", price_anchors),
+        "mediumTermCandidates": _compact_candidate_collection(payload, "mediumTermCandidates", price_anchors),
+        "longTermCandidates": _compact_candidate_collection(payload, "longTermCandidates", price_anchors),
         "benchmarks": compact_benchmarks,
     }
 
@@ -211,6 +215,51 @@ def _compact_stock(item: dict) -> dict:
         "maxWeightPct": item.get("maxWeightPct"),
         "priceAnchor": item.get("priceAnchor") if isinstance(item.get("priceAnchor"), dict) else {},
     }
+
+
+def _compact_candidate_collection(payload: dict, key: str, price_anchors: dict[str, dict]) -> list[dict]:
+    items = payload.get(key)
+    if not isinstance(items, list):
+        return []
+    return [
+        _compact_candidate(item, price_anchors)
+        for item in items[:COMPACT_TOP_N]
+        if isinstance(item, dict)
+    ]
+
+
+def _compact_candidate(item: dict, price_anchors: dict[str, dict]) -> dict:
+    ticker = str(item.get("ticker") or "").upper()
+    price_anchor = item.get("priceAnchor")
+    if not isinstance(price_anchor, dict):
+        price_anchor = price_anchors.get(ticker, {})
+    return {
+        "ticker": item.get("ticker"),
+        "name": item.get("name"),
+        "score": item.get("score"),
+        "decisionGrade": item.get("decisionGrade"),
+        "riskLevel": item.get("riskLevel"),
+        "riskGate": item.get("riskGate"),
+        "targetWeightPct": item.get("targetWeightPct"),
+        "maxWeightPct": item.get("maxWeightPct"),
+        "priceAnchor": price_anchor,
+    }
+
+
+def _price_anchor_by_ticker(payload: dict) -> dict[str, dict]:
+    anchors: dict[str, dict] = {}
+    for key in ("stocks", "priceAnchors"):
+        items = payload.get(key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            ticker = str(item.get("ticker") or "").upper()
+            price_anchor = item.get("priceAnchor")
+            if ticker and isinstance(price_anchor, dict):
+                anchors.setdefault(ticker, price_anchor)
+    return anchors
 
 
 def _compact_benchmark(item: dict) -> dict:

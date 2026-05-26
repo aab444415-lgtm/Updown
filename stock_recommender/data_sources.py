@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from hashlib import sha1
 from typing import TYPE_CHECKING
 
-from .models import Fundamentals, Momentum, NewsItem, StockProfile
+from .models import Fundamentals, MarketHistoryPoint, Momentum, NewsItem, StockProfile
 from .storage import CacheStore
 from .technical import (
     _last_finite,
@@ -151,19 +151,24 @@ def enrich_with_live_market_data(
         if quote:
             source_name = str(quote.get("_source") or SOURCE_YAHOO)
             sources = dict(fundamentals.sources)
+            preserve_market_cap = _preserve_existing_market_cap(fundamentals)
             if _is_number(quote.get("trailingPE")):
                 sources["pe"] = _field_source(source_name, quote.get("_sourceUrl"))
             if _is_number(quote.get("forwardPE")):
                 sources["forwardPe"] = _field_source(source_name, quote.get("_sourceUrl"))
-            if _is_number(quote.get("marketCap")):
+            if _is_number(quote.get("marketCap")) and not preserve_market_cap:
                 sources["marketCap"] = _field_source(source_name, quote.get("_sourceUrl"))
             fundamentals = replace(
                 fundamentals,
                 pe=_number_or_existing(quote.get("trailingPE"), fundamentals.pe),
                 forward_pe=_number_or_existing(quote.get("forwardPE"), fundamentals.forward_pe),
-                market_cap=_number_or_existing(quote.get("marketCap"), fundamentals.market_cap),
+                market_cap=(
+                    fundamentals.market_cap
+                    if preserve_market_cap
+                    else _number_or_existing(quote.get("marketCap"), fundamentals.market_cap)
+                ),
                 market_cap_currency=_text_or_existing(
-                    quote.get("financialCurrency") or quote.get("currency"),
+                    None if preserve_market_cap else quote.get("financialCurrency") or quote.get("currency"),
                     fundamentals.market_cap_currency,
                 ),
                 sources=sources,
@@ -545,6 +550,67 @@ def fetch_momentum(ticker: str, timeout: float = 8.0, cache: CacheStore | None =
     )
 
 
+def fetch_price_history(
+    ticker: str,
+    timeout: float = 8.0,
+    cache: CacheStore | None = None,
+) -> tuple[MarketHistoryPoint, ...]:
+    symbol = ticker.upper()
+    params = urllib.parse.urlencode({"range": "1y", "interval": "1d"})
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(symbol, safe='')}?{params}"
+    cache_key = f"yahoo-momentum:{symbol}:1y:1d"
+    payload: dict | None = None
+    if cache is not None:
+        cached = cache.get_json(cache_key)
+        if isinstance(cached, dict):
+            payload = cached
+    if payload is None:
+        try:
+            with _open_url(url, timeout=timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            if cache is not None:
+                cache.set_json(cache_key, SOURCE_YAHOO, url, payload, MOMENTUM_TTL_SECONDS)
+                _record_event(cache, SOURCE_YAHOO, "success", f"{symbol} price history를 수집했습니다.")
+        except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            stale = cache.get_json(cache_key, allow_expired=True) if cache is not None else None
+            if isinstance(stale, dict):
+                payload = stale
+                if cache is not None:
+                    _record_event(cache, SOURCE_YAHOO, "stale", f"{symbol} price history 호출 실패로 만료 캐시를 사용했습니다.")
+            else:
+                if cache is not None:
+                    _record_event(cache, SOURCE_YAHOO, "error", f"{symbol} price history 호출 또는 파싱에 실패했습니다.")
+                return ()
+    return _price_history_from_yahoo_payload(payload)
+
+
+def fetch_many_price_histories(
+    tickers: Iterable[str],
+    timeout: float = 8.0,
+    cache: CacheStore | None = None,
+    max_workers: int = 6,
+) -> dict[str, tuple[MarketHistoryPoint, ...]]:
+    symbols = tuple(dict.fromkeys(ticker.upper() for ticker in tickers if ticker))
+    if not symbols:
+        return {}
+    results: dict[str, tuple[MarketHistoryPoint, ...]] = {}
+    workers = max(1, min(max_workers, len(symbols)))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(fetch_price_history, ticker, timeout=timeout, cache=cache): ticker
+            for ticker in symbols
+        }
+        for future in as_completed(futures):
+            ticker = futures[future]
+            try:
+                results[ticker] = future.result()
+            except Exception as exc:  # pragma: no cover - defensive worker boundary
+                if cache is not None:
+                    _record_event(cache, SOURCE_YAHOO, "error", f"{ticker} price history 처리 실패: {exc}")
+                results[ticker] = ()
+    return results
+
+
 def fetch_many_momentums(
     tickers: Iterable[str],
     timeout: float = 8.0,
@@ -570,6 +636,40 @@ def fetch_many_momentums(
                     _record_event(cache, SOURCE_YAHOO, "error", f"{ticker} momentum 처리 실패: {exc}")
                 results[ticker] = Momentum()
     return results
+
+
+def _price_history_from_yahoo_payload(payload: dict) -> tuple[MarketHistoryPoint, ...]:
+    try:
+        result = payload["chart"]["result"][0]
+        timestamps = result.get("timestamp") or []
+        quote = result["indicators"]["quote"][0]
+        opens_raw = quote.get("open") or []
+        highs_raw = quote.get("high") or []
+        lows_raw = quote.get("low") or []
+        closes_raw = quote.get("close") or []
+        volumes_raw = quote.get("volume") or []
+        adjcloses = (result.get("indicators", {}).get("adjclose") or [{}])[0].get("adjclose") or []
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return ()
+
+    points: list[MarketHistoryPoint] = []
+    for index, timestamp in enumerate(timestamps):
+        close = _list_number(adjcloses, index)
+        if close is None:
+            close = _list_number(closes_raw, index)
+        if not isinstance(timestamp, (int, float)) or close is None or close <= 0:
+            continue
+        points.append(
+            MarketHistoryPoint(
+                date=datetime.fromtimestamp(timestamp, tz=timezone.utc).date().isoformat(),
+                open=_list_number(opens_raw, index),
+                high=_list_number(highs_raw, index),
+                low=_list_number(lows_raw, index),
+                close=close,
+                volume=_list_number(volumes_raw, index),
+            )
+        )
+    return tuple(points)
 
 
 def average_industry_momentum(
@@ -701,6 +801,15 @@ def _field_source(source: str, url: object = None) -> dict:
     if isinstance(url, str) and url:
         payload["url"] = url
     return payload
+
+
+def _preserve_existing_market_cap(fundamentals: Fundamentals) -> bool:
+    source = fundamentals.sources.get("marketCap")
+    return (
+        isinstance(source, dict)
+        and source.get("source") == "KRX"
+        and _is_number(fundamentals.market_cap)
+    )
 
 
 def _text_or_existing(value: object, existing: str) -> str:

@@ -9,6 +9,13 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
 from .data_sources import average_industry_momentum, momentum_to_score
+from .finance_profiles import (
+    build_correlation_profile,
+    build_detailed_valuation_profiles,
+    build_earnings_estimate_profiles,
+    build_liquidity_profiles,
+    build_sepa_profiles,
+)
 from .macro_data import industry_macro_data_score
 from .models import (
     BeneficiaryIndustryProfile,
@@ -20,8 +27,10 @@ from .models import (
     IndustryProfile,
     IndustryScore,
     LegendStrategyScore,
+    LiquidityProfile,
     LongTermScore,
     MacroSnapshot,
+    MarketHistoryPoint,
     MediumTermScore,
     Momentum,
     NewsItem,
@@ -146,6 +155,8 @@ def build_report(
     created_at: datetime | None = None,
     source_events: Iterable[dict] | None = None,
     beneficiary_industries: Iterable[BeneficiaryIndustryProfile] = (),
+    price_histories: dict[str, tuple[MarketHistoryPoint, ...]] | None = None,
+    liquidity_profiles: dict[str, LiquidityProfile] | None = None,
 ) -> RecommendationReport:
     industries_tuple = tuple(industries)
     stocks_tuple = tuple(stocks)
@@ -171,23 +182,33 @@ def build_report(
         macro_snapshot=macro_snapshot,
         created_at=report_created_at,
     )
-    stock_scores = score_stocks(stocks_tuple, industry_scores, momentums)
+    price_histories = price_histories or {}
+    if liquidity_profiles is None and price_histories:
+        liquidity_profiles = build_liquidity_profiles(stocks_tuple, price_histories, momentums)
+    else:
+        liquidity_profiles = liquidity_profiles or {}
+    stock_scores = score_stocks(stocks_tuple, industry_scores, momentums, liquidity_profiles)
+    ranked_stock_scores = tuple(sorted(stock_scores, key=lambda item: item.score, reverse=True))
+    sepa_profiles = build_sepa_profiles(stock_scores, momentums)
+    detailed_valuation_profiles = build_detailed_valuation_profiles(stock_scores)
+    earnings_estimate_profiles = build_earnings_estimate_profiles(stock_scores)
+    correlation_profile = build_correlation_profile(ranked_stock_scores, price_histories)
     early_growth_scores = score_early_growth_candidates(stock_scores, momentums)
     short_term_scores = score_short_term_candidates(
-        stock_scores, industry_scores, beneficiary_scores, news_tuple, momentums
+        stock_scores, industry_scores, beneficiary_scores, news_tuple, momentums, liquidity_profiles, sepa_profiles
     )
     medium_term_scores = score_medium_term_candidates(
-        stock_scores, industry_scores, news_tuple, momentums
+        stock_scores, industry_scores, news_tuple, momentums, liquidity_profiles, sepa_profiles
     )
     long_term_scores = score_long_term_candidates(
-        stock_scores, industry_scores, news_tuple, momentums, macro_snapshot
+        stock_scores, industry_scores, news_tuple, momentums, macro_snapshot, liquidity_profiles
     )
     legend_strategy_scores = score_legend_strategy_candidates(stock_scores, momentums)
     return RecommendationReport(
         created_at=report_created_at,
         macro_context=macro_context,
         industry_scores=tuple(sorted(industry_scores, key=lambda item: item.score, reverse=True)),
-        stock_scores=tuple(sorted(stock_scores, key=lambda item: item.score, reverse=True)),
+        stock_scores=ranked_stock_scores,
         news_items=news_tuple,
         early_growth_scores=early_growth_scores,
         short_term_scores=short_term_scores,
@@ -195,6 +216,11 @@ def build_report(
         long_term_scores=long_term_scores,
         legend_strategy_scores=legend_strategy_scores,
         beneficiary_industry_scores=beneficiary_scores,
+        liquidity_profiles=dict(liquidity_profiles),
+        sepa_profiles=dict(sepa_profiles),
+        earnings_estimate_profiles=dict(earnings_estimate_profiles),
+        detailed_valuation_profiles=dict(detailed_valuation_profiles),
+        correlation_profile=correlation_profile,
         macro_snapshot=macro_snapshot,
         data_quality=data_quality or DataQuality(),
         momentums=dict(momentums),
@@ -320,9 +346,11 @@ def score_stocks(
     stocks: Iterable[StockProfile],
     industry_scores: Iterable[IndustryScore],
     momentums: dict[str, Momentum],
+    liquidity_profiles: dict[str, LiquidityProfile] | None = None,
 ) -> tuple[StockScore, ...]:
     industry_score_by_name = {item.industry.name: item for item in industry_scores}
     results: list[StockScore] = []
+    liquidity_profiles = liquidity_profiles or {}
     for stock in stocks:
         industry_score = industry_score_by_name[stock.industry]
         growth_quality = growth_quality_score(stock.fundamentals)
@@ -342,6 +370,14 @@ def score_stocks(
             growth_quality=growth_quality,
             analysis_style=analysis_style,
         )
+        liquidity = liquidity_profiles.get(stock.ticker.upper())
+        if liquidity is not None and liquidity.score < 35:
+            liquidity_reason = f"유동성 {liquidity.grade}({liquidity.score:.1f}/100)로 체결 리스크 점검"
+            if risk_gate == "Pass":
+                risk_gate = "Watch"
+                risk_gate_reasons = (liquidity_reason,)
+            else:
+                risk_gate_reasons = tuple(dict.fromkeys((*risk_gate_reasons, liquidity_reason)))
         valuation_note = valuation_note_for_stock(stock, valuation, analysis_style)
         valuation_range = valuation_range_for_stock(stock, analysis_style)
         total = style_weighted_stock_score(
@@ -354,6 +390,8 @@ def score_stocks(
             weight_profile=weight_profile,
         )
         total = risk_adjusted_stock_score(total, risk_gate, risk_gate_reasons)
+        if liquidity is not None:
+            total = liquidity_adjusted_score(total, liquidity)
         data_cap, data_cautions = data_coverage_gate_for_stock(stock.fundamentals)
         total = min(total, data_cap)
         reasons = _stock_reasons(
@@ -374,6 +412,7 @@ def score_stocks(
                     *stock.risks,
                     *industry_score.industry.risks[:1],
                     *(() if risk_gate == "Pass" else risk_gate_reasons),
+                    *((liquidity.warnings if liquidity is not None else ())),
                     *data_cautions,
                     *risk_cautions_for_stock(stock, analysis_style),
                 )
@@ -397,7 +436,7 @@ def score_stocks(
             valuation=valuation,
             momentum=momentum,
         )
-        valuation_label = valuation_label_for_score(valuation)
+        valuation_label = valuation_label_for_score(valuation, stock.fundamentals)
         results.append(
             StockScore(
                 stock=stock,
@@ -476,12 +515,16 @@ def score_short_term_candidates(
     beneficiary_industry_scores: Iterable[BeneficiaryIndustryScore],
     news_items: Iterable[NewsItem],
     momentums: dict[str, Momentum],
+    liquidity_profiles: dict[str, LiquidityProfile] | None = None,
+    sepa_profiles: dict[str, object] | None = None,
 ) -> tuple[ShortTermScore, ...]:
     industry_score_by_name = {item.industry.name: item for item in industry_scores}
     beneficiary_tuple = tuple(beneficiary_industry_scores)
     current_promising = _promising_current_industry_names(industry_scores)
     promising_beneficiaries = _promising_beneficiary_scores(beneficiary_tuple)
     news_tuple = tuple(news_items)
+    liquidity_profiles = liquidity_profiles or {}
+    sepa_profiles = sepa_profiles or {}
     news_counter = _counter(
         " ".join(
             " ".join(part for part in (item.title, item.summary or "") if part)
@@ -493,12 +536,14 @@ def score_short_term_candidates(
         stock = item.stock
         industry_score = industry_score_by_name[stock.industry]
         momentum = momentums.get(stock.ticker.upper(), Momentum())
+        liquidity = liquidity_profiles.get(stock.ticker.upper())
+        sepa = sepa_profiles.get(stock.ticker.upper())
         news = short_term_news_score(stock, industry_score.industry, news_counter, bool(news_tuple))
         market = short_term_market_score(momentum, industry_score.market_score)
         chart = short_term_chart_score(momentum)
         volume = short_term_volume_score(momentum)
         company = short_term_company_score(stock, item.quality_score)
-        confidence = candidate_confidence_score(stock, momentum, bool(news_tuple), "short")
+        confidence = candidate_confidence_score(stock, momentum, bool(news_tuple), "short", liquidity)
         theme = _short_term_theme_signal(stock, industry_score, current_promising, promising_beneficiaries)
         total = chart * 0.70 + theme.score * 0.30
         total -= short_term_penalty(stock, momentum, news_tuple, market, chart, volume, company)
@@ -517,6 +562,9 @@ def score_short_term_candidates(
         )
         score = _apply_short_term_trade_signal_caps(score, trade_signal)
         score = _apply_short_term_caps(score, momentum)
+        setup_label = short_term_setup_label(momentum, chart, volume, trade_signal)
+        if getattr(sepa, "stage", "") == "Stage 2":
+            setup_label = f"{setup_label} + SEPA" if setup_label else "SEPA Stage 2"
         results.append(
             ShortTermScore(
                 stock_score=item,
@@ -534,7 +582,7 @@ def score_short_term_candidates(
                 confidence_score=round(confidence, 1),
                 confidence_label=confidence_label(confidence),
                 signal_label=short_term_signal_label(score, market, chart, volume, news, confidence, trade_signal),
-                setup_label=short_term_setup_label(momentum, chart, volume, trade_signal),
+                setup_label=setup_label,
                 time_horizon="당일~2주",
                 reasons=short_term_reasons(stock, momentum, news, market, chart, volume, company, theme),
                 cautions=short_term_cautions(stock, momentum, news_tuple, market, chart, volume, company, theme),
@@ -632,9 +680,13 @@ def score_medium_term_candidates(
     industry_scores: Iterable[IndustryScore],
     news_items: Iterable[NewsItem],
     momentums: dict[str, Momentum],
+    liquidity_profiles: dict[str, LiquidityProfile] | None = None,
+    sepa_profiles: dict[str, object] | None = None,
 ) -> tuple[MediumTermScore, ...]:
     industry_score_by_name = {item.industry.name: item for item in industry_scores}
     news_tuple = tuple(news_items)
+    liquidity_profiles = liquidity_profiles or {}
+    sepa_profiles = sepa_profiles or {}
     news_counter = _counter(
         " ".join(
             " ".join(part for part in (item.title, item.summary or "") if part)
@@ -646,14 +698,18 @@ def score_medium_term_candidates(
         stock = item.stock
         industry_score = industry_score_by_name[stock.industry]
         momentum = momentums.get(stock.ticker.upper(), Momentum())
+        liquidity = liquidity_profiles.get(stock.ticker.upper())
+        sepa = sepa_profiles.get(stock.ticker.upper())
         company = medium_term_company_score(stock, item.quality_score, item.valuation_score)
         market = medium_term_market_score(momentum, industry_score.market_score)
         chart = medium_term_chart_score(momentum)
         news = medium_term_news_score(stock, industry_score.industry, news_counter, bool(news_tuple))
         total = company * 0.30 + chart * 0.30 + market * 0.25 + news * 0.15
+        if getattr(sepa, "stage", "") == "Stage 2":
+            total += 2.0
         total -= medium_term_penalty(stock, momentum, news_tuple, company, market, chart)
         score = _clamp(total, 0, 100)
-        confidence = candidate_confidence_score(stock, momentum, bool(news_tuple), "medium")
+        confidence = candidate_confidence_score(stock, momentum, bool(news_tuple), "medium", liquidity)
         results.append(
             MediumTermScore(
                 stock_score=item,
@@ -688,9 +744,11 @@ def score_long_term_candidates(
     news_items: Iterable[NewsItem],
     momentums: dict[str, Momentum],
     macro_snapshot: MacroSnapshot | None = None,
+    liquidity_profiles: dict[str, LiquidityProfile] | None = None,
 ) -> tuple[LongTermScore, ...]:
     industry_score_by_name = {item.industry.name: item for item in industry_scores}
     news_tuple = tuple(news_items)
+    liquidity_profiles = liquidity_profiles or {}
     news_counter = _counter(
         " ".join(
             " ".join(part for part in (item.title, item.summary or "") if part)
@@ -702,6 +760,7 @@ def score_long_term_candidates(
         stock = item.stock
         industry_score = industry_score_by_name[stock.industry]
         momentum = momentums.get(stock.ticker.upper(), Momentum())
+        liquidity = liquidity_profiles.get(stock.ticker.upper())
         company = long_term_company_score(stock, item.quality_score, item.valuation_score)
         market = long_term_market_score(momentum, industry_score, macro_snapshot)
         chart = long_term_chart_score(momentum)
@@ -709,7 +768,7 @@ def score_long_term_candidates(
         total = company * 0.50 + market * 0.25 + news * 0.15 + chart * 0.10
         total -= long_term_penalty(stock, momentum, news_tuple, company, market, chart)
         score = _clamp(total, 0, 100)
-        confidence = candidate_confidence_score(stock, momentum, bool(news_tuple), "long")
+        confidence = candidate_confidence_score(stock, momentum, bool(news_tuple), "long", liquidity)
         results.append(
             LongTermScore(
                 stock_score=item,
@@ -1286,6 +1345,7 @@ def candidate_confidence_score(
     momentum: Momentum,
     has_news: bool,
     horizon: str,
+    liquidity: LiquidityProfile | None = None,
 ) -> float:
     score = 22.0
     if _has_momentum_data(momentum):
@@ -1302,6 +1362,13 @@ def candidate_confidence_score(
     if has_news:
         score += 8 if horizon == "short" else 6
     score += _fundamental_coverage_score(stock.fundamentals) * (0.12 if horizon == "short" else 0.24)
+    if liquidity is not None:
+        if liquidity.score >= 65:
+            score += 6 if horizon == "short" else 3
+        elif liquidity.score < 35:
+            score -= 14 if horizon == "short" else 8
+        elif liquidity.score < 45:
+            score -= 6 if horizon == "short" else 3
     if momentum.stale:
         score -= 10
     return _clamp(score, 0, 100)
@@ -2552,6 +2619,16 @@ def risk_adjusted_stock_score(total: float, risk_gate: str, risk_gate_reasons: t
     return total
 
 
+def liquidity_adjusted_score(total: float, liquidity: LiquidityProfile) -> float:
+    if liquidity.score < 25:
+        return min(max(total - 7, 0), 52)
+    if liquidity.score < 35:
+        return min(max(total - 4, 0), 62)
+    if liquidity.score < 45:
+        return max(total - 2, 0)
+    return total
+
+
 def valuation_note_for_stock(stock: StockProfile, valuation: float, analysis_style: str) -> str:
     fundamentals = stock.fundamentals
     pe = fundamentals.forward_pe if fundamentals.forward_pe is not None else fundamentals.pe
@@ -2927,7 +3004,9 @@ def early_growth_cautions(
     return tuple(dict.fromkeys(cautions))
 
 
-def valuation_label_for_score(score: float) -> str:
+def valuation_label_for_score(score: float, fundamentals: Fundamentals | None = None) -> str:
+    if fundamentals is not None and not _has_valuation_multiple_data(fundamentals):
+        return "데이터 부족"
     if score >= 76:
         return "저평가/합리"
     if score >= 63:
@@ -2935,6 +3014,18 @@ def valuation_label_for_score(score: float) -> str:
     if score >= 48:
         return "약간 고평가"
     return "고평가"
+
+
+def _has_valuation_multiple_data(fundamentals: Fundamentals) -> bool:
+    return any(
+        value is not None
+        for value in (
+            fundamentals.pe,
+            fundamentals.forward_pe,
+            fundamentals.ev_to_ebit,
+            fundamentals.earnings_yield_pct,
+        )
+    )
 
 
 def _industry_evidence(

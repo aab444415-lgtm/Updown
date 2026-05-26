@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT_DIR))
 
 from stock_recommender.backtest import (
     BACKTEST_HORIZONS,
+    BACKTEST_METHODS,
     BENCHMARKS,
     backtest_to_dict,
     create_backtest,
@@ -65,25 +66,33 @@ def export_backtests() -> None:
     for months in (6, 12, 24):
         for top_n in (3, 5, 10):
             for benchmark in BENCHMARKS:
-                for horizon in BACKTEST_HORIZONS:
-                    path = _backtest_path(months, top_n, benchmark, horizon)
-                    try:
-                        payload = backtest_to_dict(
-                            create_backtest(
-                                months=months,
-                                top_n=top_n,
-                                benchmark_ticker=benchmark,
-                                horizon=horizon,
+                for method in BACKTEST_METHODS:
+                    for horizon in BACKTEST_HORIZONS:
+                        path = _backtest_path(method, months, top_n, benchmark, horizon)
+                        try:
+                            payload = backtest_to_dict(
+                                create_backtest(
+                                    months=months,
+                                    top_n=top_n,
+                                    benchmark_ticker=benchmark,
+                                    method=method,
+                                    horizon=horizon,
+                                )
                             )
-                        )
-                    except Exception as exc:
-                        payload = empty_backtest_payload(months, top_n, benchmark, str(exc), horizon)
-                    write_json(path, payload)
-                    if horizon == "overall":
-                        write_json(DIST_DIR / "data" / f"backtest-{months}-{top_n}-{benchmark}.json", payload)
+                        except Exception as exc:
+                            payload = empty_backtest_payload(months, top_n, benchmark, str(exc), horizon, method)
+                        write_json(path, payload)
+                        if method == "snapshot":
+                            write_json(_legacy_backtest_path(months, top_n, benchmark, horizon), payload)
+                            if horizon == "overall":
+                                write_json(DIST_DIR / "data" / f"backtest-{months}-{top_n}-{benchmark}.json", payload)
 
 
-def _backtest_path(months: int, top_n: int, benchmark: str, horizon: str) -> Path:
+def _backtest_path(method: str, months: int, top_n: int, benchmark: str, horizon: str) -> Path:
+    return DIST_DIR / "data" / f"backtest-{method}-{months}-{top_n}-{benchmark}-{horizon}.json"
+
+
+def _legacy_backtest_path(months: int, top_n: int, benchmark: str, horizon: str) -> Path:
     return DIST_DIR / "data" / f"backtest-{months}-{top_n}-{benchmark}-{horizon}.json"
 
 
@@ -105,14 +114,14 @@ def snapshots_payload() -> dict:
 
 
 def empty_backtest_payload(
-    months: int, top_n: int, benchmark: str, warning: str, horizon: str = "overall"
+    months: int, top_n: int, benchmark: str, warning: str, horizon: str = "overall", method: str = "snapshot"
 ) -> dict:
     return {
         "createdAt": "",
         "createdAtDisplay": "",
         "createdAtTimezone": "",
         "snapshotDate": "",
-        "method": "snapshot",
+        "method": method,
         "horizon": horizon,
         "pointInTime": True,
         "priceSource": "unknown",

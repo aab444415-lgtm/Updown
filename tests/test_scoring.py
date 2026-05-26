@@ -1,7 +1,9 @@
 import json
 import unittest
+from contextlib import redirect_stdout
 from datetime import date, datetime, timedelta, timezone
 from http import HTTPStatus
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -11,6 +13,7 @@ from stock_recommender.backtest import PricePoint, SnapshotRecord, backtest_to_d
 from stock_recommender.config import AppConfig, configured_source_names, load_config, missing_optional_source_names
 import stock_recommender.data_sources as data_sources
 import stock_recommender.universe_loader as universe_loader
+from stock_recommender.finance_profiles import liquidity_profile_for_stock
 from stock_recommender.macro_data import industry_macro_data_score
 from stock_recommender.models import (
     BeneficiaryIndustryProfile,
@@ -20,6 +23,7 @@ from stock_recommender.models import (
     IndustryProfile,
     MacroIndicator,
     MacroSnapshot,
+    MarketHistoryPoint,
     Momentum,
     NewsItem,
     StockProfile,
@@ -33,6 +37,7 @@ from stock_recommender.scoring import (
     decision_grade_for_stock,
     growth_quality_score,
     quality_score,
+    valuation_label_for_score,
     valuation_score,
 )
 from stock_recommender.sec_edgar import extract_fundamentals
@@ -103,6 +108,21 @@ class ScoringTests(unittest.TestCase):
         )
 
         self.assertGreater(valuation_score(reasonable_growth), valuation_score(cheap_but_stagnant))
+
+    def test_valuation_label_separates_missing_data_from_bad_multiple(self):
+        self.assertEqual(valuation_label_for_score(45, Fundamentals()), "데이터 부족")
+        self.assertEqual(valuation_label_for_score(22, Fundamentals(pe=120.0)), "고평가")
+        self.assertEqual(valuation_label_for_score(76, Fundamentals(forward_pe=12.0)), "저평가/합리")
+
+    def test_dynamic_universe_classifies_known_theme_tickers(self):
+        self.assertEqual(
+            universe_loader._classify_industry("NVDA Nvidia Corp Common Stock"),
+            "AI 반도체 및 데이터센터",
+        )
+        self.assertEqual(
+            universe_loader._classify_industry("064350 현대로템"),
+            "방산 및 우주항공",
+        )
 
     def test_growth_quality_rewards_operating_leverage_and_quarterly_streak(self):
         strong = Fundamentals(
@@ -264,6 +284,154 @@ class ScoringTests(unittest.TestCase):
         self.assertIn(item.portfolio_signal, {"편입 후보", "분할 관찰", "보유 점검"})
         self.assertEqual(api_payload["stocks"][0]["riskGate"], item.risk_gate)
         self.assertEqual(snapshot_payload["stocks"][0]["targetWeightPct"], item.target_weight_pct)
+
+    def test_liquidity_profile_rewards_deep_stable_trading(self):
+        stock = StockProfile(
+            ticker="DEEP",
+            name="Deep Market",
+            industry="테스트 산업",
+            role="core",
+            thesis="liquidity test",
+            risks=(),
+            fundamentals=Fundamentals(market_cap=5_000_000_000),
+        )
+        deep = liquidity_profile_for_stock(
+            stock,
+            _flat_price_history("DEEP", close=100.0, volume=6_000_000, days=70),
+        )
+        thin = liquidity_profile_for_stock(
+            stock,
+            _flat_price_history("DEEP", close=10.0, volume=8_000, days=70),
+        )
+
+        self.assertGreater(deep.score, thin.score + 35)
+        self.assertIn(deep.grade, {"매우 높음", "높음"})
+        self.assertIn(thin.grade, {"낮음", "매우 낮음"})
+
+    def test_correlation_profile_handles_same_and_inverse_direction(self):
+        industry = IndustryProfile("테스트 산업", "", (), (), (), ())
+        stocks = tuple(
+            StockProfile(
+                ticker=ticker,
+                name=ticker,
+                industry=industry.name,
+                role="core",
+                thesis="correlation test",
+                risks=(),
+                fundamentals=Fundamentals(25.0, 20.0, 18.0, 35.0, 28.0, 22.0, 3_000_000_000),
+            )
+            for ticker in ("AAA", "BBB", "CCC")
+        )
+        returns = tuple(0.012 if index % 3 == 0 else (-0.004 if index % 3 == 1 else 0.007) for index in range(65))
+        histories = {
+            "AAA": _history_from_returns("AAA", 100.0, returns),
+            "BBB": _history_from_returns("BBB", 80.0, tuple(value * 0.9 for value in returns)),
+            "CCC": _history_from_returns("CCC", 60.0, tuple(-value for value in returns)),
+        }
+
+        report = build_report(DEFAULT_MACRO_CONTEXT, (industry,), stocks, (), price_histories=histories)
+        profile = report.correlation_profile
+
+        self.assertIsNotNone(profile)
+        self.assertGreaterEqual(profile.coverage_pct, 99.0)
+        self.assertGreater(profile.max_correlation or 0, 0.95)
+        self.assertTrue(any(pair.correlation < -0.95 for pair in profile.pairs))
+
+    def test_sepa_profile_flags_stage_two_template(self):
+        industry = IndustryProfile("테스트 성장 산업", "", (), (), (), ())
+        stock = StockProfile(
+            ticker="SEPA",
+            name="SEPA Corp",
+            industry=industry.name,
+            role="core",
+            thesis="sepa test",
+            risks=(),
+            fundamentals=Fundamentals(35.0, 22.0, 18.0, 32.0, 28.0, 21.0, 3_000_000_000),
+        )
+        momentum = Momentum(
+            one_month_pct=24.0,
+            three_month_pct=38.0,
+            six_month_pct=56.0,
+            drawdown_from_high_pct=-7.0,
+            range_position_pct=92.0,
+            latest_close=105.0,
+            ma60=95.0,
+            ma150=86.0,
+            ma200=80.0,
+            ma200_slope_pct=2.4,
+            rsi14=64.0,
+            volume_ratio=1.7,
+            twenty_day_breakout_pct=2.0,
+            previous_swing_high_distance_pct=1.5,
+        )
+
+        report = build_report(
+            DEFAULT_MACRO_CONTEXT,
+            (industry,),
+            (stock,),
+            (),
+            momentums={"SEPA": momentum},
+        )
+        profile = report.sepa_profiles["SEPA"]
+
+        self.assertEqual(profile.stage, "Stage 2")
+        self.assertEqual(profile.trend_template_passes, 8)
+        self.assertEqual(profile.stage_label, "매수 가능 추세권")
+
+    def test_finance_skill_profiles_are_serialized_for_api_and_snapshot(self):
+        industry = IndustryProfile("테스트 산업", "", (), (), (), ())
+        stock = StockProfile(
+            ticker="FSK",
+            name="Finance Skill",
+            industry=industry.name,
+            role="core",
+            thesis="serialization test",
+            risks=(),
+            fundamentals=Fundamentals(
+                revenue_growth_pct=30.0,
+                operating_margin_pct=24.0,
+                roe_pct=18.0,
+                debt_to_equity_pct=28.0,
+                pe=24.0,
+                forward_pe=18.0,
+                market_cap=4_000_000_000,
+                free_cash_flow=220_000_000,
+                latest_quarter_revenue_yoy_pct=28.0,
+                latest_quarter_operating_income_yoy_pct=35.0,
+                quarterly_revenue_yoy_streak=4,
+            ),
+        )
+        momentum = Momentum(
+            one_month_pct=12.0,
+            three_month_pct=24.0,
+            six_month_pct=36.0,
+            drawdown_from_high_pct=-12.0,
+            range_position_pct=82.0,
+            latest_close=70.0,
+            ma60=64.0,
+            ma150=58.0,
+            ma200=54.0,
+            ma200_slope_pct=1.8,
+            volume_ratio=1.4,
+            twenty_day_breakout_pct=1.0,
+        )
+        report = build_report(
+            DEFAULT_MACRO_CONTEXT,
+            (industry,),
+            (stock,),
+            (),
+            momentums={"FSK": momentum},
+            price_histories={"FSK": _flat_price_history("FSK", close=70.0, volume=1_200_000, days=70)},
+        )
+
+        api_payload = report_to_dict(report)
+        snapshot_payload = report_to_snapshot_payload(report)
+
+        self.assertIn("correlation", api_payload)
+        self.assertIn("correlation", snapshot_payload)
+        for field in ("liquidity", "sepa", "earningsEstimate", "detailedValuation"):
+            self.assertIsNotNone(api_payload["stocks"][0][field])
+            self.assertIsNotNone(snapshot_payload["stocks"][0][field])
 
     def test_report_contains_data_quality(self):
         report = build_report(
@@ -1634,6 +1802,7 @@ class ConfigTests(unittest.TestCase):
                     [
                         'SEC_USER_AGENT="stock-recommender test@example.com"',
                         "FRED_API_KEY=fred-key",
+                        "KRX_AUTH_KEY=krx-key",
                         "STOCK_RECOMMENDER_UNIVERSE_MODE=curated",
                         "STOCK_RECOMMENDER_UNIVERSE_LIMIT=42",
                         "STOCK_RECOMMENDER_US_UNIVERSE_LIMIT=30",
@@ -1641,6 +1810,9 @@ class ConfigTests(unittest.TestCase):
                         "STOCK_RECOMMENDER_US_FUNDAMENTAL_LIMIT=9",
                         "STOCK_RECOMMENDER_KR_FUNDAMENTAL_LIMIT=3",
                         "STOCK_RECOMMENDER_POLYGON_FRESH_LIMIT=7",
+                        "STOCK_RECOMMENDER_ENABLE_EXTERNAL_RESEARCH=1",
+                        "ADANOS_API_KEY=adanos-key",
+                        "FUNDA_API_KEY=funda-key",
                     ]
                 ),
                 encoding="utf-8",
@@ -1650,8 +1822,10 @@ class ConfigTests(unittest.TestCase):
 
         self.assertEqual(config.sec_user_agent, "stock-recommender test@example.com")
         self.assertEqual(config.fred_api_key, "fred-key")
+        self.assertEqual(config.krx_auth_key, "krx-key")
         self.assertIn("SEC EDGAR", configured_source_names(config))
         self.assertIn("FRED", configured_source_names(config))
+        self.assertIn("KRX", configured_source_names(config))
         self.assertIn("OpenDART", missing_optional_source_names(config))
         self.assertEqual(config.universe_mode, "curated")
         self.assertEqual(config.universe_limit, 42)
@@ -1660,6 +1834,9 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.us_fundamental_limit, 9)
         self.assertEqual(config.kr_fundamental_limit, 3)
         self.assertEqual(config.polygon_fresh_limit, 7)
+        self.assertTrue(config.enable_external_research)
+        self.assertIn("Adanos", configured_source_names(config))
+        self.assertIn("Funda", configured_source_names(config))
 
     def test_load_config_defaults_to_korea_timezone(self):
         with TemporaryDirectory() as tmpdir:
@@ -1673,6 +1850,10 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(config.persist_repo_ledger)
         self.assertIsNone(config.full_snapshot_dir)
         self.assertEqual(config.universe_limit, 800)
+        self.assertFalse(config.enable_external_research)
+        self.assertNotIn("Adanos", missing_optional_source_names(config))
+        self.assertNotIn("Funda", missing_optional_source_names(config))
+        self.assertIn("KRX", missing_optional_source_names(config))
         self.assertEqual(config.us_universe_limit, 600)
         self.assertEqual(config.kr_universe_limit, 200)
         self.assertEqual(config.us_fundamental_limit, 250)
@@ -1829,6 +2010,172 @@ class UniverseLoaderTests(unittest.TestCase):
         self.assertEqual({stock.ticker for stock in result.stocks}, {"005930.KS", "123456.KQ"})
         self.assertTrue(all(stock.country == "KR" for stock in result.stocks))
         self.assertEqual({stock.dart_stock_code for stock in result.stocks}, {"005930", "123456"})
+
+    def test_krx_quotes_are_used_before_yahoo_for_kr_screening(self):
+        with TemporaryDirectory() as tmpdir:
+            config = _test_app_config(
+                tmpdir,
+                opendart_api_key="dart-key",
+                krx_auth_key="krx-key",
+                universe_limit=2,
+                us_universe_limit=0,
+                kr_universe_limit=2,
+            )
+            cache = CacheStore(config.cache_db_path)
+            krx_response = type("Response", (), {
+                "ok": True,
+                "source": "KRX",
+                "payload": {
+                    "basDd": "20260525",
+                    "OutBlock_1": [
+                        {
+                            "_market": "KOSPI",
+                            "ISU_CD": "005930",
+                            "ISU_NM": "삼성전자",
+                            "TDD_CLSPRC": "70,000",
+                            "MKTCAP": "418,000,000,000,000",
+                        },
+                        {
+                            "_market": "KOSDAQ",
+                            "ISU_CD": "123456",
+                            "ISU_NM": "코스닥바이오",
+                            "TDD_CLSPRC": "12,000",
+                            "MKTCAP": "700,000,000,000",
+                        },
+                    ],
+                },
+                "warning": None,
+            })()
+
+            with (
+                patch.object(universe_loader.SecEdgarClient, "fetch_ticker_records", return_value=()),
+                patch.object(
+                    universe_loader.OpenDartClient,
+                    "fetch_corp_code_map",
+                    return_value=type("Response", (), {
+                        "ok": True,
+                        "source": "OpenDART",
+                        "payload": {
+                            "005930": {"corp_code": "00126380", "corp_name": "삼성전자"},
+                            "123456": {"corp_code": "00999999", "corp_name": "코스닥바이오"},
+                        },
+                        "warning": None,
+                    })(),
+                ),
+                patch.object(universe_loader.KrxClient, "fetch_latest_stock_daily_trades", return_value=krx_response) as krx,
+                patch.object(universe_loader, "fetch_yahoo_quotes", return_value={}) as yahoo,
+            ):
+                result = universe_loader.load_stock_universe(config, cache)
+
+        krx.assert_called_once()
+        yahoo.assert_not_called()
+        self.assertEqual(result.quote_ready_count, 2)
+        self.assertEqual({stock.ticker for stock in result.stocks}, {"005930.KS", "123456.KQ"})
+        self.assertTrue(all(stock.fundamentals.sources["marketCap"]["source"] == "KRX" for stock in result.stocks))
+        self.assertTrue(any("KRX 가격/시총으로 한국 후보 2개" in warning for warning in result.warnings))
+
+    def test_krx_partial_market_failure_keeps_available_rows_with_warning(self):
+        with TemporaryDirectory() as tmpdir:
+            config = _test_app_config(
+                tmpdir,
+                opendart_api_key="dart-key",
+                krx_auth_key="krx-key",
+                universe_limit=2,
+                us_universe_limit=0,
+                kr_universe_limit=2,
+            )
+            cache = CacheStore(config.cache_db_path)
+            krx_response = type("Response", (), {
+                "ok": True,
+                "source": "KRX",
+                "payload": {
+                    "basDd": "20260525",
+                    "marketStatus": {
+                        "KOSPI": {"ok": True, "rowCount": 1, "warning": None},
+                        "KOSDAQ": {"ok": False, "rowCount": 0, "warning": "권한 없음"},
+                    },
+                    "OutBlock_1": [
+                        {
+                            "_market": "KOSPI",
+                            "ISU_CD": "005930",
+                            "ISU_NM": "삼성전자",
+                            "TDD_CLSPRC": "70,000",
+                            "MKTCAP": "418,000,000,000,000",
+                        },
+                    ],
+                },
+                "warning": None,
+            })()
+
+            with (
+                patch.object(universe_loader.SecEdgarClient, "fetch_ticker_records", return_value=()),
+                patch.object(
+                    universe_loader.OpenDartClient,
+                    "fetch_corp_code_map",
+                    return_value=type("Response", (), {
+                        "ok": True,
+                        "source": "OpenDART",
+                        "payload": {
+                            "005930": {"corp_code": "00126380", "corp_name": "삼성전자"},
+                            "123456": {"corp_code": "00999999", "corp_name": "코스닥바이오"},
+                        },
+                        "warning": None,
+                    })(),
+                ),
+                patch.object(universe_loader.KrxClient, "fetch_latest_stock_daily_trades", return_value=krx_response),
+                patch.object(universe_loader, "fetch_yahoo_quotes", return_value={}),
+            ):
+                result = universe_loader.load_stock_universe(config, cache)
+
+        self.assertEqual(result.quote_ready_count, 1)
+        self.assertEqual([stock.ticker for stock in result.stocks], ["005930.KS"])
+        self.assertTrue(any("KRX KOSDAQ 일별매매정보 확인이 일부 실패" in warning for warning in result.warnings))
+
+    def test_krx_previous_close_does_not_use_change_amount(self):
+        quote = universe_loader._krx_quote_from_row(
+            {
+                "_market": "KOSPI",
+                "ISU_CD": "005930",
+                "ISU_NM": "삼성전자",
+                "TDD_CLSPRC": "70,000",
+                "CMPPREVDD_PRC": "1,500",
+                "MKTCAP": "418,000,000,000,000",
+            },
+            "005930",
+        )
+
+        self.assertIsNotNone(quote)
+        self.assertNotIn("regularMarketPreviousClose", quote)
+
+    def test_krx_status_requires_each_market_rows(self):
+        import stock_recommender.sources_status as sources_status
+
+        with TemporaryDirectory() as tmpdir:
+            config = _test_app_config(tmpdir, krx_auth_key="krx-key")
+            cache = CacheStore(config.cache_db_path)
+            partial_response = type("Response", (), {
+                "ok": True,
+                "source": "KRX",
+                "payload": {
+                    "OutBlock_1": [{"ISU_CD": "005930"}],
+                    "marketStatus": {
+                        "KOSPI": {"ok": True, "rowCount": 1, "warning": None},
+                        "KOSDAQ": {"ok": False, "rowCount": 0, "warning": "권한 없음"},
+                    },
+                },
+                "warning": None,
+            })()
+
+            with (
+                patch.object(sources_status.KrxClient, "fetch_latest_stock_base_infos", return_value=partial_response),
+                patch.object(sources_status.KrxClient, "fetch_latest_stock_daily_trades", return_value=partial_response),
+            ):
+                response = sources_status._check_krx(config, cache, timeout=1.0)
+
+        self.assertFalse(sources_status._response_ok(response))
+        self.assertEqual(response.payload["checks"]["유가증권 종목기본정보"], True)
+        self.assertEqual(response.payload["checks"]["코스닥 종목기본정보"], False)
+        self.assertIn("권한 없음", response.warning)
 
     def test_data_coverage_gate_caps_source_less_financials(self):
         cap, cautions = data_coverage_gate_for_stock(Fundamentals(market_cap=100, pe=20))
@@ -2292,6 +2639,43 @@ class MarketDataSourceTests(unittest.TestCase):
         self.assertEqual(fundamentals.market_cap, 3_000_000)
         self.assertEqual(fundamentals.sources["marketCap"]["source"], "Polygon")
 
+    def test_yahoo_enrichment_preserves_krx_market_cap_source(self):
+        stock = StockProfile(
+            ticker="005930.KS",
+            name="Samsung Electronics",
+            industry=INDUSTRIES[0].name,
+            role="core",
+            thesis="test",
+            risks=(),
+            country="KR",
+            currency="KRW",
+            fundamentals=Fundamentals(
+                pe=None,
+                market_cap=418_000_000_000_000,
+                market_cap_currency="KRW",
+                sources={"marketCap": {"source": "KRX", "url": "https://openapi.krx.co.kr/"}},
+            ),
+        )
+        original_fetch = data_sources.fetch_yahoo_quotes
+
+        try:
+            data_sources.fetch_yahoo_quotes = lambda tickers, timeout=8.0, cache=None: {
+                "005930.KS": {
+                    "trailingPE": 18,
+                    "marketCap": 1,
+                    "currency": "KRW",
+                }
+            }
+            enriched = data_sources.enrich_with_live_market_data((stock,))
+        finally:
+            data_sources.fetch_yahoo_quotes = original_fetch
+
+        fundamentals = enriched[0].fundamentals
+        self.assertEqual(fundamentals.market_cap, 418_000_000_000_000)
+        self.assertEqual(fundamentals.sources["marketCap"]["source"], "KRX")
+        self.assertEqual(fundamentals.pe, 18)
+        self.assertEqual(fundamentals.sources["pe"]["source"], "Yahoo Finance")
+
 
 class DecisionGradeTests(unittest.TestCase):
     def test_decision_grade_penalizes_high_risk(self):
@@ -2562,10 +2946,44 @@ class BacktestTests(unittest.TestCase):
         self.assertTrue(result.point_in_time)
         self.assertEqual(result.method, "snapshot")
         self.assertEqual(result.periods, ())
+        self.assertEqual(result.required_snapshot_days, 30)
         self.assertIn("스냅샷이 부족", result.warnings[0])
+        self.assertTrue(any("30일" in warning for warning in result.warnings))
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_snapshot_health_requires_today_without_failing_initial_30_day_warmup(self):
+        import stock_recommender.snapshot_health as snapshot_health
+
+        original_load_config = snapshot_health.load_config
+        original_snapshot_history = snapshot_health.snapshot_history
+        original_now = snapshot_health.now_in_app_timezone
+
+        try:
+            snapshot_health.load_config = lambda: _test_app_config("/tmp")
+            snapshot_health.now_in_app_timezone = lambda config: datetime(
+                2026, 5, 26, 7, 0, tzinfo=ZoneInfo("Asia/Seoul")
+            )
+            snapshot_health.snapshot_history = lambda limit=365: {
+                "uniqueDays": 10,
+                "latest": {"snapshotDate": "2026-05-26"},
+            }
+
+            with redirect_stdout(StringIO()):
+                self.assertEqual(snapshot_health.main(["--require-today", "--min-days", "30"]), 0)
+
+            snapshot_health.snapshot_history = lambda limit=365: {
+                "uniqueDays": 10,
+                "latest": {"snapshotDate": "2026-05-25"},
+            }
+
+            with redirect_stdout(StringIO()):
+                self.assertEqual(snapshot_health.main(["--require-today", "--min-days", "30"]), 1)
+        finally:
+            snapshot_health.load_config = original_load_config
+            snapshot_health.snapshot_history = original_snapshot_history
+            snapshot_health.now_in_app_timezone = original_now
+
     def test_snapshot_payload_and_daily_upsert(self):
         report = build_report(
             macro_context=DEFAULT_MACRO_CONTEXT,
@@ -2911,9 +3329,70 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(row["payloadKind"], "compact")
         self.assertEqual(compact_payload["payloadKind"], "compact")
         self.assertLessEqual(len(compact_payload["stocks"]), 10)
+        self.assertIn("shortTermCandidates", compact_payload)
+        self.assertIn("mediumTermCandidates", compact_payload)
+        self.assertIn("longTermCandidates", compact_payload)
+        compact_candidates = (
+            compact_payload["shortTermCandidates"]
+            + compact_payload["mediumTermCandidates"]
+            + compact_payload["longTermCandidates"]
+        )
+        self.assertTrue(compact_candidates)
+        self.assertIn("priceAnchor", compact_candidates[0])
         self.assertIn("payloadDigest", row)
         self.assertNotIn("earlyGrowthCandidates", compact_payload)
         self.assertNotIn("fundamentals", compact_payload["stocks"][0])
+
+    def test_old_compact_snapshot_horizon_backtest_falls_back_to_stocks(self):
+        def payload(snapshot_date: str, aaa: float, bbb: float, ccc: float, spy: float) -> dict:
+            return {
+                "version": 20,
+                "payloadKind": "compact",
+                "snapshotDate": snapshot_date,
+                "snapshotQuality": {"backtestEligible": True, "exclusionReasons": []},
+                "stocks": [
+                    {
+                        "ticker": "AAA",
+                        "name": "Alpha",
+                        "score": 90,
+                        "decisionGrade": "매수 후보",
+                        "targetWeightPct": 8,
+                        "priceAnchor": {"latestClose": aaa, "latestCloseDate": snapshot_date},
+                    },
+                    {
+                        "ticker": "BBB",
+                        "name": "Beta",
+                        "score": 80,
+                        "decisionGrade": "관심",
+                        "targetWeightPct": 4,
+                        "priceAnchor": {"latestClose": bbb, "latestCloseDate": snapshot_date},
+                    },
+                    {
+                        "ticker": "CCC",
+                        "name": "Gamma",
+                        "score": 70,
+                        "decisionGrade": "관심",
+                        "targetWeightPct": 4,
+                        "priceAnchor": {"latestClose": ccc, "latestCloseDate": snapshot_date},
+                    },
+                ],
+                "benchmarks": [
+                    {"ticker": "SPY", "priceAnchor": {"latestClose": spy, "latestCloseDate": snapshot_date}},
+                    {"ticker": "QQQ", "priceAnchor": {"latestClose": spy, "latestCloseDate": snapshot_date}},
+                    {"ticker": "^KS11", "priceAnchor": {"latestClose": spy, "latestCloseDate": snapshot_date}},
+                ],
+            }
+
+        snapshots = (
+            SnapshotRecord(date(2026, 4, 30), payload("2026-04-30", 100, 100, 100, 100)),
+            SnapshotRecord(date(2026, 5, 31), payload("2026-05-31", 110, 105, 95, 102)),
+        )
+
+        result = run_snapshot_backtest(snapshots, histories={}, months=1, top_n=3, benchmark_ticker="SPY", horizon="short")
+
+        self.assertEqual(result.period_count, 1)
+        self.assertEqual(result.periods[0].tickers, ("AAA", "BBB", "CCC"))
+        self.assertEqual(result.periods[0].price_source, "snapshotAnchors")
 
     def test_snapshot_history_reads_legacy_v1_full_ledger(self):
         with TemporaryDirectory() as tmpdir:
@@ -3120,15 +3599,68 @@ class StaticExportTests(unittest.TestCase):
     def test_empty_backtest_payload_keeps_public_fields_and_warning(self):
         import scripts.export_cloudflare_static as export_static
 
-        payload = export_static.empty_backtest_payload(12, 5, "SPY", "partial failure", "short")
+        payload = export_static.empty_backtest_payload(12, 5, "SPY", "partial failure", "short", "rules")
 
-        self.assertEqual(payload["method"], "snapshot")
+        self.assertEqual(payload["method"], "rules")
         self.assertEqual(payload["horizon"], "short")
         self.assertTrue(payload["pointInTime"])
         self.assertEqual(payload["priceSource"], "unknown")
         self.assertEqual(payload["requiredSnapshotDays"], 13)
         self.assertEqual(payload["warnings"], ["partial failure"])
         self.assertIn("createdAtTimezone", payload)
+
+    def test_static_export_writes_method_aware_backtests_and_snapshot_aliases(self):
+        import scripts.export_cloudflare_static as export_static
+
+        original_dist_dir = export_static.DIST_DIR
+        original_create = export_static.create_backtest
+        original_to_dict = export_static.backtest_to_dict
+        original_methods = export_static.BACKTEST_METHODS
+        original_horizons = export_static.BACKTEST_HORIZONS
+        original_benchmarks = export_static.BENCHMARKS
+
+        def fake_create_backtest(**kwargs):
+            return kwargs
+
+        def fake_to_dict(payload):
+            return {
+                "method": payload["method"],
+                "horizon": payload["horizon"],
+                "months": payload["months"],
+                "topN": payload["top_n"],
+                "benchmarkTicker": payload["benchmark_ticker"],
+                "warnings": [],
+            }
+
+        with TemporaryDirectory() as tmpdir:
+            dist_dir = Path(tmpdir) / "dist"
+            (dist_dir / "data").mkdir(parents=True)
+            try:
+                export_static.DIST_DIR = dist_dir
+                export_static.create_backtest = fake_create_backtest
+                export_static.backtest_to_dict = fake_to_dict
+                export_static.BACKTEST_METHODS = ("snapshot", "rules", "legacy")
+                export_static.BACKTEST_HORIZONS = ("short", "overall")
+                export_static.BENCHMARKS = ("SPY",)
+                export_static.export_backtests()
+            finally:
+                export_static.DIST_DIR = original_dist_dir
+                export_static.create_backtest = original_create
+                export_static.backtest_to_dict = original_to_dict
+                export_static.BACKTEST_METHODS = original_methods
+                export_static.BACKTEST_HORIZONS = original_horizons
+                export_static.BENCHMARKS = original_benchmarks
+
+            rules_payload = json.loads((dist_dir / "data" / "backtest-rules-12-5-SPY-short.json").read_text(encoding="utf-8"))
+            snapshot_alias = json.loads((dist_dir / "data" / "backtest-12-5-SPY-short.json").read_text(encoding="utf-8"))
+            overall_alias = json.loads((dist_dir / "data" / "backtest-12-5-SPY.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(rules_payload["method"], "rules")
+        self.assertEqual(rules_payload["horizon"], "short")
+        self.assertEqual(snapshot_alias["method"], "snapshot")
+        self.assertEqual(snapshot_alias["horizon"], "short")
+        self.assertEqual(overall_alias["method"], "snapshot")
+        self.assertEqual(overall_alias["horizon"], "overall")
 
     def test_static_shell_copies_react_assets_and_injects_static_mode(self):
         import scripts.export_cloudflare_static as export_static
@@ -3192,7 +3724,16 @@ class StaticExportTests(unittest.TestCase):
         self.assertLess(commit_index, deploy_index)
         self.assertIn("python3 -m stock_recommender.snapshot_cli", workflow)
         self.assertIn("STOCK_RECOMMENDER_PERSIST_REPO_LEDGER: \"1\"", workflow)
+        self.assertIn("KRX_AUTH_KEY", workflow)
+        self.assertIn("POLYGON_API_KEY", workflow)
+        self.assertIn("python3 -m stock_recommender.snapshot_health --require-today --min-days 30", workflow)
         self.assertIn("git add snapshot_store/recommendation_snapshots.json", workflow)
+
+    def test_frontend_static_backtest_prefers_method_aware_path(self):
+        app_source = Path("frontend/src/App.tsx").read_text(encoding="utf-8")
+
+        self.assertIn("backtest-${method}-12-5-SPY-${horizon}.json", app_source)
+        self.assertIn("backtest-12-5-SPY-${horizon}.json", app_source)
 
 
 def _annual_fact(start: str, end: str, filed: str, value: float) -> dict:
@@ -3253,6 +3794,58 @@ def _history(start_price: float, daily_return: float) -> tuple[PricePoint, ...]:
             price *= 1 + daily_return
             points.append(PricePoint(current, price))
         current += timedelta(days=1)
+    return tuple(points)
+
+
+def _flat_price_history(
+    ticker: str,
+    close: float,
+    volume: float,
+    days: int,
+) -> tuple[MarketHistoryPoint, ...]:
+    start = date(2026, 1, 1)
+    return tuple(
+        MarketHistoryPoint(
+            date=(start + timedelta(days=index)).isoformat(),
+            open=close,
+            high=close * 1.01,
+            low=close * 0.99,
+            close=close,
+            volume=volume,
+        )
+        for index in range(days)
+    )
+
+
+def _history_from_returns(
+    ticker: str,
+    start_price: float,
+    returns: tuple[float, ...],
+) -> tuple[MarketHistoryPoint, ...]:
+    start = date(2026, 1, 1)
+    points = [
+        MarketHistoryPoint(
+            date=start.isoformat(),
+            open=start_price,
+            high=start_price * 1.01,
+            low=start_price * 0.99,
+            close=start_price,
+            volume=1_000_000,
+        )
+    ]
+    close = start_price
+    for index, daily_return in enumerate(returns, start=1):
+        close *= 1 + daily_return
+        points.append(
+            MarketHistoryPoint(
+                date=(start + timedelta(days=index)).isoformat(),
+                open=close / (1 + daily_return),
+                high=close * 1.01,
+                low=close * 0.99,
+                close=close,
+                volume=1_000_000,
+            )
+        )
     return tuple(points)
 
 
@@ -3659,6 +4252,7 @@ def _test_app_config(
     *,
     opendart_api_key: str | None = None,
     polygon_api_key: str | None = None,
+    krx_auth_key: str | None = None,
     universe_mode: str = "screened",
     universe_limit: int = 800,
     us_universe_limit: int = 600,
@@ -3679,6 +4273,7 @@ def _test_app_config(
         sec_user_agent="stock-recommender-test test@example.com",
         opendart_api_key=opendart_api_key,
         polygon_api_key=polygon_api_key,
+        krx_auth_key=krx_auth_key,
         timezone_name="Asia/Seoul",
         universe_mode=universe_mode,
         universe_limit=universe_limit,
