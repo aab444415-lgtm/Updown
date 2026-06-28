@@ -1,6 +1,639 @@
 {
-  "lastUpdatedAt": "2026-06-27T22:56:04.726285+00:00",
+  "lastUpdatedAt": "2026-06-28T22:42:06.559921+00:00",
   "snapshots": [
+    {
+      "createdAt": "2026-06-29T07:33:44.834934+09:00",
+      "id": 41,
+      "mode": "live",
+      "payload": {
+        "audit": {
+          "createdAt": "2026-06-29T07:33:44.834934+09:00",
+          "createdAtTimezone": "Asia/Seoul",
+          "gitCommit": "54ba5adc5278e3b4112c71ff85c6eaae991b3548",
+          "gitDirty": true,
+          "modelVersion": "stock-recommender/0.1.0",
+          "runId": "28338264272"
+        },
+        "benchmarks": [
+          {
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 728.989990234375,
+              "latestCloseDate": "2026-06-26",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "ticker": "SPY"
+          },
+          {
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 706.52001953125,
+              "latestCloseDate": "2026-06-26",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "ticker": "QQQ"
+          },
+          {
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 8411.2099609375,
+              "latestCloseDate": "2026-06-26",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "ticker": "^KS11"
+          }
+        ],
+        "createdAt": "2026-06-29T07:33:44.834934+09:00",
+        "createdAtDisplay": "2026-06-29 07:33:44",
+        "createdAtTimezone": "Asia/Seoul",
+        "longTermCandidates": [
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "SK하이닉스",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 52.8,
+            "targetWeightPct": 0.0,
+            "ticker": "000660"
+          },
+          {
+            "decisionGrade": "관망",
+            "maxWeightPct": 3.0,
+            "name": "가온전선",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 44.4,
+            "targetWeightPct": 0.0,
+            "ticker": "000500"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "삼환기업",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 43.9,
+            "targetWeightPct": 0.0,
+            "ticker": "000360"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "대아건설",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 43.9,
+            "targetWeightPct": 0.0,
+            "ticker": "000380"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "로케트전기",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 43.9,
+            "targetWeightPct": 0.0,
+            "ticker": "000420"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "그린손해보험",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 43.9,
+            "targetWeightPct": 0.0,
+            "ticker": "000470"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "제일화재해상보험",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 43.9,
+            "targetWeightPct": 0.0,
+            "ticker": "000610"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "영풍",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 43.9,
+            "targetWeightPct": 0.0,
+            "ticker": "000670"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "LS네트웍스",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 43.9,
+            "targetWeightPct": 0.0,
+            "ticker": "000680"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "유수홀딩스",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 43.9,
+            "targetWeightPct": 0.0,
+            "ticker": "000700"
+          }
+        ],
+        "mediumTermCandidates": [
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "SK하이닉스",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 47.5,
+            "targetWeightPct": 0.0,
+            "ticker": "000660"
+          },
+          {
+            "decisionGrade": "관망",
+            "maxWeightPct": 3.0,
+            "name": "가온전선",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 43.9,
+            "targetWeightPct": 0.0,
+            "ticker": "000500"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "삼환기업",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 42.6,
+            "targetWeightPct": 0.0,
+            "ticker": "000360"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "대아건설",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 42.6,
+            "targetWeightPct": 0.0,
+            "ticker": "000380"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "로케트전기",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 42.6,
+            "targetWeightPct": 0.0,
+            "ticker": "000420"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "그린손해보험",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 42.6,
+            "targetWeightPct": 0.0,
+            "ticker": "000470"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "제일화재해상보험",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 42.6,
+            "targetWeightPct": 0.0,
+            "ticker": "000610"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "영풍",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 42.6,
+            "targetWeightPct": 0.0,
+            "ticker": "000670"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "LS네트웍스",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 42.6,
+            "targetWeightPct": 0.0,
+            "ticker": "000680"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "유수홀딩스",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 42.6,
+            "targetWeightPct": 0.0,
+            "ticker": "000700"
+          }
+        ],
+        "mode": "live",
+        "payloadDigest": "sha256:9d7244e4d6c4f0aff2f66a09b6bf76e69962c3acb5270fde25be6c37efcbfd72",
+        "payloadKind": "compact",
+        "shortTermCandidates": [],
+        "snapshotDate": "2026-06-29",
+        "snapshotQuality": {
+          "backtestEligible": false,
+          "benchmarkAnchorCoveragePct": 100.0,
+          "exclusionReasons": [
+            "priceAnchorCoverageBelow80"
+          ],
+          "fundamentalSourceCoveragePct": 5.7,
+          "priceAnchorCoveragePct": 0.0,
+          "sourceErrorCount": 42,
+          "sourceStaleCount": 0
+        },
+        "sourceEventSummary": {
+          "bySource": {
+            "ECOS": {
+              "success": 1
+            },
+            "FRED": {
+              "success": 6
+            },
+            "Google News": {
+              "success": 1
+            },
+            "KRX": {
+              "error": 20
+            },
+            "OpenDART": {
+              "success": 248
+            },
+            "SEC EDGAR": {
+              "error": 1,
+              "warning": 2
+            },
+            "Yahoo Finance": {
+              "error": 21
+            }
+          },
+          "byStatus": {
+            "error": 42,
+            "success": 256,
+            "warning": 2
+          },
+          "errorCount": 42,
+          "staleCount": 0,
+          "total": 300
+        },
+        "stocks": [
+          {
+            "decisionGrade": "관망",
+            "maxWeightPct": 3.0,
+            "name": "가온전선",
+            "portfolioSignal": "보유 점검",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 59.3,
+            "targetWeightPct": 0.0,
+            "ticker": "000500"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "SK하이닉스",
+            "portfolioSignal": "제외",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 51.2,
+            "targetWeightPct": 0.0,
+            "ticker": "000660"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "삼천당제약",
+            "portfolioSignal": "제외",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 49.0,
+            "targetWeightPct": 0.0,
+            "ticker": "000250"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "유한양행",
+            "portfolioSignal": "제외",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 47.7,
+            "targetWeightPct": 0.0,
+            "ticker": "000100"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "삼환기업",
+            "portfolioSignal": "제외",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 46.0,
+            "targetWeightPct": 0.0,
+            "ticker": "000360"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "대아건설",
+            "portfolioSignal": "제외",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 46.0,
+            "targetWeightPct": 0.0,
+            "ticker": "000380"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "로케트전기",
+            "portfolioSignal": "제외",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 46.0,
+            "targetWeightPct": 0.0,
+            "ticker": "000420"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "그린손해보험",
+            "portfolioSignal": "제외",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 46.0,
+            "targetWeightPct": 0.0,
+            "ticker": "000470"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "제일화재해상보험",
+            "portfolioSignal": "제외",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 46.0,
+            "targetWeightPct": 0.0,
+            "ticker": "000610"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "영풍",
+            "portfolioSignal": "제외",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": null,
+              "latestCloseDate": null,
+              "source": null,
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 46.0,
+            "targetWeightPct": 0.0,
+            "ticker": "000670"
+          }
+        ],
+        "version": 20
+      },
+      "payloadDigest": "sha256:9d7244e4d6c4f0aff2f66a09b6bf76e69962c3acb5270fde25be6c37efcbfd72",
+      "payloadKind": "compact",
+      "snapshotDate": "2026-06-29",
+      "topName": "가온전선",
+      "topScore": 59.3,
+      "topTicker": "000500"
+    },
     {
       "createdAt": "2026-06-28T07:34:30.727790+09:00",
       "id": 40,
