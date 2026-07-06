@@ -1,6 +1,113 @@
 {
-  "lastUpdatedAt": "2026-07-05T22:37:42.816413+00:00",
+  "lastUpdatedAt": "2026-07-06T22:44:13.802648+00:00",
   "snapshots": [
+    {
+      "createdAt": "2026-07-07T07:43:57.309188+09:00",
+      "id": 49,
+      "mode": "live",
+      "payload": {
+        "audit": {
+          "createdAt": "2026-07-07T07:43:57.309188+09:00",
+          "createdAtTimezone": "Asia/Seoul",
+          "gitCommit": "46a0e8f6f682296659dacbb54e99f1137504cf12",
+          "gitDirty": true,
+          "modelVersion": "stock-recommender/0.1.0",
+          "runId": "28828336603"
+        },
+        "benchmarks": [
+          {
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 751.280029296875,
+              "latestCloseDate": "2026-07-06",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "ticker": "SPY"
+          },
+          {
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 722.8200073242188,
+              "latestCloseDate": "2026-07-06",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "ticker": "QQQ"
+          },
+          {
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 8088.33984375,
+              "latestCloseDate": "2026-07-03",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "ticker": "^KS11"
+          }
+        ],
+        "createdAt": "2026-07-07T07:43:57.309188+09:00",
+        "createdAtDisplay": "2026-07-07 07:43:57",
+        "createdAtTimezone": "Asia/Seoul",
+        "longTermCandidates": [],
+        "mediumTermCandidates": [],
+        "mode": "live",
+        "payloadDigest": "sha256:a07cdbe792aff408a98c6ca917b932d19acc6986add5064603a5e41023e010e5",
+        "payloadKind": "compact",
+        "shortTermCandidates": [],
+        "snapshotDate": "2026-07-07",
+        "snapshotQuality": {
+          "backtestEligible": false,
+          "benchmarkAnchorCoveragePct": 100.0,
+          "exclusionReasons": [
+            "priceAnchorCoverageBelow80"
+          ],
+          "fundamentalSourceCoveragePct": 0,
+          "priceAnchorCoveragePct": 0,
+          "sourceErrorCount": 2,
+          "sourceStaleCount": 0
+        },
+        "sourceEventSummary": {
+          "bySource": {
+            "ECOS": {
+              "success": 1
+            },
+            "FRED": {
+              "success": 6
+            },
+            "Google News": {
+              "success": 1
+            },
+            "OpenDART": {
+              "error": 1
+            },
+            "SEC EDGAR": {
+              "error": 1,
+              "warning": 2
+            },
+            "Yahoo Finance": {
+              "success": 59
+            }
+          },
+          "byStatus": {
+            "error": 2,
+            "success": 67,
+            "warning": 2
+          },
+          "errorCount": 2,
+          "staleCount": 0,
+          "total": 71
+        },
+        "stocks": [],
+        "version": 20
+      },
+      "payloadDigest": "sha256:a07cdbe792aff408a98c6ca917b932d19acc6986add5064603a5e41023e010e5",
+      "payloadKind": "compact",
+      "snapshotDate": "2026-07-07",
+      "topName": null,
+      "topScore": null,
+      "topTicker": null
+    },
     {
       "createdAt": "2026-07-06T07:29:19.926389+09:00",
       "id": 48,
