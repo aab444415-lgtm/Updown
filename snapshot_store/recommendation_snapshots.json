@@ -1,6 +1,637 @@
 {
-  "lastUpdatedAt": "2026-08-18T21:54:25.844905+00:00",
+  "lastUpdatedAt": "2026-08-19T22:09:00.398608+00:00",
   "snapshots": [
+    {
+      "createdAt": "2026-08-20T06:48:28.704312+09:00",
+      "id": 93,
+      "mode": "live",
+      "payload": {
+        "audit": {
+          "createdAt": "2026-08-20T06:48:28.704312+09:00",
+          "createdAtTimezone": "Asia/Seoul",
+          "gitCommit": "bc0d6a7e4eef540b90d0a4a890c2fcd2e3d613fb",
+          "gitDirty": true,
+          "modelVersion": "stock-recommender/0.1.0",
+          "runId": "32305737329"
+        },
+        "benchmarks": [
+          {
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 769.0599975585938,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "ticker": "SPY"
+          },
+          {
+            "priceAnchor": {
+              "currency": "USD",
+              "latestClose": 716.0800170898438,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "ticker": "QQQ"
+          },
+          {
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 6869.830078125,
+              "latestCloseDate": "2026-08-18",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "ticker": "^KS11"
+          }
+        ],
+        "createdAt": "2026-08-20T06:48:28.704312+09:00",
+        "createdAtDisplay": "2026-08-20 06:48:28",
+        "createdAtTimezone": "Asia/Seoul",
+        "longTermCandidates": [
+          {
+            "decisionGrade": "매수 후보",
+            "maxWeightPct": 10.0,
+            "name": "SK하이닉스",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 1500000.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 77.8,
+            "targetWeightPct": 8.0,
+            "ticker": "000660.KS"
+          },
+          {
+            "decisionGrade": "관심",
+            "maxWeightPct": 6.0,
+            "name": "삼양식품",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 1304000.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 71.9,
+            "targetWeightPct": 4.0,
+            "ticker": "003230.KS"
+          },
+          {
+            "decisionGrade": "관망",
+            "maxWeightPct": 3.0,
+            "name": "이수페타시스",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 104400.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 63.8,
+            "targetWeightPct": 0.0,
+            "ticker": "007660.KS"
+          },
+          {
+            "decisionGrade": "관망",
+            "maxWeightPct": 3.0,
+            "name": "삼성전자",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 247500.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 60.8,
+            "targetWeightPct": 0.0,
+            "ticker": "005930.KS"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "코웨이",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 93500.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Watch",
+            "riskLevel": "중간",
+            "score": 59.9,
+            "targetWeightPct": 0.0,
+            "ticker": "021240.KS"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "한올바이오파마",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 59200.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 59.6,
+            "targetWeightPct": 0.0,
+            "ticker": "009420.KS"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "한미사이언스",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 45150.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 59.6,
+            "targetWeightPct": 0.0,
+            "ticker": "008930.KS"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "GS건설",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 34950.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 59.6,
+            "targetWeightPct": 0.0,
+            "ticker": "006360.KS"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "오리온홀딩스",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 25400.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 59.6,
+            "targetWeightPct": 0.0,
+            "ticker": "001800.KS"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "빙그레",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 79600.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 59.6,
+            "targetWeightPct": 0.0,
+            "ticker": "005180.KS"
+          }
+        ],
+        "mediumTermCandidates": [
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "삼영무역",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 23000.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 79.5,
+            "targetWeightPct": 0.0,
+            "ticker": "002810.KS"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "한국알콜",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 13640.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 79.5,
+            "targetWeightPct": 0.0,
+            "ticker": "017890.KQ"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "한올바이오파마",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 59200.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 77.7,
+            "targetWeightPct": 0.0,
+            "ticker": "009420.KS"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "GS건설",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 34950.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 77.7,
+            "targetWeightPct": 0.0,
+            "ticker": "006360.KS"
+          },
+          {
+            "decisionGrade": "관심",
+            "maxWeightPct": 6.0,
+            "name": "삼양식품",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 1304000.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 77.0,
+            "targetWeightPct": 4.0,
+            "ticker": "003230.KS"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "KISCO홀딩스",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 27750.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 75.1,
+            "targetWeightPct": 0.0,
+            "ticker": "001940.KS"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "한샘",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 39450.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 75.0,
+            "targetWeightPct": 0.0,
+            "ticker": "009240.KS"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "이수화학",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 12730.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 74.8,
+            "targetWeightPct": 0.0,
+            "ticker": "005950.KS"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "오리온홀딩스",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 25400.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 74.6,
+            "targetWeightPct": 0.0,
+            "ticker": "001800.KS"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "농심",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 432500.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 73.2,
+            "targetWeightPct": 0.0,
+            "ticker": "004370.KS"
+          }
+        ],
+        "mode": "live",
+        "payloadDigest": "sha256:4e683fc6f8b19eca76172181b577fd029420b7bad43442d448bedad8cde8e082",
+        "payloadKind": "compact",
+        "shortTermCandidates": [],
+        "snapshotDate": "2026-08-20",
+        "snapshotQuality": {
+          "backtestEligible": true,
+          "benchmarkAnchorCoveragePct": 100.0,
+          "exclusionReasons": [],
+          "fundamentalSourceCoveragePct": 11.2,
+          "priceAnchorCoveragePct": 100.0,
+          "sourceErrorCount": 8,
+          "sourceStaleCount": 0
+        },
+        "sourceEventSummary": {
+          "bySource": {
+            "ECOS": {
+              "success": 1
+            },
+            "FRED": {
+              "success": 6
+            },
+            "Google News": {
+              "success": 1
+            },
+            "KRX": {
+              "success": 4
+            },
+            "OpenDART": {
+              "success": 278
+            },
+            "SEC EDGAR": {
+              "error": 1,
+              "warning": 2
+            },
+            "Yahoo Finance": {
+              "error": 7
+            }
+          },
+          "byStatus": {
+            "error": 8,
+            "success": 290,
+            "warning": 2
+          },
+          "errorCount": 8,
+          "staleCount": 0,
+          "total": 300
+        },
+        "stocks": [
+          {
+            "decisionGrade": "매수 후보",
+            "maxWeightPct": 10.0,
+            "name": "SK하이닉스",
+            "portfolioSignal": "편입 후보",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 1500000.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 76.0,
+            "targetWeightPct": 8.0,
+            "ticker": "000660.KS"
+          },
+          {
+            "decisionGrade": "관심",
+            "maxWeightPct": 6.0,
+            "name": "삼양식품",
+            "portfolioSignal": "분할 관찰",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 1304000.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 71.7,
+            "targetWeightPct": 4.0,
+            "ticker": "003230.KS"
+          },
+          {
+            "decisionGrade": "관심",
+            "maxWeightPct": 6.0,
+            "name": "가온전선",
+            "portfolioSignal": "분할 관찰",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 157800.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 68.9,
+            "targetWeightPct": 4.0,
+            "ticker": "000500.KS"
+          },
+          {
+            "decisionGrade": "관망",
+            "maxWeightPct": 3.0,
+            "name": "이수페타시스",
+            "portfolioSignal": "보유 점검",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 104400.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 66.5,
+            "targetWeightPct": 0.0,
+            "ticker": "007660.KS"
+          },
+          {
+            "decisionGrade": "관망",
+            "maxWeightPct": 3.0,
+            "name": "고려아연",
+            "portfolioSignal": "보유 점검",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 1145000.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 62.7,
+            "targetWeightPct": 0.0,
+            "ticker": "010130.KS"
+          },
+          {
+            "decisionGrade": "관망",
+            "maxWeightPct": 3.0,
+            "name": "한화에어로스페이스",
+            "portfolioSignal": "소액 관찰",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 1177000.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Aggressive Allow",
+            "riskLevel": "높음",
+            "score": 59.8,
+            "targetWeightPct": 0.0,
+            "ticker": "012450.KS"
+          },
+          {
+            "decisionGrade": "관망",
+            "maxWeightPct": 3.0,
+            "name": "삼성전자",
+            "portfolioSignal": "보유 점검",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 247500.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 57.7,
+            "targetWeightPct": 0.0,
+            "ticker": "005930.KS"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "LS ELECTRIC",
+            "portfolioSignal": "제외",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 202000.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 56.3,
+            "targetWeightPct": 0.0,
+            "ticker": "010120.KS"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "HD한국조선해양",
+            "portfolioSignal": "제외",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 367000.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 56.3,
+            "targetWeightPct": 0.0,
+            "ticker": "009540.KS"
+          },
+          {
+            "decisionGrade": "제외",
+            "maxWeightPct": 0.0,
+            "name": "대한광통신",
+            "portfolioSignal": "제외",
+            "priceAnchor": {
+              "currency": "KRW",
+              "latestClose": 12700.0,
+              "latestCloseDate": "2026-08-19",
+              "source": "Yahoo Finance",
+              "stale": false
+            },
+            "riskGate": "Pass",
+            "riskLevel": "중간",
+            "score": 54.5,
+            "targetWeightPct": 0.0,
+            "ticker": "010170.KQ"
+          }
+        ],
+        "version": 20
+      },
+      "payloadDigest": "sha256:4e683fc6f8b19eca76172181b577fd029420b7bad43442d448bedad8cde8e082",
+      "payloadKind": "compact",
+      "snapshotDate": "2026-08-20",
+      "topName": "SK하이닉스",
+      "topScore": 76.0,
+      "topTicker": "000660.KS"
+    },
     {
       "createdAt": "2026-08-19T06:45:24.336078+09:00",
       "id": 92,
